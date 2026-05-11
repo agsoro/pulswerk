@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="InfluxDB.Client" Version="4.18.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pulswerk.Core\Pulswerk.Core.csproj" />
+  </ItemGroup>
+
+</Project>

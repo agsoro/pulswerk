@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+@inject Pulswerk.Dashboard.DashboardDataService DashboardData
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Pulswerk</title>
+    <link rel="stylesheet" href="/plswk/lib/fontawesome.min.css">
+    <link rel="stylesheet" href="/plswk/lib/flowbite.min.css">
+    <link rel="stylesheet" href="/plswk/css/pulswerk.css">
+    @RenderSection("Styles", required: false)
+</head>
+
+<body class="bg-slate-900 text-slate-50 flex min-h-screen font-sans antialiased">
+
+    <aside
+        class="w-[72px] bg-slate-800 border-r border-slate-700 py-6 px-3 flex flex-col items-center fixed h-screen z-50 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap"
+        data-testid="sidebar">
+        <a href="/plswk/" class="flex items-center mb-10 no-underline w-full pl-2 overflow-hidden"
+               data-testid="sidebar-brand">
+            <img src="/plswk/img/pulswerk_logo_sm.png" alt="Pulswerk" class="h-8 min-w-[170px] brightness-0 invert">
+        </a>
+        <ul class="list-none flex flex-col gap-2 w-full" data-testid="nav-links">
+            <li>
+                <a href="/plswk/"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Dashboard" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-dashboard">
+                    <i class="fas fa-chart-line w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_dashboard">Dashboard</span>
+                </a>
+            </li>
+            <li>
+                <a href="/plswk/Dashboards"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Dashboards" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-dashboards">
+                    <i class="fas fa-th-large w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_dashboards">Dashboards</span>
+                </a>
+            </li>
+            <li>
+                <a href="/plswk/Assets"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Assets" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-assets">
+                    <i class="fas fa-sitemap w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_assets">Assets</span>
+                </a>
+            </li>
+            <li>
+                <a href="/plswk/Connections"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Connections" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-connections">
+                    <i class="fas fa-network-wired w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_connections">Connections</span>
+                </a>
+            </li>
+            <li>
+                <a href="/plswk/Alarms"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Alarms" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-alarms">
+                    <i class="fas fa-bell w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_alarms">Alarms</span>
+                </a>
+            </li>
+            <li>
+                <a href="/plswk/Logs"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Logs" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-logs">
+                    <i class="fas fa-terminal w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_logs">Logs</span>
+                </a>
+            </li>
+            <li>
+                <a href="/plswk/Heartbeat"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Heartbeat" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-heartbeat">
+                    <i class="fas fa-heartbeat w-5 text-xl flex-shrink-0 text-center"></i>
+                    <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
+                          data-i18n="nav_heartbeat">Heartbeat</span>
+                </a>
+            </li>
+        </ul>
+        <footer
+            class="mt-auto pt-6 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full text-center overflow-hidden"
+            data-testid="sidebar-footer">
+            <span
+                class="sidebar-version opacity-0 transition-opacity duration-200">v@(System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3)
+                                                ?? "2.0.0")</span>
+            </footer>
+        </aside>
+
+        <main class="flex-1 ml-[72px] px-6 py-4 w-[calc(100%-72px)] transition-[margin-left] duration-300">
+            <header class="flex justify-between items-center mb-4" data-testid="page-header">
+                <h1 class="text-xl font-bold tracking-tight" data-testid="page-title">@ViewData["Title"]</h1>
+                <div class="flex items-center gap-6">
+                    <div
+                        class="flex items-center gap-1 bg-white/5 p-1 rounded-lg border border-white/10 text-[0.65rem] font-bold uppercase tracking-wider">
+                        <button onclick="setLanguage('en')" id="lang-en"
+                                class="px-2 py-1 rounded transition-colors duration-200 hover:text-white">EN</button>
+                        <div class="w-px h-3 bg-white/10"></div>
+                        <button onclick="setLanguage('de')" id="lang-de"
+                                class="px-2 py-1 rounded transition-colors duration-200 hover:text-white">DE</button>
+                    </div>
+                    <div id="connection-status" class="flex items-center gap-2 text-sm text-slate-400">
+                        <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <span data-i18n="status_connected">Connected to</span> @Environment.MachineName
+                    </div>
+                </div>
+            </header>
+
+            @RenderBody()
+        </main>
+
+        <script src="/plswk/lib/jquery.min.js"></script>
+        <script src="/plswk/lib/flowbite.min.js"></script>
+        <script src="/plswk/lib/apexcharts.js"></script>
+        <script src="/plswk/js/i18n.js"></script>
+        <script src="/plswk/js/app-utils.js"></script>
+        <script src="/plswk/js/modals.js"></script>
+        <script>
+            initI18n('@(DashboardData.Config.Monitoring?.Language ?? "en")');
+        </script>
+        @RenderSection("Scripts", required: false)
+    </body>
+
+</html>

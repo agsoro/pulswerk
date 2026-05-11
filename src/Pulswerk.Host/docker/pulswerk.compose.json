@@ -1,0 +1,119 @@
+﻿{
+  // ── InfluxDB ─────────────────────────────────────────────────────────────
+  // "influxdb" resolves to the sibling container on the compose network.
+  "influxdb": {
+    "url": "http://influxdb:8086",
+    "token": "connector-token",
+    "org": "pulswerk",
+    "bucket": "telemetry"
+  },
+  "database": {
+    "retentionDays": 730,
+    "compactionAfterDays": 700,
+    "alarmRetentionDays": 30
+  },
+  "polling": {
+    "intervalSeconds": 30
+  },
+  // ── Monitoring Dashboard ──────────────────────────────────────────────────
+  "monitoring": {
+    "enabled": true,
+    "port": 5000,
+    "logBufferSize": 5000
+  },
+  // ── Connections ──────────────────────────────────────────────────────────
+  "connections": [
+    {
+      "id": "modbus-test",
+      "type": "modbus-tcp",
+      "host": "modbus-sim",
+      "port": 502,
+      "name": "Modbus Sim 1"
+    },
+    {
+      "id": "modbus-test2",
+      "type": "modbus-tcp",
+      "host": "modbus-sim2",
+      "port": 502,
+      "name": "Modbus Sim 2"
+    },
+    {
+      "id": "bacnet-deziko",
+      "type": "bacnet-ip",
+      "host": "bacnet-sim",
+      "port": 47808,
+      "name": "Deziko BACnet"
+    }
+  ],
+  // ── Devices ──────────────────────────────────────────────────────────────
+  "devices": [
+    {
+      "name": "Main Meter Building A",
+      "deviceType": "janitza",
+      "connectionId": "modbus-test",
+      "slaveId": 1,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "Main Meter Building A"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "name": "Sub Meter Floor 2",
+      "deviceType": "janitza",
+      "connectionId": "modbus-test",
+      "slaveId": 2,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "Floor 2",
+        "Sub Meter Floor 2"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "name": "Sub Meter Floor 3",
+      "deviceType": "janitza",
+      "connectionId": "modbus-test2",
+      "slaveId": 1,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "Floor 3",
+        "Sub Meter Floor 3"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "name": "HVAC Meter",
+      "deviceType": "janitza",
+      "connectionId": "modbus-test2",
+      "slaveId": 2,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "HVAC",
+        "HVAC Meter"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "name": "Test BACnet AHU",
+      "deviceType": "deziko",
+      "connectionId": "bacnet-deziko",
+      "bacnetDeviceId": 10,
+      "assetType": "BACnet Zone"
+    }
+  ],
+  "unitTranslations": {
+    "degrees celsius": "°C",
+    "degrees kelvin": "°C",
+    "percent": "%",
+    "pascals": "Pa",
+    "percent relative humidity": "% r.F.",
+    "cubic meters per hour": "m³/h",
+    "liters per second": "l/s",
+    "no units": ""
+  }
+}

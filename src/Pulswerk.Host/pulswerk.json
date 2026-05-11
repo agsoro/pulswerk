@@ -1,0 +1,130 @@
+{
+  "influxdb": {
+    "url": "http://localhost:8086",
+    "token": "connector-token",
+    "org": "pulswerk",
+    "bucket": "telemetry"
+  },
+  "database": {
+    "retentionDays": 730,
+    "compactionAfterDays": 700,
+    "alarmRetentionDays": 30
+  },
+  "polling": {
+    "intervalSeconds": 30
+  },
+  "connections": [
+    {
+      "id": "modbus-building-a",
+      "type": "modbus-tcp",
+      "host": "192.168.1.100",
+      "port": 502
+    },
+    {
+      "id": "modbus-building-b",
+      "type": "modbus-tcp",
+      "host": "192.168.1.101",
+      "port": 502
+    },
+    {
+      "id": "bacnet-deziko",
+      "type": "bacnet-ip",
+      "host": "192.168.1.200",
+      "port": 47808
+    }
+  ],
+  "devices": [
+    {
+      "name": "Main Meter Building A",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-a",
+      "slaveId": 1
+    },
+    {
+      "name": "Sub Meter Floor 2",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-b",
+      "slaveId": 1
+    },
+    {
+      "name": "Sub Meter Floor 3",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-b",
+      "slaveId": 2
+    },
+    {
+      "name": "Main Meter",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-a",
+      "slaveId": 10,
+      "path": [
+        "Building",
+        "Main Meter"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "name": "Sub Meter",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-a",
+      "slaveId": 11,
+      "path": [
+        "Building",
+        "Main Meter",
+        "Sub Meter"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "name": "Floor Meter",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-a",
+      "slaveId": 12,
+      "path": [
+        "Building",
+        "Main Meter",
+        "Sub Meter",
+        "Floor Meter"
+      ],
+      "assetType": "Meter Level"
+    },
+    {
+      "name": "Glueck Controller Zone 1",
+      "deviceType": "glueck",
+      "connectionId": "modbus-building-a",
+      "slaveId": 3
+    },
+    {
+      "name": "ASP01",
+      "deviceType": "deziko",
+      "connectionId": "bacnet-deziko",
+      "bacnetDeviceId": 10,
+      "assetType": "BACnet Node",
+      "filter": {
+        "excludeNamePattern": "^(UNUSED|SPARE|TEST)"
+      }
+    },
+    {
+      "name": "Test BACnet AHU",
+      "deviceType": "deziko",
+      "connectionId": "bacnet-deziko",
+      "bacnetDeviceId": 10,
+      "assetType": "BACnet Zone"
+    }
+  ],
+  "unitTranslations": {
+    "degrees celsius": "°C",
+    "degrees kelvin": "K",
+    "percent": "%",
+    "pascals": "Pa",
+    "percent relative humidity": "% r.F.",
+    "cubic meters per hour": "m³/h",
+    "liters per second": "l/s",
+    "no units": ""
+  },
+  "monitoring": {
+    "enabled": true,
+    "port": 5000,
+    "logBufferSize": 5000
+  }
+}

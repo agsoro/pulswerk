@@ -1,0 +1,317 @@
+@page
+@model Pulswerk.Dashboard.Pages.AssetsModel
+@{
+    ViewData["Title"] = "Assets";
+}
+
+
+<div class="flex h-[calc(100vh-110px)] border border-slate-700 rounded-xl overflow-hidden animate-fade-in">
+    <!-- Left Sidebar: The Asset Tree -->
+    <div class="asset-sidebar full-width w-[320px] min-w-[250px] border-r border-slate-700 bg-black/10 overflow-y-auto py-4 flex flex-col transition-all duration-300" id="assetTree">
+        <div class="h-full flex flex-col items-center justify-center text-slate-400 opacity-50 py-8">
+            <i class="fas fa-spinner fa-spin text-5xl mb-4"></i>
+            <p data-i18n="loading_tree">Loading tree...</p>
+        </div>
+    </div>
+
+    <!-- Splitter -->
+    <div class="w-1 bg-slate-700 cursor-col-resize transition-colors duration-200 hover:bg-cyan-500 resizer" id="dragMe" style="display: none;"></div>
+
+    <!-- Right Content: Points for selected node -->
+    <div class="flex-1 flex flex-col overflow-hidden asset-content hidden">
+        <div id="contentView" style="display: none; height: 100%; flex-direction: column;">
+            <div class="px-6 py-5 border-b border-slate-700 bg-white/[0.02]">
+                <div class="text-xs text-slate-400 mb-2 flex gap-2" id="breadcrumb"></div>
+                <div class="text-xl font-bold text-slate-50" id="nodeTitle" data-i18n="select_asset">Select an asset</div>
+                <div class="text-xs text-slate-400 font-mono" id="nodeMeta"></div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6" id="pointList"></div>
+        </div>
+        <div id="emptyView" class="h-full flex flex-col items-center justify-center text-slate-400 opacity-50">
+            <i class="fas fa-sitemap text-5xl mb-4"></i>
+            <p data-i18n="select_node_hint">Select a node from the tree to view data points</p>
+        </div>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()
+</div>
+
+@section Scripts {
+    <script>
+        let allTrees = [];
+        let selectedNodeId = null;
+
+        // Splitter Logic
+        const resizer = document.getElementById('dragMe');
+        const leftSide = document.getElementById('assetTree');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', function(e) {
+            isResizing = true;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            resizer.classList.add('dragging');
+            
+            document.addEventListener('mousemove', mouseMoveHandler);
+            document.addEventListener('mouseup', mouseUpHandler);
+        });
+
+        function mouseMoveHandler(e) {
+            if (!isResizing) return;
+            requestAnimationFrame(() => {
+                const containerRect = leftSide.parentElement.getBoundingClientRect();
+                const newWidth = e.clientX - containerRect.left;
+                if (newWidth > 150 && newWidth < 800) {
+                    leftSide.style.width = `${newWidth}px`;
+                }
+            });
+        }
+
+        function mouseUpHandler() {
+            isResizing = false;
+            document.body.style.cursor = 'default';
+            document.body.style.userSelect = 'auto';
+            resizer.classList.remove('dragging');
+            document.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('mouseup', mouseUpHandler);
+        }
+
+        async function loadTree() {
+            try {
+                const response = await fetch('?handler=Tree');
+                allTrees = await response.json();
+                renderTree();
+
+                const params = new URLSearchParams(window.location.search);
+                const nodeId = params.get('node');
+                if (nodeId) {
+                    selectNodeById(nodeId, true);
+                }
+            } catch (error) {
+                console.error("Failed to load tree:", error);
+                document.getElementById('assetTree').innerHTML = '<div class="h-full flex flex-col items-center justify-center text-slate-400 opacity-50"><p>Error loading hierarchy</p></div>';
+            }
+        }
+
+        window.addEventListener('popstate', (event) => {
+            const params = new URLSearchParams(window.location.search);
+            const nodeId = params.get('node');
+            if (nodeId) {
+                selectNodeById(nodeId, true);
+            }
+        });
+
+        function selectNodeById(nodeId, skipPush = false) {
+            const row = document.querySelector(`.tree-row[data-id="${nodeId}"]`);
+            if (row) {
+                let parent = row.closest('.tree-children');
+                while (parent) {
+                    parent.classList.add('expanded');
+                    const toggle = parent.previousElementSibling.querySelector('.tree-toggle');
+                    if (toggle) toggle.classList.add('expanded');
+                    parent = parent.parentElement.closest('.tree-children');
+                }
+                if (skipPush) row.dataset.skipPush = "true";
+                row.click();
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function renderTree() {
+            const container = document.getElementById('assetTree');
+            container.innerHTML = '';
+            allTrees.forEach(device => {
+                container.appendChild(createTreeNode(device, 0, []));
+            });
+        }
+
+        function createTreeNode(node, depth, path = []) {
+            const currentPath = [...path, { id: node.id, name: node.name }];
+            const wrapper = document.createElement('div');
+            wrapper.className = 'select-none relative';
+
+            const row = document.createElement('div');
+            row.className = 'tree-row flex items-center px-4 py-1.5 cursor-pointer transition-all duration-200 text-sm text-slate-400 whitespace-nowrap mx-2 my-px rounded hover:bg-white/5 hover:text-slate-50';
+            row.dataset.id = node.id;
+            if (node.id === selectedNodeId) row.classList.add('active');
+
+            for (let i = 0; i < depth; i++) {
+                const indent = document.createElement('div');
+                indent.className = 'tree-indent w-5 shrink-0 h-full relative';
+                row.appendChild(indent);
+            }
+
+            const toggle = document.createElement('div');
+            toggle.className = 'tree-toggle w-5 h-5 flex items-center justify-center mr-2 text-[0.7rem] transition-transform duration-200 text-slate-400 z-[1]';
+            if (node.children && node.children.length > 0) {
+                toggle.innerHTML = '<i class="fas fa-chevron-right"></i>';
+                toggle.onclick = (e) => {
+                    e.stopPropagation();
+                    const childContainer = wrapper.querySelector('.tree-children');
+                    childContainer.classList.toggle('expanded');
+                    toggle.classList.toggle('expanded');
+                };
+            }
+            row.appendChild(toggle);
+
+            const icon = document.createElement('div');
+            icon.className = 'tree-icon w-5 mr-3 text-center text-[0.9rem]';
+            const iconClass = node.type === 'BACnet Device' ? 'fa-server' : 
+                             (node.isView ? 'fa-folder' : 'fa-tag');
+            icon.innerHTML = `<i class="fas ${iconClass}"></i>`;
+            row.appendChild(icon);
+
+            const label = document.createElement('span');
+            label.textContent = node.name;
+            row.appendChild(label);
+
+            row.onclick = () => {
+                document.querySelectorAll('.tree-row').forEach(r => r.classList.remove('active'));
+                row.classList.add('active');
+                selectedNodeId = node.id;
+                
+                const url = new URL(window.location);
+                url.searchParams.set('node', node.id);
+                window.history.replaceState({}, '', url);
+
+                showNode(node, currentPath);
+            };
+
+            wrapper.appendChild(row);
+
+            if (node.children && node.children.length > 0) {
+                const childContainer = document.createElement('div');
+                childContainer.className = 'tree-children';
+                node.children.forEach(child => {
+                    childContainer.appendChild(createTreeNode(child, depth + 1, currentPath));
+                });
+                wrapper.appendChild(childContainer);
+            }
+
+            return wrapper;
+        }
+
+        function showNode(node, path = []) {
+            const emptyView = document.getElementById('emptyView');
+            const contentView = document.getElementById('contentView');
+            const assetContent = document.querySelector('.asset-content');
+            const assetSidebar = document.getElementById('assetTree');
+            const resizer = document.getElementById('dragMe');
+
+            const row = document.querySelector(`.tree-row[data-id="${node.id}"]`);
+            if (row && !row.dataset.skipPush) {
+                const newUrl = window.location.pathname + '?node=' + node.id;
+                history.pushState({ nodeId: node.id }, "", newUrl);
+            }
+            if (row) delete row.dataset.skipPush;
+
+            emptyView.style.display = 'none';
+            contentView.style.display = 'flex';
+            assetContent.classList.remove('hidden');
+            assetSidebar.classList.remove('full-width');
+            resizer.style.display = 'block';
+            
+            document.getElementById('nodeTitle').textContent = node.name;
+            document.getElementById('nodeMeta').textContent = node.id;
+
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = '';
+            path.forEach((p, index) => {
+                const link = document.createElement('a');
+                link.href = `/Assets?node=${p.id}`;
+                link.textContent = p.name;
+                link.className = 'text-slate-400 no-underline hover:text-sky-400';
+                link.onclick = (e) => {
+                    e.preventDefault();
+                    selectNodeById(p.id);
+                };
+                breadcrumb.appendChild(link);
+
+                if (index < path.length - 1) {
+                    const sep = document.createElement('i');
+                    sep.className = 'fas fa-chevron-right text-[0.6rem] opacity-50';
+                    breadcrumb.appendChild(sep);
+                }
+            });
+            
+            const list = document.getElementById('pointList');
+            list.innerHTML = '';
+            
+            if (!node.points || node.points.length === 0) {
+                list.innerHTML = '<div class="h-full flex flex-col items-center justify-center text-slate-400 opacity-50"><i class="fas fa-info-circle text-5xl mb-4"></i><p>No data points in this view</p></div>';
+                return;
+            }
+
+            node.points.forEach(point => {
+                const item = document.createElement('div');
+                item.className = 'glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-cyan-700 hover:translate-x-1';
+                
+                const icon = getPointIcon(point.type || '');
+                let displayName = point.name || 'Unnamed';
+
+                const safeName = displayName.replace(/'/g, "\\'");
+                const safeFullName = (point.fullName || '').replace(/'/g, "\\'");
+                const safeUnits = (point.units || '').replace(/'/g, "\\'");
+                const safePathEnc = encodeURIComponent(JSON.stringify(point.parentPath || []));
+                
+                item.innerHTML = `
+                    <div class="w-10 h-10 bg-cyan-900/10 rounded-lg flex items-center justify-center text-cyan-500 text-xl">${icon}</div>
+                    <div class="flex-1">
+                        <div class="font-semibold text-slate-50">${displayName}</div>
+                        <div class="text-[0.7rem] text-slate-400 font-mono">${point.fullName || ''}</div>
+                    </div>
+                    <div class="text-right min-w-[120px]">
+                        <span class="text-lg font-bold text-cyan-500 point-value" data-key="${point.key}">${formatNumber(point.value, 2)}</span>
+                        <span class="text-xs text-slate-400 ml-1">${point.units || ''}</span>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="btn-icon star-btn" data-key="${point.key}" title="Favorite" onclick="toggleFavorite('${point.key}', this)"><i class="far fa-star"></i></button>
+                        <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')"><i class="fas fa-chart-area"></i></button>
+                        ${point.isWritable ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${point.type}', '${encodeURIComponent(JSON.stringify(point.enumValues || null))}')"><i class="fas fa-pen"></i></button>` : ''}
+                        <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}', '${safeName}', '${safePathEnc}')"><i class="fas fa-cog"></i></button>
+                    </div>
+                `;
+                updateStarState(point.key, item.querySelector('.star-btn'));
+                list.appendChild(item);
+            });
+        }
+
+
+        async function refreshValues() {
+            try {
+                const response = await fetch('?handler=Tree');
+                const newTrees = await response.json();
+                
+                const updateValues = (nodes) => {
+                    nodes.forEach(node => {
+                        if (node.points) {
+                            node.points.forEach(p => {
+                                const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
+                                if (el) el.textContent = formatNumber(p.value, 2);
+
+                                if (currentHistoryKey === p.key && document.getElementById('historyModal').style.display === 'flex') {
+                                    document.getElementById('chartLiveValue').textContent = formatNumber(p.value, 2);
+                                }
+                            });
+                        }
+                        if (node.children) updateValues(node.children);
+                    });
+                };
+                updateValues(newTrees);
+            } catch (e) {}
+        }
+
+        loadTree();
+        setInterval(refreshValues, 2000);
+
+        window.addEventListener('resize', () => {
+            // Trigger Chart.js resize if needed
+            if (window.historyChart) window.historyChart.resize();
+        });
+    </script>
+}
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()

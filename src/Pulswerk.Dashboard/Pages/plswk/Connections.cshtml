@@ -1,0 +1,166 @@
+@page
+@model Pulswerk.Dashboard.Pages.ConnectionsModel
+@{
+    ViewData["Title"] = "Connections";
+}
+
+
+<div class="flex gap-6 h-[calc(100vh-110px)] animate-fade-in" data-testid="conn-layout">
+
+    <!-- ── Left: connection cards ── -->
+    <div class="w-[300px] shrink-0 flex flex-col gap-3 overflow-y-auto pr-1 conn-list" id="connList" data-testid="conn-list">
+        @foreach (var conn in Model.Connections)
+        {
+            <div class="conn-card glass p-4 rounded-xl border border-slate-700 cursor-pointer transition-all duration-150 flex flex-col gap-1.5 select-none hover:border-sky-400 hover:bg-sky-400/5"
+                 data-id="@conn.Id"
+                 onclick="selectConnection('@conn.Id')">
+                <div class="flex justify-between items-start">
+                    <div class="font-bold text-[0.95rem] text-slate-50">@conn.Name</div>
+                    <span class="text-[0.65rem] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-white/5 text-slate-400 whitespace-nowrap">@conn.Type</span>
+                </div>
+                <div class="text-[0.78rem] text-slate-400 font-mono">@conn.Host : @conn.Port</div>
+                <div class="flex justify-between items-center mt-0.5">
+                    <span class="text-xs font-semibold flex items-center @(conn.Status == "online" ? "text-emerald-500" : "text-red-500")">
+                        <span class="w-[7px] h-[7px] rounded-full mr-1.5 inline-block @(conn.Status == "online" ? "bg-emerald-500" : "bg-red-500")"></span>
+                        @conn.Status.ToUpper()
+                    </span>
+                    <span class="text-[0.72rem] text-slate-400 bg-white/5 px-2 py-0.5 rounded-full">@conn.DeviceCount device@(conn.DeviceCount == 1 ? "" : "s")</span>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- ── Right: detail panel ── -->
+    <div class="flex-1 flex flex-col gap-4 overflow-hidden" data-testid="conn-detail">
+
+        <!-- placeholder shown when nothing is selected -->
+        <div class="flex-1 flex flex-col items-center justify-center gap-4 text-slate-400 opacity-45 text-sm" id="detailEmpty" data-testid="conn-detail-empty">
+            <i class="fas fa-network-wired text-4xl"></i>
+            <p>Select a connection to view its devices</p>
+        </div>
+
+        <!-- per-connection panels, hidden until selected -->
+        @foreach (var conn in Model.Connections)
+        {
+            <div class="flex-1 flex flex-col bg-slate-800 border border-slate-700 rounded-xl overflow-hidden" id="panel-@conn.Id" style="display:none;">
+                <div class="px-6 py-5 border-b border-slate-700 flex justify-between items-center shrink-0 bg-black/15">
+                    <div>
+                        <div class="text-lg font-bold text-slate-50">@conn.Name</div>
+                        <div class="text-[0.78rem] text-slate-400 font-mono mt-0.5">@conn.Host : @conn.Port &nbsp;·&nbsp; @conn.Type &nbsp;·&nbsp; @conn.Id</div>
+                    </div>
+                    <div class="flex gap-6 items-center">
+                        <div class="text-right">
+                            <div class="text-xl font-bold text-sky-400 leading-tight">@conn.DeviceCount</div>
+                            <div class="text-[0.65rem] uppercase tracking-wider text-slate-400">Devices</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xl font-bold leading-tight @(conn.Status == "online" ? "text-emerald-500" : "text-red-500")">
+                                @conn.Status.ToUpper()
+                            </div>
+                            <div class="text-[0.65rem] uppercase tracking-wider text-slate-400">Status</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto px-6 py-4 device-table-wrap">
+                    @if (conn.Devices.Count == 0)
+                    {
+                        <div class="py-8 text-center text-slate-400 opacity-50">
+                            No devices configured on this connection.
+                        </div>
+                    }
+                    else
+                    {
+                        <table class="w-full border-separate border-spacing-0 text-sm">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left text-[0.68rem] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700 whitespace-nowrap">Device</th>
+                                    <th class="px-3 py-2.5 text-left text-[0.68rem] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700 whitespace-nowrap">Protocol</th>
+                                    <th class="px-3 py-2.5 text-left text-[0.68rem] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700 whitespace-nowrap">Address</th>
+                                    <th class="px-3 py-2.5 text-left text-[0.68rem] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700 whitespace-nowrap">Asset Type</th>
+                                    <th class="px-3 py-2.5 text-left text-[0.68rem] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700 whitespace-nowrap">Status</th>
+                                    <th class="px-3 py-2.5 text-left text-[0.68rem] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700 whitespace-nowrap">Last Seen</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var dev in conn.Devices)
+                                {
+                                    <tr class="transition-colors duration-150 hover:bg-white/[0.03]">
+                                        <td class="px-3 py-3 border-b border-white/[0.04] align-middle">
+                                            <div class="font-semibold">@dev.Name</div>
+                                            <div class="text-[0.72rem] text-slate-400 mt-0.5">@dev.DeviceType</div>
+                                        </td>
+                                        <td class="px-3 py-3 border-b border-white/[0.04] align-middle">
+                                            <span class="dev-type-pill inline-block text-[0.68rem] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-sky-400/10 text-sky-400 border border-sky-400/20 @dev.Protocol.ToLower()">@dev.Protocol</span>
+                                        </td>
+                                        <td class="px-3 py-3 border-b border-white/[0.04] align-middle font-mono text-[0.82rem]">@dev.Address</td>
+                                        <td class="px-3 py-3 border-b border-white/[0.04] align-middle">
+                                            @if (!string.IsNullOrEmpty(dev.AssetType))
+                                            {
+                                                <span class="inline-block text-[0.68rem] px-2 py-0.5 rounded bg-white/5 text-slate-400 font-mono">@dev.AssetType</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-slate-400 opacity-40">–</span>
+                                            }
+                                        </td>
+                                        <td class="px-3 py-3 border-b border-white/[0.04] align-middle">
+                                            <div class="flex items-center gap-1.5 text-[0.78rem] font-semibold @(dev.Status == "online" ? "text-emerald-500" : "text-red-500")">
+                                                <span class="w-[7px] h-[7px] rounded-full inline-block @(dev.Status == "online" ? "bg-emerald-500" : "bg-red-500")"></span>
+                                                @dev.Status.ToUpper()
+                                            </div>
+                                        </td>
+                                        <td class="px-3 py-3 border-b border-white/[0.04] align-middle text-[0.78rem] font-mono text-slate-400">@dev.LastSeen</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    let activeId = null;
+
+    function selectConnection(id) {
+        // deselect old card + hide old panel
+        if (activeId) {
+            document.querySelector(`.conn-card[data-id="${activeId}"]`)?.classList.remove('active');
+            const old = document.getElementById('panel-' + activeId);
+            if (old) old.style.display = 'none';
+        }
+
+        // select new card + show its panel
+        activeId = id;
+        document.querySelector(`.conn-card[data-id="${id}"]`)?.classList.add('active');
+        document.getElementById('detailEmpty').style.display = 'none';
+        const panel = document.getElementById('panel-' + id);
+        if (panel) panel.style.display = 'flex';
+
+        // persist selection in URL without reload
+        const url = new URL(window.location);
+        url.searchParams.set('conn', id);
+        history.replaceState({}, '', url);
+    }
+
+    // restore selection from URL on load
+    window.addEventListener('DOMContentLoaded', () => {
+        const params = new URLSearchParams(window.location.search);
+        const conn = params.get('conn');
+        if (conn && document.querySelector(`.conn-card[data-id="${conn}"]`)) {
+            selectConnection(conn);
+        } else {
+            // auto-select first connection if only one exists
+            const first = document.querySelector('.conn-card');
+            if (first && document.querySelectorAll('.conn-card').length === 1) {
+                selectConnection(first.dataset.id);
+            }
+        }
+    });
+</script>
+}

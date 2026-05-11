@@ -1,0 +1,126 @@
+@page
+@model Pulswerk.Dashboard.Pages.FavoritesModel
+@{
+    ViewData["Title"] = "Favorites";
+}
+
+
+<div class="flex flex-col gap-8 animate-fade-in">
+    <div class="flex justify-between items-center">
+        <p class="text-slate-400">Pinned assets and telemetry points for quick access.</p>
+        <button class="btn-icon" title="Refresh" onclick="loadFavorites()"><i class="fas fa-sync-alt"></i></button>
+    </div>
+
+    <div id="favoritesList" class="grid grid-cols-[repeat(auto-fill,minmax(400px,1fr))] gap-6"></div>
+
+    <div id="emptyFavorites" class="hidden flex-col items-center justify-center text-center text-slate-400 py-24 gap-4">
+        <i class="fas fa-star text-5xl opacity-20"></i>
+        <p>You haven't added any favorites yet.</p>
+        <p class="text-xs">Go to the Assets page and click the star icon to pin a point.</p>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()
+
+@section Scripts {
+    <script>
+        let allPoints = [];
+
+        async function loadFavorites() {
+            const favKeys = JSON.parse(localStorage.getItem('deziko_favorites') || '[]');
+            if (favKeys.length === 0) {
+                document.getElementById('favoritesList').style.display = 'none';
+                document.getElementById('emptyFavorites').style.display = 'flex';
+                return;
+            }
+
+            document.getElementById('favoritesList').style.display = 'grid';
+            document.getElementById('emptyFavorites').style.display = 'none';
+
+            try {
+                const response = await fetch('?handler=Tree');
+                const trees = await response.json();
+                
+                allPoints = [];
+                const extractPoints = (nodes) => {
+                    nodes.forEach(n => {
+                        if (n.points) allPoints.push(...n.points);
+                        if (n.children) extractPoints(n.children);
+                    });
+                };
+                extractPoints(trees);
+
+                const list = document.getElementById('favoritesList');
+                list.innerHTML = '';
+
+                favKeys.forEach(key => {
+                    const point = allPoints.find(p => p.key === key);
+                    if (point) renderPoint(point, list);
+                });
+            } catch (err) { console.error("Failed to load favorites:", err); }
+        }
+
+        function renderPoint(point, container) {
+            const item = document.createElement('div');
+            item.className = 'glass rounded-xl p-6 flex flex-col transition-all duration-300';
+            const icon = getPointIcon(point.type);
+            
+            const pathHtml = point.parentPath.map((p, index) => {
+                const link = `<a href="/plswk/Assets?node=${p.id}" class="text-sky-400 no-underline hover:underline">${p.name}</a>`;
+                const sep = index < point.parentPath.length - 1 ? '<i class="fas fa-chevron-right mx-2 text-[0.7rem] opacity-50"></i>' : '';
+                return link + sep;
+            }).join('');
+
+            const safeName = (point.name || 'Unnamed').replace(/'/g, "\\'");
+            const safeFullName = (point.fullName || '').replace(/'/g, "\\'");
+            const safeUnits = (point.units || '').replace(/'/g, "\\'");
+            const safePathEnc = encodeURIComponent(JSON.stringify(point.parentPath || []));
+
+            item.innerHTML = `
+                <div class="text-sky-400 text-sm font-medium w-full border-b border-white/5 pb-3 mb-4 break-words leading-relaxed">${pathHtml}</div>
+                <div class="flex items-center gap-6 w-full">
+                    <div class="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center text-xl">${icon}</div>
+                    <div class="flex-1 min-w-0">
+                        <a href="/plswk/Assets?node=${point.parentId}" class="font-bold text-white text-xl no-underline block hover:text-sky-400">${point.name}</a>
+                        <div class="text-[0.65rem] opacity-40 font-mono">${point.fullName}</div>
+                    </div>
+                    <div class="text-right min-w-[100px]">
+                        <span class="text-xl font-bold text-cyan-500 point-value" data-key="${point.key}">${formatNumber(point.value, 2)}</span>
+                        <span class="text-xs text-slate-400 ml-1">${point.units}</span>
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-4 w-full justify-end border-t border-white/5 pt-3">
+                    <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')"><i class="fas fa-chart-area"></i></button>
+                    ${point.isWritable ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${point.type}', '${encodeURIComponent(JSON.stringify(point.enumValues || null))}')"><i class="fas fa-pen"></i></button>` : ''}
+                    <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}', '${safeName}', '${safePathEnc}')"><i class="fas fa-cog"></i></button>
+                </div>
+            `;
+            container.appendChild(item);
+        }
+
+
+        async function refreshValues() {
+            const response = await fetch('?handler=Tree');
+            const newTrees = await response.json();
+            const updateValues = (nodes) => {
+                nodes.forEach(node => {
+                    if (node.points) {
+                        node.points.forEach(p => {
+                            const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
+                            if (el) el.textContent = formatNumber(p.value, 2);
+                            if (currentHistoryKey === p.key && document.getElementById('historyModal').style.display === 'flex') {
+                                document.getElementById('chartLiveValue').textContent = formatNumber(p.value, 2);
+                            }
+                        });
+                    }
+                    if (node.children) updateValues(node.children);
+                });
+            };
+            updateValues(newTrees);
+        }
+
+        loadFavorites();
+        setInterval(refreshValues, 2000);
+    </script>
+}

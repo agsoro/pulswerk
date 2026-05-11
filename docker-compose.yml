@@ -1,0 +1,70 @@
+# docker-compose.yml  –  PRODUCTION
+#
+# Core services only. No simulators, no test tooling.
+#
+#   1. influxdb   – InfluxDB 2.x OSS (time-series database)
+#                   UI  → http://localhost:8086
+#                   Org: pulswerk, Bucket: telemetry, Token: connector-token
+#
+#   2. pulswerk   – built from src/
+#                   Dashboard → http://localhost:5000
+#
+# Quick start:
+#   docker compose up --build
+#
+# For the full test stack with simulators + Browserless:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up --build
+#
+
+services:
+
+  # ── InfluxDB 2.x (time-series database) ──────────────────────────────────
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"     # HTTP API + UI
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: pulswerk
+      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
+      DOCKER_INFLUXDB_INIT_RETENTION: 17520h
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: connector-token
+    volumes:
+      - influx-data:/var/lib/influxdb2
+      - influx-config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD-SHELL", "influx ping || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  # ── Pulswerk ─────────────────────────────────────────────────────────────────
+  pulswerk:
+    build:
+      context: .                    # repo root (solution-level build)
+      dockerfile: src/Pulswerk.Host/docker/Dockerfile
+    container_name: pulswerk
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    depends_on:
+      influxdb:
+        condition: service_started
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=connector-token
+      - INFLUXDB_ORG=pulswerk
+      - INFLUXDB_BUCKET=telemetry
+    volumes:
+      - influx-data:/var/lib/influxdb2:ro
+      - pulswerk-data:/app/data
+
+volumes:
+  influx-data:
+  influx-config:
+  pulswerk-data:

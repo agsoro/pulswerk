@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/publish/
+**/scratch/
+**/.git/
+**/.vs/
+**/node_modules/
+tools/
+testing/
+tests/
+.gemini/
+*.md
+*.sln.DotSettings*

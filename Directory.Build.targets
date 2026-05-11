@@ -1,0 +1,13 @@
+<Project>
+  <!-- Only increment once per build, using the Host project as the trigger -->
+  <Target Name="IncrementVersion" BeforeTargets="PrepareForBuild" Condition="'$(MSBuildProjectName)' == 'Pulswerk.Host' And '$(DOTNET_RUNNING_IN_CONTAINER)' != 'true'">
+    <Message Importance="High" Text="  [Version] Incrementing build number in version.txt..." />
+    
+    <PropertyGroup>
+      <OldVersionValue>$([System.IO.File]::ReadAllText($(MSBuildThisFileDirectory)version.txt).Trim())</OldVersionValue>
+      <NewVersionValue>$([MSBuild]::Add($(OldVersionValue), 1))</NewVersionValue>
+    </PropertyGroup>
+    
+    <WriteLinesToFile File="$(MSBuildThisFileDirectory)version.txt" Lines="$(NewVersionValue)" Overwrite="true" />
+  </Target>
+</Project>

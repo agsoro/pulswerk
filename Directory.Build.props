@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <VersionMajor>2</VersionMajor>
+    <VersionMinor>1</VersionMinor>
+    <VersionBuild>$([System.IO.File]::ReadAllText($(MSBuildThisFileDirectory)version.txt).Trim())</VersionBuild>
+    <Version>$(VersionMajor).$(VersionMinor).$(VersionBuild)</Version>
+    <Authors>Pulswerk Team</Authors>
+    <Company>Pulswerk</Company>
+    <Product>Pulswerk Dashboard &amp; Connector</Product>
+  </PropertyGroup>
+
+  <!-- Global build settings -->
+  <PropertyGroup>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Pulswerk.$(MSBuildProjectName.Replace('Pulswerk.', ''))</RootNamespace>
+  </PropertyGroup>
+</Project>

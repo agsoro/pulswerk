@@ -1,0 +1,125 @@
+@* Asset Modals: History, Edit and Properties *@
+
+<!-- History Modal -->
+<div class="modal-overlay" id="historyModal" data-testid="history-modal">
+    <div class="modal-content animate-fade-in">
+        <div class="modal-header">
+            <div>
+                <div class="modal-path" id="chartPath"></div>
+                <h2 id="chartTitle" data-i18n="history">History</h2>
+                <div class="flex gap-4 items-center">
+                    <div class="text-xs text-slate-400 font-mono" id="chartMeta"></div>
+                    <div class="flex items-baseline gap-1.5">
+                        <div id="chartLiveValue" class="font-bold text-cyan-500 bg-cyan-500/10 px-2 py-0.5 rounded text-sm">---</div>
+                        <div class="edit-unit font-semibold text-slate-400 text-sm" id="chartUnit"></div>
+                    </div>
+                </div>
+            </div>
+            <button class="close-modal" onclick="closeHistory()">&times;</button>
+        </div>
+        
+        <div class="chart-controls">
+            <select class="select-days" id="daysSelector" onchange="reloadHistory()">
+                <option value="0.04167" selected data-i18n="last_hour">Last Hour</option>
+                <option value="0.16667" data-i18n="last_4h">Last 4 Hours</option>
+                <option value="1" data-i18n="last_24h">Last 24 Hours</option>
+                <option value="7" data-i18n="last_7d">Last 7 Days</option>
+                <option value="14" data-i18n="last_14d">Last 14 Days</option>
+                <option value="30" data-i18n="last_30d">Last 30 Days</option>
+                <option value="365" data-i18n="last_year">Last Year</option>
+            </select>
+            <div id="chartLoading" class="hidden items-center gap-2 text-sky-400">
+                <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading">Loading...</span>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div id="historyChart" style="height: 100%"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="editModal" data-testid="edit-modal">
+    <div class="modal-content edit-modal-content animate-fade-in">
+        <div class="modal-header">
+            <div>
+                <div class="modal-path" id="editPath"></div>
+                <h2 id="editTitle" data-i18n="edit_value">Edit Value</h2>
+                <div class="text-xs text-slate-400 font-mono" id="editMeta"></div>
+            </div>
+            <button class="close-modal" onclick="closeEdit()">&times;</button>
+        </div>
+
+        <div class="edit-form">
+            <div class="input-group" id="stepperGroup" style="display:none">
+                <label data-i18n="new_value">New Value</label>
+                <div class="number-stepper">
+                    <button class="stepper-btn" onclick="step(-1)">−</button>
+                    <input type="number" id="editValue" class="stepper-input">
+                    <button class="stepper-btn" onclick="step(1)">+</button>
+                </div>
+                <div class="text-right text-xs text-slate-500 font-medium mt-1">
+                    <span data-i18n="current_value">Current</span>: <span id="currentVal" class="text-slate-300">---</span> <span id="editUnitLabel"></span>
+                </div>
+            </div>
+
+            <div class="input-group" id="enumGroup" style="display:none">
+                <label data-i18n="new_value">New Value</label>
+                <select id="enumSelect" class="enum-select"></select>
+            </div>
+
+            <div class="input-group" id="boolGroup" style="display:none">
+                <div class="bool-toggle-wrap">
+                    <div class="bool-toggle-label" id="boolLabel">OFF</div>
+                    <label class="bool-toggle">
+                        <input type="checkbox" id="boolInput" onchange="updateBoolLabel()">
+                        <span class="bool-toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="editStatus" class="status-msg"></div>
+
+            <button type="button" class="save-btn" id="saveBtn" onclick="submitEdit(event)">
+                <i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Properties Modal -->
+<div class="modal-overlay" id="propsModal" data-testid="props-modal">
+    <div class="modal-content animate-fade-in">
+        <div class="modal-header">
+            <div>
+                <div class="modal-path" id="propsPath"></div>
+                <h2 id="propsTitle" data-i18n="properties">Properties</h2>
+                <div class="text-xs text-slate-400 font-mono" id="propsMeta"></div>
+            </div>
+            <button class="close-modal" onclick="closeProperties()">&times;</button>
+        </div>
+
+        <div id="propsLoading" class="flex-1 flex flex-col items-center justify-center text-sky-400 gap-3">
+            <i class="fas fa-spinner fa-spin text-4xl"></i>
+            <span data-i18n="loading">Loading...</span>
+        </div>
+
+        <div id="propsEmpty" class="hidden flex-1 flex flex-col items-center justify-center text-slate-400 gap-3">
+            <i class="fas fa-search text-4xl opacity-20"></i>
+            <span data-i18n="no_properties_found">No extended properties found.</span>
+        </div>
+
+        <div id="propsTable" class="props-table-container hidden">
+            <table class="props-table">
+                <thead>
+                    <tr>
+                        <th data-i18n="prop_name">Property</th>
+                        <th data-i18n="prop_value">Value</th>
+                    </tr>
+                </thead>
+                <tbody id="propsBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>

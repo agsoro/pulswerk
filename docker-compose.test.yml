@@ -1,0 +1,89 @@
+# docker-compose.test.yml  –  TESTING OVERLAY
+#
+# Extends docker-compose.yml with simulators, test config, and Browserless.
+# Always use together with the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up --build
+#
+# Services added:
+#   3. modbus-sim    – Janitza-style Modbus TCP server (port 502)
+#   4. modbus-sim2   – Second Modbus TCP simulator   (port 503)
+#   5. bacnet-sim    – Deziko-style BACnet/IP device  (port 47808 UDP)
+#   6. browserless   – Headless Chrome for visual UI tests (port 3000)
+#
+# Visual tests:
+#   cd testing/visual && npm test
+#
+
+services:
+
+  # ── Modbus TCP simulator ────────────────────────────────────────────────────
+  modbus-sim:
+    build:
+      context: testing/modbus-sim
+    container_name: modbus-sim
+    restart: unless-stopped
+    ports:
+      - "502:502"       # expose for local debug with Modscan / QModMaster
+
+  # ── Second Modbus TCP simulator (independent slave set) ─────────────────────
+  modbus-sim2:
+    build:
+      context: testing/modbus-sim
+    container_name: modbus-sim2
+    restart: unless-stopped
+    ports:
+      - "503:502"       # expose on host port 503 for local debug
+
+  # ── BACnet/IP simulator ─────────────────────────────────────────────────────
+  bacnet-sim:
+    build:
+      context: testing/bacnet-sim
+    container_name: bacnet-sim
+    restart: unless-stopped
+    ports:
+      - "47808:47808/udp"  # expose for external BACnet tools / debugging
+
+  # ── Pulswerk overrides for test environment ─────────────────────────────────
+  pulswerk:
+    depends_on:
+      influxdb:
+        condition: service_started
+      modbus-sim:
+        condition: service_started
+      modbus-sim2:
+        condition: service_started
+      bacnet-sim:
+        condition: service_started
+    volumes:
+      # Mount the test-ready config into /app/pulswerk.json
+      - ./src/Pulswerk.Host/docker/pulswerk.compose.json:/app/pulswerk.json:ro
+    # All services share the default compose bridge network.
+    # "influxdb", "modbus-sim", and "bacnet-sim" resolve via Docker DNS.
+
+  # ── Browserless Chrome (visual UI testing) ──────────────────────────────────
+  #
+  # Headless Chrome via Browserless.io – Playwright connects over CDP.
+  # Debugger UI  → http://localhost:3000
+  # CDP endpoint → ws://browserless:3000?token=pulswerk-visual-tests
+  #
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    container_name: browserless
+    restart: unless-stopped
+    ports:
+      - "3000:3000"           # Browserless UI + CDP
+    environment:
+      TOKEN: "pulswerk-visual-tests"
+      TIMEOUT: 60000
+      CONCURRENT: 5
+      QUEUED: 10
+      HEALTH: "true"
+    depends_on:
+      - pulswerk
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/json/version || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s

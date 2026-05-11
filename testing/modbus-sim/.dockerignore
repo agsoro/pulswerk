@@ -1,0 +1,13 @@
+# Exclude Windows build artefacts – the obj/ folder contains project.assets.json
+# with hardcoded Windows paths (C:\Program Files\...) that break Linux Docker builds.
+bin/
+obj/
+out/
+
+# IDE / OS noise
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+Thumbs.db

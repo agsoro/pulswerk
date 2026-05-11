@@ -1,0 +1,166 @@
+@page
+@model Pulswerk.Dashboard.Pages.IndexModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+
+<!-- ── Alarm priority boxes ──────────────────────────────────────────────── -->
+<div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4 mb-8 animate-fade-in" data-testid="alarm-boxes">
+    <a class="alarm-box bg-gradient-to-br from-red-950 to-red-900 border-red-500 text-red-300" href="/plswk/Alarms?severity=CRITICAL" id="box-critical">
+        <div class="text-lg"><i class="fas fa-skull-crossbones"></i></div>
+        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_critical">Critical</div>
+        <div class="text-4xl font-extrabold leading-none text-red-500">@Model.AlarmCritical</div>
+    </a>
+    <a class="alarm-box bg-gradient-to-br from-amber-950 to-amber-900 border-amber-500 text-amber-300" href="/plswk/Alarms?severity=MAJOR" id="box-major">
+        <div class="text-lg"><i class="fas fa-exclamation-triangle"></i></div>
+        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_major">Major</div>
+        <div class="text-4xl font-extrabold leading-none text-amber-500">@Model.AlarmMajor</div>
+    </a>
+    <a class="alarm-box bg-gradient-to-br from-sky-950 to-sky-900 border-sky-400 text-sky-200" href="/plswk/Alarms?severity=MINOR" id="box-minor">
+        <div class="text-lg"><i class="fas fa-exclamation-circle"></i></div>
+        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_minor">Minor</div>
+        <div class="text-4xl font-extrabold leading-none text-sky-400">@Model.AlarmMinor</div>
+    </a>
+    <a class="alarm-box bg-gradient-to-br from-slate-800 to-slate-700 border-slate-500 text-slate-400" href="/plswk/Alarms?severity=WARNING" id="box-warning">
+        <div class="text-lg"><i class="fas fa-bell"></i></div>
+        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_warning">Warning</div>
+        <div class="text-4xl font-extrabold leading-none text-slate-400">@Model.AlarmWarning</div>
+    </a>
+    <a class="alarm-box bg-gradient-to-br from-slate-800 to-slate-900 border-white/10 text-slate-200" href="/plswk/Alarms" id="box-total">
+        <div class="text-lg"><i class="fas fa-list-ul"></i></div>
+        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_total">Total</div>
+        <div class="text-4xl font-extrabold leading-none text-slate-50">@Model.AlarmTotal</div>
+    </a>
+</div>
+
+<!-- ── Favorites ─────────────────────────────────────────────────────────── -->
+<div class="animate-fade-in" style="animation-delay: 0.1s">
+    <div class="flex items-center gap-3 text-base font-bold text-slate-50 mb-5">
+        <i class="fas fa-star text-sky-400"></i> <span data-i18n="favorites">Favorites</span>
+        <button class="btn-icon ml-auto" title="Refresh" data-i18n-title="btn_refresh" onclick="loadFavorites()">
+            <i class="fas fa-sync-alt"></i>
+        </button>
+    </div>
+
+    <div id="favoritesList" class="grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-5" data-testid="favorites-list"></div>
+
+    <div id="emptyFavorites" class="hidden flex-col items-center justify-center gap-3 text-center text-slate-400 p-12 glass rounded-2xl">
+        <i class="fas fa-star text-4xl opacity-20"></i>
+        <p>No favorites yet.</p>
+        <p class="text-xs">Go to <a href="/plswk/Assets" class="text-sky-400 hover:underline">Assets</a> and click the ★ to pin a point.</p>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()
+
+@section Scripts {
+    <script>
+        let allPoints = [];
+
+        async function loadFavorites() {
+            const favKeys = JSON.parse(localStorage.getItem('deziko_favorites') || '[]');
+            const list = document.getElementById('favoritesList');
+            const empty = document.getElementById('emptyFavorites');
+
+            if (favKeys.length === 0) {
+                list.style.display = 'none';
+                empty.style.display = 'flex';
+                return;
+            }
+
+            list.style.display = 'grid';
+            empty.style.display = 'none';
+
+            try {
+                const response = await fetch('?handler=Tree');
+                const trees = await response.json();
+
+                allPoints = [];
+                const extractPoints = (nodes) => {
+                    nodes.forEach(n => {
+                        if (n.points) allPoints.push(...n.points);
+                        if (n.children) extractPoints(n.children);
+                    });
+                };
+                extractPoints(trees);
+
+                list.innerHTML = '';
+                favKeys.forEach(key => {
+                    const point = allPoints.find(p => p.key === key);
+                    if (point) renderPoint(point, list);
+                });
+            } catch (err) { console.error("Failed to load favorites:", err); }
+        }
+
+        function renderPoint(point, container) {
+            const item = document.createElement('div');
+            item.className = 'glass rounded-xl p-5 flex flex-col transition-all duration-300';
+            const icon = getPointIcon(point.type);
+
+            const pathHtml = point.parentPath.map((p, index) => {
+                const link = `<a href="/plswk/Assets?node=${p.id}" class="text-sky-400 no-underline hover:underline">${p.name}</a>`;
+                const sep  = index < point.parentPath.length - 1
+                    ? '<i class="fas fa-chevron-right mx-2 text-[0.7rem] opacity-50"></i>'
+                    : '';
+                return link + sep;
+            }).join('');
+
+            const safeName    = (point.name     || 'Unnamed').replace(/'/g, "\\'");
+            const safeFullName = (point.fullName || '').replace(/'/g, "\\'");
+            const safeUnits   = (point.units    || '').replace(/'/g, "\\'");
+            const safePathEnc = encodeURIComponent(JSON.stringify(point.parentPath || []));
+
+            item.innerHTML = `
+                <div class="text-sky-400 text-sm font-medium w-full border-b border-white/5 pb-2.5 mb-3 break-words leading-relaxed">${pathHtml}</div>
+                <div class="flex items-center gap-5 w-full">
+                    <div class="w-[42px] h-[42px] rounded-[10px] bg-cyan-500/10 text-cyan-500 flex items-center justify-center text-lg shrink-0">${icon}</div>
+                    <div class="flex-1 min-w-0">
+                        <a href="/plswk/Assets?node=${point.parentId}" class="font-bold text-white text-lg no-underline block hover:text-sky-400">${point.name}</a>
+                        <div class="text-[0.62rem] opacity-40 font-mono">${point.fullName}</div>
+                    </div>
+                    <div class="text-right min-w-[90px]">
+                        <span class="text-xl font-bold text-cyan-500 point-value" data-key="${point.key}">${point.value}</span>
+                        <span class="text-xs text-slate-400 ml-0.5">${point.units}</span>
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-3 w-full justify-end border-t border-white/5 pt-2.5">
+                    <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}','${safeName}','${safeUnits}','${safePathEnc}')"><i class="fas fa-chart-area"></i></button>
+                    ${point.isWritable ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}','${safeName}','${safeFullName}','${safeUnits}','${safePathEnc}','${point.type}','${encodeURIComponent(JSON.stringify(point.enumValues||null))}')"><i class="fas fa-pen"></i></button>` : ''}
+                    <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}','${safeName}','${safePathEnc}')"><i class="fas fa-cog"></i></button>
+                </div>
+            `;
+            container.appendChild(item);
+        }
+
+        async function refreshValues() {
+            try {
+                const response = await fetch('?handler=Tree');
+                const newTrees = await response.json();
+                const updateValues = (nodes) => {
+                    nodes.forEach(node => {
+                        if (node.points) {
+                            node.points.forEach(p => {
+                                const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
+                                if (el) el.textContent = p.value;
+                                if (currentHistoryKey === p.key &&
+                                    document.getElementById('historyModal').style.display === 'flex') {
+                                    document.getElementById('chartLiveValue').textContent = p.value;
+                                }
+                            });
+                        }
+                        if (node.children) updateValues(node.children);
+                    });
+                };
+                updateValues(newTrees);
+            } catch (err) { /* silently ignore */ }
+        }
+
+        loadFavorites();
+        setInterval(refreshValues, 2000);
+    </script>
+}
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()

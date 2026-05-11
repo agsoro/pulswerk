@@ -1,0 +1,19 @@
+{
+  "name": "pulswerk.dashboard",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build:css": "npx tailwindcss -i ./wwwroot/css/input.css -o ./wwwroot/css/pulswerk.css --minify",
+    "watch:css": "npx tailwindcss -i ./wwwroot/css/input.css -o ./wwwroot/css/pulswerk.css --watch",
+    "format": "dotnet format ../../"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.14",
+    "tailwindcss": "^3.4.19"
+  }
+}

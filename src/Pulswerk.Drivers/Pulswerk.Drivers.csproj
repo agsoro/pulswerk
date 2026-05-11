@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NModbus" Version="3.0.81" />
+    <PackageReference Include="BACnet" Version="3.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pulswerk.Core\Pulswerk.Core.csproj" />
+    <ProjectReference Include="..\Pulswerk.Storage\Pulswerk.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

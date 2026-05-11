@@ -1,0 +1,36 @@
+@page
+@model Pulswerk.Dashboard.Pages.LogsModel
+@{
+    ViewData["Title"] = "System Logs";
+}
+
+<div class="flex justify-between items-center mb-4 animate-fade-in">
+    <div class="flex gap-2">
+        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+        <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+        <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+    </div>
+    <div class="text-slate-400 text-sm">
+        Showing last 500 entries • <a href="javascript:location.reload()" class="text-sky-400 hover:underline no-underline">Refresh</a>
+    </div>
+</div>
+
+<div class="glass rounded-2xl border border-slate-700 p-4 font-mono text-[0.8125rem] h-[calc(100vh-200px)] overflow-y-auto flex flex-col gap-1 animate-fade-in" data-testid="log-container" style="background-color: #020617;">
+    @foreach (var log in Model.Logs)
+    {
+        <div class="flex gap-4 leading-relaxed whitespace-pre-wrap break-all">
+            <span class="text-slate-500 shrink-0 w-[180px]">[@log.Timestamp]</span>
+            <span class="shrink-0 w-[60px] font-bold uppercase @(log.Severity == "info" ? "text-emerald-500" : log.Severity == "warning" ? "text-amber-500" : log.Severity == "error" ? "text-red-500" : "text-slate-400")">@log.Severity</span>
+            <span class="text-sky-400 shrink-0 w-[120px] truncate">[@log.Source]</span>
+            <span class="text-slate-200">@log.Message</span>
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        // Scroll to bottom on load
+        const container = document.querySelector('[data-testid="log-container"]');
+        container.scrollTop = container.scrollHeight;
+    </script>
+}

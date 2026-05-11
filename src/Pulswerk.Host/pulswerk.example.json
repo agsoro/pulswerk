@@ -1,0 +1,59 @@
+{
+  "influxdb": {
+    "url": "http://localhost:8086",
+    "token": "connector-token",
+    "org": "pulswerk",
+    "bucket": "telemetry"
+  },
+  "database": {
+    "retentionDays": 730,
+    "compactionAfterDays": 700,
+    "alarmRetentionDays": 30
+  },
+  "polling": {
+    "intervalSeconds": 30
+  },
+  "connections": [
+    {
+      "id": "modbus-building-a",
+      "type": "modbus-tcp",
+      "host": "192.168.1.100",
+      "port": 502
+    },
+    {
+      "id": "bacnet-deziko",
+      "type": "bacnet-ip",
+      "host": "192.168.1.200",
+      "port": 47808
+    }
+  ],
+  "devices": [
+    {
+      "name": "Main Meter",
+      "deviceType": "janitza",
+      "connectionId": "modbus-building-a",
+      "slaveId": 1,
+      "assetType": "Meter"
+    },
+    {
+      "name": "HVAC AHU 01",
+      "deviceType": "deziko",
+      "connectionId": "bacnet-deziko",
+      "bacnetDeviceId": 10,
+      "assetType": "BACnet Node"
+      // Most settings (COV enabled, poll rate, filter, telemetry properties)
+      // are now inferred from code-based defaults for "deziko" devices.
+    }
+  ],
+  "unitTranslations": {
+    "degrees celsius": "°C",
+    "percent": "%",
+    "pascals": "Pa",
+    "no units": ""
+  },
+  "monitoring": {
+    "enabled": true,
+    "port": 5000,
+    "logBufferSize": 5000
+  }
+}

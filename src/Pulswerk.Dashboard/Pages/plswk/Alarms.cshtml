@@ -1,0 +1,220 @@
+@page
+@model Pulswerk.Dashboard.Pages.AlarmsModel
+@{
+    ViewData["Title"] = "Active Alarms";
+}
+
+@section Styles {
+    <style type="text/tailwindcss">
+        @@layer components {
+            .filter-chip {
+                @@apply inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[0.78rem] font-semibold
+                       bg-white/5 border border-slate-700 text-slate-400 no-underline transition-all duration-200
+                       hover:bg-sky-400/10 hover:border-sky-400 hover:text-sky-400;
+            }
+            .filter-chip.active { @@apply bg-sky-400/10 border-sky-400 text-sky-400; }
+            .chip-critical.active { @@apply border-red-500 text-red-500 bg-red-500/10; }
+            .chip-major.active    { @@apply border-amber-500 text-amber-500 bg-amber-500/10; }
+            .chip-minor.active    { @@apply border-sky-400 text-sky-400 bg-sky-400/10; }
+            .chip-warning.active  { @@apply border-slate-500 text-slate-400 bg-slate-500/10; }
+            .chip-acked           { @@apply border-emerald-400/30 text-emerald-400; }
+            .chip-acked.active    { @@apply border-emerald-400 text-emerald-400 bg-emerald-400/10; }
+            .ack-status-msg { @@apply text-sm px-3.5 py-2.5 rounded-lg hidden; }
+            .ack-status-msg.sending { @@apply block bg-indigo-500/10 text-indigo-400 border border-indigo-500/25; }
+            .ack-status-msg.success { @@apply block bg-green-500/10 text-green-500 border border-green-500/20; }
+            .ack-status-msg.error   { @@apply block bg-red-500/10 text-red-500 border border-red-500/20; }
+        }
+    </style>
+}
+
+<div class="flex gap-2 flex-wrap mb-5 animate-fade-in" data-testid="alarm-filters">
+    <a href="/plswk/Alarms" class="filter-chip @(string.IsNullOrEmpty(Model.Severity) ? "active" : "")">
+        All <span class="opacity-65">@(Model.CountCritical+Model.CountMajor+Model.CountMinor+Model.CountWarning)</span>
+    </a>
+    <a href="/plswk/Alarms?severity=CRITICAL" class="filter-chip chip-critical @(Model.Severity=="CRITICAL" ? "active" : "")">
+        <i class="fas fa-skull-crossbones"></i> Critical <span class="opacity-65">@Model.CountCritical</span>
+    </a>
+    <a href="/plswk/Alarms?severity=MAJOR" class="filter-chip chip-major @(Model.Severity=="MAJOR" ? "active" : "")">
+        <i class="fas fa-exclamation-triangle"></i> Major <span class="opacity-65">@Model.CountMajor</span>
+    </a>
+    <a href="/plswk/Alarms?severity=MINOR" class="filter-chip chip-minor @(Model.Severity=="MINOR" ? "active" : "")">
+        <i class="fas fa-exclamation-circle"></i> Minor <span class="opacity-65">@Model.CountMinor</span>
+    </a>
+    <a href="/plswk/Alarms?severity=WARNING" class="filter-chip chip-warning @(Model.Severity=="WARNING" ? "active" : "")">
+        <i class="fas fa-bell"></i> Warning <span class="opacity-65">@Model.CountWarning</span>
+    </a>
+    @if (Model.CountAcked > 0)
+    {
+        <a href="/plswk/Alarms?severity=ACKED" class="filter-chip chip-acked @(Model.Severity=="ACKED" ? "active" : "")">
+            <i class="fas fa-check-circle"></i> Acknowledged <span class="opacity-65">@Model.CountAcked</span>
+        </a>
+    }
+</div>
+
+<div class="flex flex-col gap-4 animate-fade-in" data-testid="alarm-list">
+    @if (Model.Alarms.Count == 0)
+    {
+        <div class="glass text-center py-16 text-slate-400 rounded-2xl">
+            <i class="fas fa-bell-slash text-5xl opacity-20 mb-4 block"></i>
+            <p>No active alarms detected.</p>
+        </div>
+    }
+    else
+    {
+        @foreach (var alarm in Model.Alarms)
+        {
+            <div class="glass p-5 rounded-2xl border border-slate-700 grid grid-cols-[auto_1fr_auto] items-center gap-6 transition-all duration-200 hover:bg-white/[0.02] @(alarm.Status.StartsWith("ACTIVE_ACK") ? "opacity-70" : "")">
+                <div class="w-1 h-10 rounded @(alarm.Severity == "CRITICAL" ? "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" : alarm.Severity == "MAJOR" ? "bg-amber-500" : alarm.Severity == "MINOR" ? "bg-sky-400" : "bg-slate-400")"></div>
+                <div class="flex flex-col gap-1">
+                    <div class="font-bold text-base text-slate-50">
+                        @alarm.Type
+                        @if (alarm.Status.StartsWith("ACTIVE_ACK"))
+                        {
+                            <span class="ml-2 text-[0.7rem] text-emerald-400 font-semibold align-middle">
+                                <i class="fas fa-check-circle"></i> Acknowledged
+                            </span>
+                        }
+                    </div>
+                    <div class="text-sm text-slate-400 flex gap-4">
+                        <span><i class="fas fa-tag"></i> @alarm.Severity</span>
+                        <span><i class="fas fa-map-marker-alt"></i> @alarm.Originator</span>
+                        <span><i class="fas fa-info-circle"></i> @alarm.Status</span>
+                    </div>
+                    @if (!string.IsNullOrEmpty(alarm.Message))
+                    {
+                        <div class="mt-2 text-sm text-slate-50 opacity-90">@alarm.Message</div>
+                    }
+                    @if (!string.IsNullOrEmpty(alarm.AckComment))
+                    {
+                        <div class="mt-2 text-xs text-slate-400 italic flex items-start gap-1.5">
+                            <i class="fas fa-comment-alt mt-0.5 text-sky-400 shrink-0"></i>
+                            <span>@alarm.AckComment</span>
+                        </div>
+                    }
+                </div>
+                <div class="text-sm text-slate-400 text-right">
+                    <div>@alarm.Time</div>
+                    @if (!alarm.Status.StartsWith("ACK") && !string.IsNullOrEmpty(alarm.AlarmId))
+                    {
+                        <button class="mt-2 bg-transparent border border-emerald-500 text-emerald-500 px-3 py-1 rounded text-xs cursor-pointer transition-all duration-200 inline-flex items-center gap-1.5 hover:bg-emerald-500/10"
+                            data-alarm-id="@alarm.AlarmId"
+                            data-bacnet-ack-key="@(alarm.BacnetAckKey ?? "")"
+                            onclick="openAck(this)">
+                            <i class="fas fa-check"></i> Acknowledge
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="text-xs text-emerald-500 mt-2 block">
+                            <i class="fas fa-check-circle"></i> Acknowledged
+                        </span>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@Html.AntiForgeryToken()
+
+<!-- ── ACK Modal ─────────────────────────────────────────────────────── -->
+<div id="ackModal" class="hidden fixed inset-0 z-[9000] items-center justify-center bg-black/70 backdrop-blur-sm" data-testid="ack-modal">
+    <div class="glass w-[min(480px,90vw)] rounded-xl p-8 flex flex-col gap-5">
+        <div class="flex justify-between items-center">
+            <h3 class="text-lg font-bold"><i class="fas fa-check-circle text-emerald-500 mr-2"></i> Acknowledge Alarm</h3>
+            <button onclick="closeAck()" class="bg-transparent border-0 text-slate-400 cursor-pointer text-xl hover:text-white"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="ackAlarmName" class="text-sm text-slate-400"></div>
+        <div>
+            <label class="text-xs text-slate-400 block mb-1.5">Comment <span class="opacity-50">(optional)</span></label>
+            <textarea id="ackComment" rows="3" placeholder="Describe what action was taken…"
+                class="w-full bg-white/5 border border-slate-700 rounded-lg text-slate-50 px-3 py-2.5 font-sans text-sm resize-y outline-none focus:border-sky-400 transition-colors"></textarea>
+        </div>
+        <p id="ackLocalOnly" class="text-[0.72rem] text-slate-400 opacity-60 -mt-2 leading-relaxed hidden">
+            <i class="fas fa-info-circle"></i> This alarm has no active BACnet context. The acknowledgment will be recorded locally only.
+        </p>
+        <p id="ackBacnetNote" class="text-[0.72rem] text-emerald-400 -mt-2 hidden leading-relaxed">
+            <i class="fas fa-plug"></i> A BACnet <code class="bg-emerald-400/15 px-1.5 py-0.5 rounded text-[0.68rem]">AlarmAcknowledgement</code> will be sent to the originating field controller.
+        </p>
+        <div id="ackStatus" class="ack-status-msg"></div>
+        <div class="flex gap-3 justify-end">
+            <button id="ackCancelBtn" onclick="closeAck()" class="bg-transparent border border-slate-700 text-slate-400 px-5 py-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors">Cancel</button>
+            <button id="ackConfirmBtn" onclick="submitAck()" class="bg-emerald-500 border-0 text-white font-semibold px-6 py-2 rounded-lg cursor-pointer hover:bg-emerald-600 transition-colors">
+                <i class="fas fa-check"></i> Confirm
+            </button>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let _ackAlarmId = '';
+        let _bacnetAckKey = '';
+
+        function openAck(btn) {
+            _ackAlarmId  = btn.dataset.alarmId;
+            _bacnetAckKey = btn.dataset.bacnetAckKey || '';
+            const card = btn.closest('[class*="grid"]');
+            const alarmType = card?.querySelector('.font-bold')?.textContent?.trim() ?? _ackAlarmId;
+            document.getElementById('ackAlarmName').textContent = alarmType;
+            document.getElementById('ackBacnetNote').style.display = _bacnetAckKey ? 'block' : 'none';
+            document.getElementById('ackLocalOnly').style.display = _bacnetAckKey ? 'none' : 'block';
+            document.getElementById('ackComment').value = '';
+            document.getElementById('ackModal').style.display = 'flex';
+            setTimeout(() => document.getElementById('ackComment').focus(), 50);
+        }
+
+        function closeAck() {
+            document.getElementById('ackModal').style.display = 'none';
+            const s = document.getElementById('ackStatus');
+            s.className = 'ack-status-msg'; s.textContent = '';
+            const btn = document.getElementById('ackConfirmBtn');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check"></i> Confirm';
+            document.getElementById('ackCancelBtn').disabled = false;
+        }
+
+        async function submitAck() {
+            const btn       = document.getElementById('ackConfirmBtn');
+            const cancelBtn = document.getElementById('ackCancelBtn');
+            const statusEl  = document.getElementById('ackStatus');
+
+            btn.disabled = cancelBtn.disabled = true;
+            statusEl.className   = 'ack-status-msg sending';
+            statusEl.innerHTML   = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+
+            const token   = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+            const comment = document.getElementById('ackComment').value.trim();
+
+            try {
+                const resp   = await fetch('?handler=Ack', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                    body: JSON.stringify({ alarmId: _ackAlarmId, comment, bacnetAckKey: _bacnetAckKey })
+                });
+                const result = await resp.json();
+
+                if (result.success) {
+                    const bacnetNote = result.bacnetAcked
+                        ? ' <span class="opacity-70 text-[0.8em]">· BACnet ACK sent</span>'
+                        : (_bacnetAckKey ? ' <span class="opacity-50 text-[0.8em]">· BACnet ACK skipped (context lost)</span>' : '');
+                    statusEl.className = 'ack-status-msg success';
+                    statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Acknowledged' + bacnetNote;
+                    setTimeout(() => { closeAck(); location.reload(); }, 1400);
+                } else {
+                    statusEl.className = 'ack-status-msg error';
+                    statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Failed: ' + (result.error ?? 'Unknown error');
+                    btn.disabled = cancelBtn.disabled = false;
+                }
+            } catch (err) {
+                statusEl.className = 'ack-status-msg error';
+                statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Request failed: ' + err.message;
+                btn.disabled = cancelBtn.disabled = false;
+            }
+        }
+
+        document.getElementById('ackModal').addEventListener('click', e => {
+            if (e.target === document.getElementById('ackModal')) closeAck();
+        });
+    </script>
+}

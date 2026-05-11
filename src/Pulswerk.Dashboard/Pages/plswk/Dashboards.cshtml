@@ -1,0 +1,247 @@
+@page "{id?}/{name?}"
+@model Pulswerk.Dashboard.Pages.DashboardsModel
+@{
+    ViewData["Title"] = "Dashboards";
+    var dashJson = Model.CurrentDashboard != null
+        ? System.Text.Json.JsonSerializer.Serialize(Model.CurrentDashboard,
+            new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase })
+        : "null";
+}
+
+@section Styles {
+<link rel="stylesheet" href="/plswk/lib/gridstack.min.css">
+<style>
+    /* ── Gridstack ── (cannot use tailwindcss layer due to GridStack DOM control) */
+    .grid-stack { min-height:0; }
+    .grid-stack:not(:empty) { min-height:300px; }
+    .grid-stack-item { transition:transform 0.2s ease; }
+    .grid-stack-item-content {
+        background:rgba(30,41,59,0.7); backdrop-filter:blur(12px);
+        border:1px solid rgba(255,255,255,0.06); border-radius:1rem;
+        display:flex; flex-direction:column; overflow:hidden;
+        animation:widgetIn 0.35s ease-out;
+        transition:box-shadow 0.3s, border-color 0.3s;
+    }
+    .grid-stack-item-content:hover { border-color:rgba(255,255,255,0.1); box-shadow:0 8px 24px -8px rgba(0,0,0,0.35); }
+    @@keyframes widgetIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }
+    .gs-resizable-handle { opacity:0; transition:opacity 0.2s; }
+    .grid-stack-item:hover .gs-resizable-handle { opacity:0.5; }
+    .gs-resizable-se { width:16px!important; height:16px!important; bottom:4px!important; right:4px!important;
+        background:none!important; border-right:2px solid #38bdf8!important; border-bottom:2px solid #38bdf8!important; border-radius:0 0 3px 0; }
+
+    /* Widget internal layout */
+    .widget-header { display:flex; align-items:center; padding:0.75rem 1rem; gap:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); flex-shrink:0; }
+    .widget-type-icon { color:#38bdf8; font-size:0.8rem; opacity:0.6; }
+    .widget-title { font-size:0.85rem; font-weight:700; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .widget-actions { display:flex; gap:0.25rem; }
+    .widget-actions button { background:transparent; border:none; color:#94a3b8; cursor:pointer; padding:0.25rem 0.4rem; border-radius:0.3rem; transition:all 0.15s; font-size:0.8rem; }
+    .widget-actions button:hover { color:#38bdf8; background:rgba(56,189,248,0.1); }
+    .widget-body { flex:1; padding:0.75rem; min-height:0; position:relative; overflow:hidden; display:flex; flex-direction:column; }
+    .widget-body canvas { width:100%!important; flex:1; min-height:0; }
+    .widget-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,0.6); z-index:5; border-radius:0 0 1rem 1rem; }
+    .widget-loading i { font-size:1.25rem; color:#38bdf8; }
+
+    /* Latest values table */
+    .lv-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+    .lv-table th { text-align:left; padding:0.5rem 0.75rem; color:#94a3b8; font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid rgba(255,255,255,0.05); }
+    .lv-table td { padding:0.55rem 0.75rem; border-bottom:1px solid rgba(255,255,255,0.03); transition:background 0.15s; }
+    .lv-table tr:hover td { background:rgba(56,189,248,0.03); }
+    .lv-table .lv-value { font-weight:700; color:#00d1d1; font-family:'Inter',monospace; transition:color 0.3s; }
+    .lv-table .lv-units { color:#94a3b8; font-size:0.75rem; margin-left:0.25rem; }
+
+    /* Single value widget */
+    .sv-widget { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:0.35rem; background:radial-gradient(ellipse at center, rgba(0,209,209,0.06) 0%, transparent 70%); }
+    .sv-value { font-size:2.5rem; font-weight:800; line-height:1; background:linear-gradient(135deg, #00d1d1, #38bdf8); -webkit-background-clip:text; -webkit-text-fill-color:transparent; filter:drop-shadow(0 0 12px rgba(0,209,209,0.25)); transition:transform 0.3s; }
+    .sv-widget:hover .sv-value { transform:scale(1.05); }
+    .sv-units { font-size:0.9rem; color:#94a3b8; }
+    .sv-label { font-size:0.75rem; color:#94a3b8; margin-top:0.15rem; opacity:0.7; }
+
+    /* Single value card (favorites-style) */
+    .sv-card { display:flex; flex-direction:column; height:100%; }
+    .sv-card-path { width:100%; font-size:0.72rem; color:#38bdf8; font-weight:500; padding-bottom:0.6rem; margin-bottom:0.6rem; border-bottom:1px solid rgba(255,255,255,0.05); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sv-card-path a { color:inherit; text-decoration:none; }
+    .sv-card-path a:hover { text-decoration:underline; }
+    .sv-card-body { display:flex; align-items:center; gap:1rem; flex:1; min-height:0; }
+    .sv-card-icon { width:40px; height:40px; border-radius:10px; background:rgba(0,209,209,0.1); color:#00d1d1; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0; }
+    .sv-card-info { flex:1; min-width:0; }
+    .sv-card-name { font-weight:700; font-size:0.95rem; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sv-card-fullname { font-size:0.6rem; opacity:0.35; font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sv-card-valbox { text-align:right; min-width:70px; flex-shrink:0; }
+    .sv-card-val { font-size:1.35rem; font-weight:800; color:#00d1d1; }
+    .sv-card-units { font-size:0.75rem; color:#94a3b8; margin-left:0.2rem; }
+    .sv-card-actions { display:flex; gap:0.4rem; justify-content:flex-end; margin-top:auto; padding-top:0.6rem; border-top:1px solid rgba(255,255,255,0.05); }
+    .sv-card-actions .btn-icon { background:transparent; border:1px solid rgba(255,255,255,0.1); color:#94a3b8; padding:0.35rem 0.45rem; border-radius:0.4rem; cursor:pointer; transition:all 0.2s; font-size:0.75rem; display:flex; align-items:center; justify-content:center; }
+    .sv-card-actions .btn-icon:hover { border-color:#00d1d1; color:#00d1d1; background:rgba(0,139,145,0.05); }
+</style>
+}
+
+<!-- ═══════════════════ LIST MODE ═══════════════════ -->
+<div id="listMode" style="@(Model.CurrentDashboard != null ? "display:none" : "")" data-testid="dash-list-mode">
+    <div class="flex justify-between items-center mb-6">
+        <p class="text-slate-400 text-sm">Create and manage custom data dashboards.</p>
+        <button class="btn-primary" onclick="createDashboard()" data-testid="dash-create-btn"><i class="fas fa-plus"></i> New Dashboard</button>
+    </div>
+    <div id="dashGrid" class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5" data-testid="dash-grid"></div>
+    <div id="emptyDashboards" class="hidden flex-col items-center justify-center gap-4 text-center text-slate-400 p-16 glass rounded-2xl">
+        <i class="fas fa-th-large text-5xl opacity-30 text-sky-400"></i>
+        <p class="text-sm">No dashboards yet.</p>
+        <button class="btn-primary btn-sm" onclick="createDashboard()"><i class="fas fa-plus"></i> Create your first dashboard</button>
+    </div>
+</div>
+
+<!-- ═══════════════════ VIEW / EDIT MODE ═══════════════════ -->
+<div id="dashMode" class="relative min-h-[calc(100vh-120px)]" style="@(Model.CurrentDashboard == null ? "display:none" : "")" data-testid="dash-edit-mode">
+    <div class="flex items-center gap-4 mb-4 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/[0.06]" data-testid="dash-toolbar">
+        <a href="/plswk/Dashboards" class="text-slate-400 no-underline text-lg transition-colors duration-200 hover:text-sky-400"><i class="fas fa-arrow-left"></i></a>
+        <input type="text" class="bg-transparent border-0 text-white text-lg font-bold outline-none flex-1 min-w-0" id="dashTitle" style="display:none" placeholder="Dashboard name">
+        <span class="text-lg font-bold flex-1" id="dashTitleView"></span>
+
+        <!-- Timewindow selector -->
+        <div class="tw-selector relative flex items-center gap-2 bg-white/5 border border-white/10 px-3.5 py-1.5 rounded-lg cursor-pointer transition-all duration-200 text-[0.82rem] text-slate-400 whitespace-nowrap select-none hover:border-sky-400 hover:text-sky-400" id="twSelector" onclick="toggleTwDropdown(event)" data-testid="tw-selector">
+            <i class="fas fa-clock text-[0.9rem] mode-icon"></i>
+            <span id="twLabel">Last 1 hour</span>
+            <i class="fas fa-caret-down text-[0.7rem]"></i>
+            <div class="tw-dropdown absolute top-[calc(100%+6px)] right-0 z-[500] bg-slate-800 border border-white/10 rounded-xl p-2 min-w-[280px] shadow-2xl" id="twDropdown" onclick="event.stopPropagation()">
+                <div class="flex gap-1 mb-2">
+                    <button class="tw-tab flex-1 py-2 text-center rounded text-[0.78rem] font-semibold cursor-pointer transition-all duration-200 bg-transparent border-0 text-slate-400 active" data-tw-mode="realtime" onclick="setTwMode('realtime',this)">Realtime</button>
+                    <button class="tw-tab flex-1 py-2 text-center rounded text-[0.78rem] font-semibold cursor-pointer transition-all duration-200 bg-transparent border-0 text-slate-400" data-tw-mode="history" onclick="setTwMode('history',this)">History</button>
+                </div>
+                <div id="twRealtimePanel">
+                    <div class="tw-presets grid grid-cols-2 gap-1" id="twPresets"></div>
+                </div>
+                <div id="twHistoryPanel" style="display:none">
+                    <div class="flex flex-col gap-2 p-1">
+                        <div class="grid grid-cols-[2.5rem_1fr] items-center gap-1.5">
+                            <label class="text-[0.72rem] text-slate-400 font-semibold uppercase tracking-wide whitespace-nowrap">From</label>
+                            <input type="datetime-local" id="twHistFrom" class="bg-white/5 border border-slate-700 text-white px-2.5 py-2 rounded text-xs outline-none w-full min-w-0 focus:border-sky-400">
+                        </div>
+                        <div class="grid grid-cols-[2.5rem_1fr] items-center gap-1.5">
+                            <label class="text-[0.72rem] text-slate-400 font-semibold uppercase tracking-wide whitespace-nowrap">To</label>
+                            <input type="datetime-local" id="twHistTo" class="bg-white/5 border border-slate-700 text-white px-2.5 py-2 rounded text-xs outline-none w-full min-w-0 focus:border-sky-400">
+                        </div>
+                    </div>
+                    <button class="btn-primary btn-sm w-full mt-2" onclick="applyHistoryRange()"><i class="fas fa-check"></i> Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex gap-2" id="editButtons">
+            <button class="btn-ghost" id="btnAddWidget" onclick="openAddWidget()" style="display:none" data-testid="dash-add-widget-btn"><i class="fas fa-plus"></i> Add Widget</button>
+            <button class="btn-ghost" id="btnEdit" onclick="enterEditMode()" data-testid="dash-edit-btn"><i class="fas fa-pen"></i> Edit</button>
+            <button class="btn-primary btn-sm" id="btnSave" onclick="saveDashboard()" style="display:none" data-testid="dash-save-btn"><i class="fas fa-save"></i> Save</button>
+            <button class="btn-ghost" id="btnCancel" onclick="cancelEdit()" style="display:none" data-testid="dash-cancel-btn"><i class="fas fa-times"></i></button>
+        </div>
+    </div>
+
+    <div class="grid-stack" id="dashGrid2"></div>
+
+    <div id="emptyDash" class="absolute inset-0 flex items-center justify-center pointer-events-none" style="display:none">
+      <div class="flex flex-col items-center justify-center gap-4 text-center text-slate-400 p-16 glass rounded-2xl max-w-[500px] w-full pointer-events-auto">
+        <i class="fas fa-puzzle-piece text-5xl opacity-30 text-sky-400"></i>
+        <p class="text-sm">This dashboard has no widgets yet.</p>
+        <button class="btn-primary btn-sm" onclick="enterEditMode(); openAddWidget();"><i class="fas fa-plus"></i> Add your first widget</button>
+      </div>
+    </div>
+</div>
+
+<!-- ═══════════════════ ADD WIDGET MODAL ═══════════════════ -->
+<div class="fixed inset-0 bg-slate-900/90 backdrop-blur-xl hidden items-center justify-center z-[1000] p-8" id="addWidgetModal" data-testid="add-widget-modal">
+    <div class="bg-slate-800 border border-white/10 rounded-2xl w-full max-w-[700px] max-h-[85vh] flex flex-col p-8 relative shadow-2xl">
+        <div class="flex justify-between items-center mb-6">
+            <h2 id="widgetModalTitle" class="text-xl font-extrabold">Add Widget</h2>
+            <button class="close-modal bg-white/5 border border-white/10 text-white w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 p-0 leading-none hover:bg-red-500/20 hover:text-red-500 hover:border-red-500" onclick="closeAddWidget()">&times;</button>
+        </div>
+
+        <div class="overflow-y-auto flex-1">
+            <!-- Step 1: Type -->
+            <div class="mb-5">
+                <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Widget Type</label>
+                <div class="wtype-grid grid grid-cols-3 gap-3">
+                    <div class="wtype-card selected" data-type="timeseries" onclick="selectWidgetType(this)">
+                        <i class="fas fa-chart-line text-2xl text-sky-400 block mb-2"></i><span class="text-[0.78rem] font-semibold">Time Series</span>
+                    </div>
+                    <div class="wtype-card" data-type="latest-values" onclick="selectWidgetType(this)">
+                        <i class="fas fa-table text-2xl text-sky-400 block mb-2"></i><span class="text-[0.78rem] font-semibold">Latest Values</span>
+                    </div>
+                    <div class="wtype-card" data-type="single-value" onclick="selectWidgetType(this)">
+                        <i class="fas fa-digital-tachograph text-2xl text-sky-400 block mb-2"></i><span class="text-[0.78rem] font-semibold">Single Value</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Title -->
+            <div class="mb-5">
+                <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Title</label>
+                <input class="form-input" id="widgetTitle" placeholder="e.g. Zone Temperatures" value="">
+            </div>
+
+            <!-- Step 3: Keys -->
+            <div class="mb-5">
+                <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Data Keys</label>
+                <div class="max-h-[250px] overflow-y-auto border border-slate-700 rounded-lg" id="keyPicker">
+                    <div class="sticky top-0 z-[1] p-2 bg-slate-800 border-b border-white/5">
+                        <input type="text" placeholder="Search keys..." id="keySearch" oninput="filterKeys()"
+                            class="w-full bg-white/5 border border-slate-700 text-white px-2.5 py-2 rounded text-xs outline-none focus:border-sky-400">
+                    </div>
+                    <div id="keyList"></div>
+                </div>
+            </div>
+
+            <!-- Step 4: Options (timeseries-specific) -->
+            <div id="tsOptions">
+                <div class="flex gap-4 flex-wrap">
+                    <div class="flex-1 min-w-[120px] mb-3">
+                        <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Chart Type</label>
+                        <select class="form-select" id="optChartType">
+                            <option value="line">Line</option>
+                            <option value="bar">Bar</option>
+                        </select>
+                    </div>
+                    <div class="flex-1 min-w-[120px] mb-3 flex items-end">
+                        <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-slate-400"><input type="checkbox" id="optStacked" class="accent-sky-400"> Stacked</label>
+                    </div>
+                    <div class="flex-1 min-w-[120px] mb-3 flex items-end">
+                        <label class="flex items-center gap-2 cursor-pointer text-[0.82rem] text-slate-400"><input type="checkbox" id="optLegend" checked class="accent-sky-400"> Show Legend</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn-primary w-full mt-4" id="btnAddWidgetConfirm" onclick="confirmAddWidget()">
+            <i class="fas fa-plus"></i> <span id="widgetConfirmText">Add Widget</span>
+        </button>
+    </div>
+</div>
+
+<!-- ═══════════════════ CREATE DASHBOARD MODAL ═══════════════════ -->
+<div class="fixed inset-0 bg-slate-900/90 backdrop-blur-xl hidden items-center justify-center z-[1000] p-8" id="createModal" data-testid="create-dash-modal">
+    <div class="bg-slate-800 border border-white/10 rounded-2xl w-full max-w-[420px] flex flex-col p-8 relative shadow-2xl">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-extrabold">New Dashboard</h2>
+            <button class="close-modal bg-white/5 border border-white/10 text-white w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 p-0 leading-none hover:bg-red-500/20 hover:text-red-500 hover:border-red-500" onclick="document.getElementById('createModal').style.display='none'">&times;</button>
+        </div>
+        <div class="mb-5">
+            <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Name</label>
+            <input class="form-input" id="newDashName" placeholder="e.g. HVAC Overview" autofocus>
+        </div>
+        <div class="mb-5">
+            <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Description (optional)</label>
+            <input class="form-input" id="newDashDesc" placeholder="Main building monitoring">
+        </div>
+        <button class="btn-primary w-full" onclick="confirmCreate()"><i class="fas fa-plus"></i> Create</button>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()
+
+@section Scripts {
+<script src="/plswk/lib/gridstack-all.js"></script>
+<script src="/plswk/js/dashboards.js"></script>
+<script>
+    // Bootstrap with server-rendered data
+    const INITIAL_DASH = @Html.Raw(dashJson);
+    const EDIT_MODE = @(Model.EditMode ? "true" : "false");
+    initDashboards(INITIAL_DASH, EDIT_MODE);
+</script>
+}
