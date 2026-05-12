@@ -44,5 +44,8 @@ namespace Pulswerk.Core
         /// </summary>
         void Write(ConnectionConfig connection, DeviceConfig device,
                    string key, double value);
+
+        /// <summary>Returns true if the specific key is writable on this device.</summary>
+        bool IsWritable(string key);
     }
 }

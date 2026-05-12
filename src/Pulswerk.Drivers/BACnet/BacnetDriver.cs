@@ -1861,6 +1861,8 @@ namespace Pulswerk.Drivers.BACnet
         // =====================================================================
         //  IDeviceWriter – write a value to a BACnet object's PROP_PRESENT_VALUE
         // =====================================================================
+        public bool IsWritable(string key) => true;
+
         public void Write(ConnectionConfig conn, DeviceConfig device, string key, double value)
         {
             if (device.DeviceId is null)

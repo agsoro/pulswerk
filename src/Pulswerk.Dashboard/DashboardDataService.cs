@@ -243,7 +243,7 @@ namespace Pulswerk.Dashboard
                             Type = "Analog",
                             Key = pointKey,
                             Value = GetLatestValue(pointKey) ?? GetLatestValue(key),
-                            IsWritable = reader is IDeviceWriter,
+                            IsWritable = reader is IDeviceWriter writer && writer.IsWritable(key),
                             ParentId = PathSegmentId(device.Path.Last()),
                             ParentPath = parentPath
                         };
@@ -449,27 +449,43 @@ namespace Pulswerk.Dashboard
 
         public Task<bool> WriteValueAsync(string key, double value)
         {
-            // 1. Identify the device from the key (e.g. "dev123_...")
-            if (!key.StartsWith("dev")) return Task.FromResult(false);
-            int firstUnderscore = key.IndexOf('_');
-            if (firstUnderscore <= 3) return Task.FromResult(false);
+            DeviceConfig? device = null;
+            string driverKey = key;
 
-            if (!uint.TryParse(key.Substring(3, firstUnderscore - 3), out uint bacnetId))
-                return Task.FromResult(false);
+            // 1. Identify the device from the key
+            if (key.StartsWith("dev"))
+            {
+                // BACnet style: dev123_ObjectName_value
+                int firstUnderscore = key.IndexOf('_');
+                if (firstUnderscore > 3 && uint.TryParse(key.Substring(3, firstUnderscore - 3), out uint devId))
+                {
+                    device = Config.Devices.FirstOrDefault(d => d.DeviceId == devId);
+                    // BACnet driver expects the full key (it parses it again)
+                    driverKey = key; 
+                }
+            }
+            else
+            {
+                // Modbus style: DeviceName_Key
+                device = Config.Devices.FirstOrDefault(d => key.StartsWith(d.Name + "_"));
+                if (device != null)
+                {
+                    // Modbus driver expects the unscoped key
+                    driverKey = key.Substring(device.Name.Length + 1);
+                }
+            }
 
-            var device = Config.Devices.FirstOrDefault(d => d.BacnetDeviceId == bacnetId);
             if (device == null) return Task.FromResult(false);
 
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
             if (conn == null) return Task.FromResult(false);
 
             var writer = (Drivers.TryGetValue(device.Name, out var drv) ? drv : null) as IDeviceWriter;
-            if (writer == null) return Task.FromResult(false);
+            if (writer == null || !writer.IsWritable(driverKey)) return Task.FromResult(false);
 
             try
             {
-                // Pass the FULL key to the driver - it already handles the prefix
-                writer.Write(conn, device, key, value);
+                writer.Write(conn, device, driverKey, value);
                 Console.WriteLine($"  [Dashboard] Manual write success: {key} = {value}");
 
                 // --- Force immediate update in dashboard cache and storage ---

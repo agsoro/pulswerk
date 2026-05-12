@@ -46,8 +46,8 @@ namespace Pulswerk.Drivers.Modbus
         // =====================================================================
         public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
-            byte slaveId = device.SlaveId
-                ?? throw new InvalidOperationException($"Device '{device.Name}' is missing slaveId.");
+            byte slaveId = (byte)(device.DeviceId
+                ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
 
             return ModbusConnection.WithMaster(conn, master =>
             {
@@ -86,10 +86,10 @@ namespace Pulswerk.Drivers.Modbus
         public void Write(ConnectionConfig connection, DeviceConfig device,
                           string key, double value)
         {
-            if (key != TelemetryKeys.PowerLimitPct) return;
+            if (!IsWritable(key)) return;
 
-            byte slaveId = device.SlaveId
-                ?? throw new InvalidOperationException($"Device '{device.Name}' is missing slaveId.");
+            byte slaveId = (byte)(device.DeviceId
+                ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
 
             ModbusConnection.WithMaster<int>(connection, master =>
             {
@@ -98,5 +98,7 @@ namespace Pulswerk.Drivers.Modbus
                 return 0;
             });
         }
+
+        public bool IsWritable(string key) => key == TelemetryKeys.PowerLimitPct;
     }
 }
