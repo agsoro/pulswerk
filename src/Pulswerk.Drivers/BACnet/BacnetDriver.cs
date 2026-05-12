@@ -1525,9 +1525,11 @@ namespace Pulswerk.Drivers.BACnet
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
                     failedCount++;
+                    if (failedCount == 1)
+                        Console.WriteLine($"  [BACnet] Trend log read failed for {obj.ObjectName ?? obj.ObjectId.ToString()}: {ex.Message}");
                 }
             }
 
@@ -1535,7 +1537,7 @@ namespace Pulswerk.Drivers.BACnet
             if (totalSynced > 0)
                 Console.Write($" {totalSynced} records synced.");
             if (failedCount > 0)
-                Console.Write($" {failedCount}/{objectsWithLogs.Count} trend logs unavailable (simulator limitation).");
+                Console.Write($" {failedCount}/{objectsWithLogs.Count} trend logs unavailable.");
             Console.WriteLine();
             return Task.CompletedTask;
         }
@@ -2565,7 +2567,7 @@ namespace Pulswerk.Drivers.BACnet
                 Name = friendlyName,
                 FullName = info.ObjectName,
                 Description = info.Description,
-                Units = "",
+                Units = info.Units,
                 Type = info.ObjectId.type.ToString(),
                 Key = $"{info.KeyPrefix}_value",
                 IsWritable = info.Commandable,
@@ -2692,7 +2694,7 @@ namespace Pulswerk.Drivers.BACnet
                             Name = friendlyName,
                             FullName = objectName,
                             Description = description,
-                            Units = "",
+                            Units = info.Units,
                             Type = child.ObjectId.type.ToString(),
                             Key = telemetryKey,
                             IsWritable = isWritable,
@@ -2793,7 +2795,13 @@ namespace Pulswerk.Drivers.BACnet
                         name = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(name.ToLower());
 
                         string valStr;
-                        if (kv.Key == BacnetPropertyIds.PROP_PRIORITY_ARRAY && kv.Value is System.Collections.Generic.IList<BacnetValue> pArray)
+                        if (kv.Key == BacnetPropertyIds.PROP_WEEKLY_SCHEDULE
+                            || kv.Key == BacnetPropertyIds.PROP_EXCEPTION_SCHEDULE)
+                        {
+                            // Schedule properties need structured day-level formatting
+                            valStr = FormatBacnetSchedule(kv.Value);
+                        }
+                        else if (kv.Key == BacnetPropertyIds.PROP_PRIORITY_ARRAY && kv.Value is System.Collections.Generic.IList<BacnetValue> pArray)
                         {
                             var parts = new List<string>();
                             for (int i = 0; i < pArray.Count; i++)
@@ -2815,7 +2823,7 @@ namespace Pulswerk.Drivers.BACnet
                                 else if (item != null)
                                     parts.Add(item.ToString() ?? "");
                             }
-                            valStr = parts.Count > 0 ? string.Join(", ", parts) : kv.Value.ToString() ?? "";
+                            valStr = parts.Count > 0 ? string.Join(", ", parts) : "";
                         }
                         else
                         {
