@@ -484,9 +484,40 @@ namespace Pulswerk.Drivers.BACnet
             {
                 Console.WriteLine($"  [BACnet] Walking Structured Views on {device.Name} (assetType={cfg.AssetType})…");
                 state.Tree = BacnetHierarchy.Walk(client, address, device.DeviceId!.Value);
+                int leafCount = CountTreeLeaves(state.Tree);
                 Console.WriteLine($"  [BACnet] Hierarchy walk complete — " +
-                                  $"{state.Tree.Roots.Count} root(s) found.");
+                                  $"{state.Tree.Roots.Count} root(s), {leafCount} leaf node(s) " +
+                                  $"(discovered={state.CachedObjects.Count}).");
+
+                if (state.Tree.Roots.Count == 0)
+                {
+                    Console.WriteLine(
+                        $"  [BACnet] WARNING: {device.Name} has {state.CachedObjects.Count} " +
+                        $"discovered objects but 0 Structured View roots. " +
+                        $"Items will appear under flat fallback hierarchy.");
+                }
+                else if (leafCount < state.CachedObjects.Count)
+                {
+                    int orphanEstimate = state.CachedObjects.Count - leafCount;
+                    Console.WriteLine(
+                        $"  [BACnet] NOTE: {device.Name} has ~{orphanEstimate} object(s) " +
+                        $"not covered by the Structured View tree. " +
+                        $"These will appear under 'Uncategorized'.");
+                }
             }
+        }
+
+        /// <summary>Counts the total non-view (leaf) nodes in a DezikoTree.</summary>
+        private static int CountTreeLeaves(DezikoTree tree)
+        {
+            int count = 0;
+            void Walk(DezikoNode n)
+            {
+                if (!n.IsView) { count++; return; }
+                foreach (var c in n.Children) Walk(c);
+            }
+            foreach (var r in tree.Roots) Walk(r);
+            return count;
         }
 
         /// <summary>
@@ -2262,21 +2293,189 @@ namespace Pulswerk.Drivers.BACnet
             if (discovered == null || discovered.Count == 0 || device.DeviceId == null)
                 return new AssetNodeDto { Id = device.Name, Name = device.Name, Type = "BACnet Device", IsView = true };
 
-            var tree = GetDiscoveredTree(device.Name);
-            if (tree == null)
-                return new AssetNodeDto { Id = device.Name, Name = device.Name, Type = "BACnet Device", IsView = true };
-
             var lookup = discovered.ToDictionary(o => o.ObjectId, o => o);
             var root = new AssetNodeDto { Id = device.Name, Name = device.Name, IsView = true, Type = "BACnet Device" };
 
-            foreach (var rootNode in tree.Roots)
+            var tree = GetDiscoveredTree(device.Name);
+            bool hasTree = tree != null && tree.Roots.Count > 0;
+
+            if (hasTree)
             {
-                var dto = ConvertNodeToDto(rootNode, device.Id, device.DeviceId.Value, lookup, new List<PathSegmentDto>());
-                root.Children.Add(dto);
+                // ── Normal path: convert Structured View tree to DTO ─────────
+                var referencedIds = new HashSet<BacnetObjectId>();
+                foreach (var rootNode in tree!.Roots)
+                {
+                    var dto = ConvertNodeToDto(rootNode, device.Id, device.DeviceId!.Value, lookup, new List<PathSegmentDto>());
+                    root.Children.Add(dto);
+                    CollectReferencedIds(rootNode, referencedIds);
+                }
+
+                // ── Orphan handling: items in CachedObjects not in the tree ──
+                var orphaned = discovered
+                    .Where(o => !referencedIds.Contains(o.ObjectId)
+                             && !IsMetaObjectType(o.ObjectId.type))
+                    .ToList();
+
+                if (orphaned.Count > 0)
+                {
+                    Console.WriteLine(
+                        $"  [Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
+                        $"not referenced by any Structured View — adding to 'Uncategorized'.");
+
+                    var uncatNode = new AssetNodeDto
+                    {
+                        Id = $"{device.Id}_uncategorized",
+                        Name = "Uncategorized",
+                        Description = $"{orphaned.Count} data points not referenced by any Structured View",
+                        IsView = true,
+                        Type = "Folder"
+                    };
+                    var uncatPath = new List<PathSegmentDto>
+                    {
+                        new PathSegmentDto { Id = root.Id, Name = root.Name },
+                        new PathSegmentDto { Id = uncatNode.Id, Name = uncatNode.Name }
+                    };
+
+                    foreach (var info in orphaned)
+                        uncatNode.Points.Add(CreatePointDto(info, device.Id, uncatNode.Id, uncatPath));
+
+                    root.Children.Add(uncatNode);
+                }
+            }
+            else
+            {
+                // ── Flat fallback: no Structured View tree available ──────────
+                // Group discovered objects by BACnet type so items are still
+                // visible and navigable in the asset tree / list.
+                Console.WriteLine(
+                    $"  [Hierarchy] {device.Name}: no Structured View tree — " +
+                    $"building flat hierarchy for {discovered.Count} discovered object(s).");
+
+                var dataPoints = discovered
+                    .Where(o => !IsMetaObjectType(o.ObjectId.type))
+                    .ToList();
+
+                // Group by object-type category for easier navigation
+                var grouped = dataPoints
+                    .GroupBy(o => GetObjectTypeCategory(o.ObjectId.type))
+                    .OrderBy(g => g.Key);
+
+                foreach (var group in grouped)
+                {
+                    var folderNode = new AssetNodeDto
+                    {
+                        Id = $"{device.Id}_{group.Key.ToLowerInvariant().Replace(" ", "_")}",
+                        Name = group.Key,
+                        Description = $"{group.Count()} data points",
+                        IsView = true,
+                        Type = "Folder"
+                    };
+                    var folderPath = new List<PathSegmentDto>
+                    {
+                        new PathSegmentDto { Id = root.Id, Name = root.Name },
+                        new PathSegmentDto { Id = folderNode.Id, Name = folderNode.Name }
+                    };
+
+                    foreach (var info in group)
+                        folderNode.Points.Add(CreatePointDto(info, device.Id, folderNode.Id, folderPath));
+
+                    root.Children.Add(folderNode);
+                }
             }
 
             return root;
         }
+
+        /// <summary>
+        /// Creates an <see cref="AssetPointDto"/> from a discovered <see cref="BacnetObjectInfo"/>.
+        /// Used for orphaned items and the flat-hierarchy fallback.
+        /// </summary>
+        private static AssetPointDto CreatePointDto(
+            BacnetObjectInfo info, string techDeviceId,
+            string parentId, List<PathSegmentDto> parentPath)
+        {
+            string friendlyName;
+            if (info.NamingPath?.Count > 0) friendlyName = info.NamingPath.Last();
+            else if (!string.IsNullOrEmpty(info.NameExtension)) friendlyName = info.NameExtension;
+            else friendlyName = string.IsNullOrWhiteSpace(info.ObjectName)
+                ? info.ObjectId.ToString()
+                : info.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last();
+
+            List<string>? enumValues = null;
+            bool isMultiState = info.ObjectId.type is
+                BacnetObjectTypes.OBJECT_MULTI_STATE_INPUT or
+                BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT or
+                BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE;
+            bool isBin = info.ObjectId.type is
+                BacnetObjectTypes.OBJECT_BINARY_INPUT or
+                BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
+                BacnetObjectTypes.OBJECT_BINARY_VALUE;
+            if (isMultiState && info.StateText?.Count > 0) enumValues = info.StateText;
+            else if (isBin && info.StateText?.Count >= 2) enumValues = info.StateText;
+
+            return new AssetPointDto
+            {
+                Id = $"{techDeviceId}_{info.ObjectId}",
+                Name = friendlyName,
+                FullName = info.ObjectName,
+                Description = info.Description,
+                Units = "",
+                Type = info.ObjectId.type.ToString(),
+                Key = $"{info.KeyPrefix}_value",
+                IsWritable = info.Commandable,
+                EnumValues = enumValues,
+                ParentId = parentId,
+                ParentPath = parentPath
+            };
+        }
+
+        /// <summary>
+        /// Recursively collects all BacnetObjectIds referenced by nodes in a DezikoTree.
+        /// </summary>
+        private static void CollectReferencedIds(DezikoNode node, HashSet<BacnetObjectId> ids)
+        {
+            ids.Add(node.ObjectId);
+            foreach (var child in node.Children)
+                CollectReferencedIds(child, ids);
+        }
+
+        /// <summary>
+        /// Returns true for BACnet object types that are metadata/infrastructure
+        /// objects (Device, Structured View, Notification Class, etc.) rather
+        /// than data-point objects that should appear in the asset tree.
+        /// </summary>
+        private static bool IsMetaObjectType(BacnetObjectTypes t) => t is
+            BacnetObjectTypes.OBJECT_DEVICE or
+            BacnetObjectTypes.OBJECT_STRUCTURED_VIEW or
+            BacnetObjectTypes.OBJECT_NOTIFICATION_CLASS or
+            BacnetObjectTypes.OBJECT_NOTIFICATION_FORWARDER or
+            BacnetObjectTypes.OBJECT_EVENT_ENROLLMENT or
+            (BacnetObjectTypes)20 or   // OBJECT_TREND_LOG
+            (BacnetObjectTypes)27 or   // OBJECT_TREND_LOG_MULTIPLE
+            BacnetObjectTypes.OBJECT_FILE or
+            BacnetObjectTypes.OBJECT_PROGRAM or
+            BacnetObjectTypes.OBJECT_GROUP;
+
+        /// <summary>
+        /// Returns a human-readable category name for grouping BACnet object types
+        /// in the flat-hierarchy fallback.
+        /// </summary>
+        private static string GetObjectTypeCategory(BacnetObjectTypes t) => t switch
+        {
+            BacnetObjectTypes.OBJECT_ANALOG_INPUT => "Analog Inputs",
+            BacnetObjectTypes.OBJECT_ANALOG_OUTPUT => "Analog Outputs",
+            BacnetObjectTypes.OBJECT_ANALOG_VALUE => "Analog Values",
+            BacnetObjectTypes.OBJECT_BINARY_INPUT => "Binary Inputs",
+            BacnetObjectTypes.OBJECT_BINARY_OUTPUT => "Binary Outputs",
+            BacnetObjectTypes.OBJECT_BINARY_VALUE => "Binary Values",
+            BacnetObjectTypes.OBJECT_MULTI_STATE_INPUT => "Multi-State Inputs",
+            BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT => "Multi-State Outputs",
+            BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE => "Multi-State Values",
+            BacnetObjectTypes.OBJECT_SCHEDULE => "Schedules",
+            BacnetObjectTypes.OBJECT_CALENDAR => "Calendars",
+            BacnetObjectTypes.OBJECT_LOOP => "Control Loops",
+            _ => "Other Objects"
+        };
 
         private AssetNodeDto ConvertNodeToDto(DezikoNode node, string techDeviceId, uint deviceInstanceId, Dictionary<BacnetObjectId, BacnetObjectInfo> objectLookup, List<PathSegmentDto> currentPath)
         {
