@@ -47,29 +47,85 @@ namespace Pulswerk.Drivers.BACnet
             BacnetObjectInfo info,
             Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraProps)
         {
-            if (!extraProps.TryGetValue(info.ObjectId, out var props))
-                return info;
+            // ── 1. Try the batch RPM data first ─────────────────────────────
+            bool hasBatchData = extraProps.TryGetValue(info.ObjectId, out var props)
+                             && props.ContainsKey(PropNamingPath);
 
             string nameExt = info.NameExtension;
-            if (props.TryGetValue(PropNameExtension, out var vals1) && vals1.Count > 0)
-                nameExt = vals1[0].Value?.ToString() ?? "";
-
             var namingPath = info.NamingPath;
-            if (props.TryGetValue(PropNamingPath, out var vals2))
-            {
-                namingPath = new List<string>();
-                foreach (var v in vals2)
-                    ExtractStrings(v, namingPath);
-            }
-
             int category = info.Category;
-            if (props.TryGetValue(PropCategory4941, out var vals3) && vals3.Count > 0)
-                category = Convert.ToInt32(vals3[0].Value);
-
             BacnetObjectId? logId = info.LogObjectId;
-            if (props.TryGetValue(PropTrendLogReference, out var vals4) && vals4.Count > 0)
+
+            if (hasBatchData)
             {
-                if (vals4[0].Value is BacnetObjectId oid) logId = oid;
+                // Batch RPM returned the proprietary properties
+                if (props!.TryGetValue(PropNameExtension, out var vals1) && vals1.Count > 0)
+                    nameExt = vals1[0].Value?.ToString() ?? "";
+
+                if (props.TryGetValue(PropNamingPath, out var vals2))
+                {
+                    namingPath = new List<string>();
+                    foreach (var v in vals2)
+                        ExtractStrings(v, namingPath);
+                }
+
+                if (props.TryGetValue(PropCategory4941, out var vals3) && vals3.Count > 0)
+                    category = Convert.ToInt32(vals3[0].Value);
+
+                if (props.TryGetValue(PropTrendLogReference, out var vals4) && vals4.Count > 0)
+                {
+                    if (vals4[0].Value is BacnetObjectId oid) logId = oid;
+                }
+            }
+            else
+            {
+                // ── 2. Fallback: individual ReadProperty per proprietary prop ──
+                // The batch RPM often doesn't return proprietary Deziko properties;
+                // Deziko controllers require individual reads for these.
+                try
+                {
+                    // NamingPath (4397) – most important for hierarchy
+                    if (client.ReadPropertyRequest(address, info.ObjectId, PropNamingPath, out var npValues))
+                    {
+                        namingPath = new List<string>();
+                        foreach (var v in npValues)
+                            ExtractStrings(v, namingPath);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    // NameExtension (4438) – friendly alias
+                    if (client.ReadPropertyRequest(address, info.ObjectId, PropNameExtension, out var neValues)
+                        && neValues.Count > 0)
+                    {
+                        nameExt = neValues[0].Value?.ToString() ?? "";
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    // Category (4941)
+                    if (client.ReadPropertyRequest(address, info.ObjectId, PropCategory4941, out var catValues)
+                        && catValues.Count > 0)
+                    {
+                        category = Convert.ToInt32(catValues[0].Value);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    // TrendLogReference (4452)
+                    if (client.ReadPropertyRequest(address, info.ObjectId, PropTrendLogReference, out var tlValues)
+                        && tlValues.Count > 0)
+                    {
+                        if (tlValues[0].Value is BacnetObjectId oid) logId = oid;
+                    }
+                }
+                catch { }
             }
 
             return info with
