@@ -237,6 +237,9 @@ namespace Pulswerk.Drivers.BACnet
 
         private static readonly ConcurrentDictionary<string, BacnetAckContext> _ackRegistry = new();
 
+        /// <summary>Tracks devices that have already logged their hierarchy conversion stats (avoids log spam on every poll).</summary>
+        private static readonly HashSet<string> _hierarchyLogged = new();
+
         private static readonly ConcurrentDictionary<string, BacnetClient> _clientsByConnection = new();
         private static readonly ConcurrentDictionary<(string, int), BacnetClient> _clientsByEndpoint = new();
 
@@ -365,6 +368,7 @@ namespace Pulswerk.Drivers.BACnet
                     state.AttributesSent = false;   // re-send attributes after rediscovery
                     state.HierarchyDirty = true;    // signal background provisioner
                     state.HierarchyReady = false;   // wait for background job to finish provisioning before alarms
+                    _hierarchyLogged.Remove(device.Name);  // re-log hierarchy stats on next conversion
 
                     Console.WriteLine($"  [BACnet] {device.Name}: {all.Count} objects found, " +
                                       $"{filtered.Count} after filter" +
@@ -2317,13 +2321,18 @@ namespace Pulswerk.Drivers.BACnet
                     CollectReferencedIds(rootNode, referencedIds);
                 }
 
-                Console.WriteLine(
-                    $"  [Hierarchy] {device.Name}: tree conversion — " +
-                    $"leaves={stats.TotalTreeLeaves}, " +
-                    $"resolved={stats.ResolvedFromCache}, " +
-                    $"not-in-cache={stats.NotInCache}, " +
-                    $"discovered={discovered.Count}, " +
-                    $"dataPoints={dataPoints.Count}");
+                bool shouldLog = !_hierarchyLogged.Contains(device.Name);
+                if (shouldLog)
+                {
+                    _hierarchyLogged.Add(device.Name);
+                    Console.WriteLine(
+                        $"  [Hierarchy] {device.Name}: tree conversion — " +
+                        $"leaves={stats.TotalTreeLeaves}, " +
+                        $"resolved={stats.ResolvedFromCache}, " +
+                        $"not-in-cache={stats.NotInCache}, " +
+                        $"discovered={discovered.Count}, " +
+                        $"dataPoints={dataPoints.Count}");
+                }
 
                 if (stats.TotalTreeLeaves > 0)
                 {
@@ -2337,6 +2346,7 @@ namespace Pulswerk.Drivers.BACnet
 
                     if (orphaned.Count > 0)
                     {
+                        if (shouldLog)
                         Console.WriteLine(
                             $"  [Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
                             $"not referenced by any Structured View — adding to 'Uncategorized'.");
@@ -2367,9 +2377,10 @@ namespace Pulswerk.Drivers.BACnet
                     // Deziko controllers encode hierarchy via NamingPath (4397) on each
                     // object rather than listing data points in subordinate lists.
                     int withPath = dataPoints.Count(o => o.NamingPath?.Count > 0);
-                    Console.WriteLine(
-                        $"  [Hierarchy] {device.Name}: Structured View tree has 0 data-point leaves — " +
-                        $"building hierarchy from NamingPath ({withPath}/{dataPoints.Count} objects have paths).");
+                    if (shouldLog)
+                        Console.WriteLine(
+                            $"  [Hierarchy] {device.Name}: Structured View tree has 0 data-point leaves — " +
+                            $"building hierarchy from NamingPath ({withPath}/{dataPoints.Count} objects have paths).");
 
                     BuildHierarchyFromNamingPaths(root, dataPoints, device.Id);
                 }
@@ -2377,9 +2388,13 @@ namespace Pulswerk.Drivers.BACnet
             else
             {
                 // ── Flat fallback: no Structured View tree available ──────────
-                Console.WriteLine(
-                    $"  [Hierarchy] {device.Name}: no Structured View tree — " +
-                    $"building flat hierarchy for {discovered.Count} discovered object(s).");
+                if (!_hierarchyLogged.Contains(device.Name))
+                {
+                    _hierarchyLogged.Add(device.Name);
+                    Console.WriteLine(
+                        $"  [Hierarchy] {device.Name}: no Structured View tree — " +
+                        $"building flat hierarchy for {discovered.Count} discovered object(s).");
+                }
 
                 // Try NamingPath first, fall back to type-grouping
                 int withPath = dataPoints.Count(o => o.NamingPath?.Count > 0);
@@ -2789,6 +2804,19 @@ namespace Pulswerk.Drivers.BACnet
                             }
                             valStr = parts.Count > 0 ? string.Join(", ", parts) : "No active priorities";
                         }
+                        else if (kv.Value is System.Collections.IList list)
+                        {
+                            // Unwrap nested BacnetValue lists (BACnet array properties)
+                            var parts = new List<string>();
+                            foreach (var item in list)
+                            {
+                                if (item is BacnetValue bv)
+                                    FlattenBacnetValue(bv, parts);
+                                else if (item != null)
+                                    parts.Add(item.ToString() ?? "");
+                            }
+                            valStr = parts.Count > 0 ? string.Join(", ", parts) : kv.Value.ToString() ?? "";
+                        }
                         else
                         {
                             valStr = kv.Value.ToString() ?? "";
@@ -2802,6 +2830,24 @@ namespace Pulswerk.Drivers.BACnet
 
                 return props;
             });
+        }
+
+        /// <summary>
+        /// Recursively unwraps a <see cref="BacnetValue"/> to extract displayable strings.
+        /// Handles nested List&lt;BacnetValue&gt; wrappers produced by the BACnet library for array properties.
+        /// </summary>
+        private static void FlattenBacnetValue(BacnetValue v, List<string> result)
+        {
+            if (v.Value is IList<BacnetValue> nested)
+            {
+                foreach (var inner in nested)
+                    FlattenBacnetValue(inner, result);
+            }
+            else if (v.Value != null)
+            {
+                string s = v.Value.ToString() ?? "";
+                if (!string.IsNullOrEmpty(s)) result.Add(s);
+            }
         }
     }
 }

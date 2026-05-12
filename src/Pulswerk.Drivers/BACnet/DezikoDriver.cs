@@ -59,10 +59,7 @@ namespace Pulswerk.Drivers.BACnet
             {
                 namingPath = new List<string>();
                 foreach (var v in vals2)
-                {
-                    string? s = v.Value?.ToString();
-                    if (!string.IsNullOrEmpty(s)) namingPath.Add(s);
-                }
+                    ExtractStrings(v, namingPath);
             }
 
             int category = info.Category;
@@ -107,6 +104,25 @@ namespace Pulswerk.Drivers.BACnet
             // Deziko devices with hierarchy enabled wait until Structured View tree is built
             // before emitting alarms to ensure correct asset mapping.
             return device.HierarchyEnabled && !state.HierarchyReady;
+        }
+
+        /// <summary>
+        /// Recursively unwraps BacnetValue wrappers to extract actual string values.
+        /// The BACnet library wraps array properties as nested List&lt;BacnetValue&gt;,
+        /// so v.Value?.ToString() gives the .NET type name instead of the data.
+        /// </summary>
+        private static void ExtractStrings(BacnetValue v, List<string> result)
+        {
+            if (v.Value is IList<BacnetValue> nested)
+            {
+                foreach (var inner in nested)
+                    ExtractStrings(inner, result);
+            }
+            else
+            {
+                string? s = v.Value?.ToString();
+                if (!string.IsNullOrEmpty(s)) result.Add(s);
+            }
         }
     }
 }
