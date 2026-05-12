@@ -234,9 +234,11 @@ namespace Pulswerk.Drivers.BACnet
         private static readonly ConcurrentDictionary<string, BacnetClient> _clientsByConnection = new();
         private static readonly ConcurrentDictionary<(string, int), BacnetClient> _clientsByEndpoint = new();
 
-        public static void SetClientForConnection(string connId, BacnetClient client)
+        public static void RegisterClient(string connId, string addr, int port, BacnetClient client)
         {
             _clientsByConnection[connId] = client;
+            string bindAddr = string.IsNullOrWhiteSpace(addr) ? "0.0.0.0" : addr;
+            if (port > 0) _clientsByEndpoint[(bindAddr, port)] = client;
         }
 
         public static void ClearClients()
@@ -307,148 +309,148 @@ namespace Pulswerk.Drivers.BACnet
             try
             {
 
-            // ── Resolve BacnetAddress ─────────────────────────────────────────
-            // Use device-specific host if provided; otherwise fallback to connection host 
-            // (though in the new model, connection host is the local bind IP).
-            var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
-                                         device.DeviceId.Value,
-                                         cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
-            // ResolveAddress always returns a non-null address (direct IP fallback)
+                // ── Resolve BacnetAddress ─────────────────────────────────────────
+                // Use device-specific host if provided; otherwise fallback to connection host 
+                // (though in the new model, connection host is the local bind IP).
+                var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
+                                             device.DeviceId.Value,
+                                             cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
+                // ResolveAddress always returns a non-null address (direct IP fallback)
 
-            // ── Discovery (lazy + periodic) ───────────────────────────────────
-            var state = GetOrCreateState(device.Name);
-            var disc = cfg.Discovery ?? BacnetDiscoveryConfig.Default;
-            bool needsDiscovery = disc.OnStartup && !state.DiscoveryDone
-                               || (disc.RefreshIntervalMinutes > 0
-                                   && DateTime.UtcNow - state.LastDiscovery
-                                      > TimeSpan.FromMinutes(disc.RefreshIntervalMinutes));
+                // ── Discovery (lazy + periodic) ───────────────────────────────────
+                var state = GetOrCreateState(device.Name);
+                var disc = cfg.Discovery ?? BacnetDiscoveryConfig.Default;
+                bool needsDiscovery = disc.OnStartup && !state.DiscoveryDone
+                                   || (disc.RefreshIntervalMinutes > 0
+                                       && DateTime.UtcNow - state.LastDiscovery
+                                          > TimeSpan.FromMinutes(disc.RefreshIntervalMinutes));
 
-            if (needsDiscovery)
-            {
-                Interlocked.Increment(ref _busyCount);
-                Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
-                var all = DiscoverObjects(client, address, device.DeviceId.Value);
-                var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value);
-
-                // Enrich objects with vendor-specific properties (override in subclass)
-                filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
-
-                // ── Resolve Trend Log associations ───────────────────────────
-                // Standard BACnet: TrendLog objects reference their monitored
-                // object via PROP_LOG_DEVICE_OBJECT_PROPERTY (132). We scan
-                // the full object list for TrendLogs and build a reverse map,
-                // then wire LogObjectId into each matching data object.
-                var trendLogMap = ResolveTrendLogMap(client, address, all);
-                if (trendLogMap.Count > 0)
-                {
-                    Console.WriteLine($"  [BACnet] Found {trendLogMap.Count} Trend Log association(s).");
-                    filtered = filtered.Select(obj =>
-                        trendLogMap.TryGetValue(obj.ObjectId, out var logObjId) && obj.LogObjectId == null
-                            ? obj with { LogObjectId = logObjId }
-                            : obj
-                    ).ToList();
-                }
-
-                state.CachedObjects = filtered;
-                state.LastDiscovery = DateTime.UtcNow;
-                state.DiscoveryDone = true;
-                state.AttributesSent = false;   // re-send attributes after rediscovery
-                state.HierarchyDirty = true;    // signal background provisioner
-                state.HierarchyReady = false;   // wait for background job to finish provisioning before alarms
-
-                Console.WriteLine($"  [BACnet] {device.Name}: {all.Count} objects found, " +
-                                  $"{filtered.Count} after filter" +
-                                  (trendLogMap.Count > 0 ? $", {trendLogMap.Count} trend logs linked." : "."));
-
-                // Extension point for subclasses (e.g. DezikoDriver hierarchy walk)
-                OnPostDiscovery(client, address, state, device, cfg);
-                Interlocked.Decrement(ref _busyCount);
-
-                // ── Sync Trend Logs (Historical Backfill) ─────────────────────
-                if (tsStore != null)
+                if (needsDiscovery)
                 {
                     Interlocked.Increment(ref _busyCount);
-                    var syncClient = client;
-                    var syncAddress = address;
-                    _ = Task.Run(() =>
+                    Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
+                    var all = DiscoverObjects(client, address, device.DeviceId.Value);
+                    var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value);
+
+                    // Enrich objects with vendor-specific properties (override in subclass)
+                    filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
+
+                    // ── Resolve Trend Log associations ───────────────────────────
+                    // Standard BACnet: TrendLog objects reference their monitored
+                    // object via PROP_LOG_DEVICE_OBJECT_PROPERTY (132). We scan
+                    // the full object list for TrendLogs and build a reverse map,
+                    // then wire LogObjectId into each matching data object.
+                    var trendLogMap = ResolveTrendLogMap(client, address, all);
+                    if (trendLogMap.Count > 0)
                     {
-                        try
-                        {
-                            SyncTrendLogsAsync(syncClient, syncAddress, state, tsStore, device);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.Error.WriteLine($"  [BACnet] Trend log sync failed for {device.Name}: {ex.Message}");
-                        }
-                        finally
-                        {
-                            Interlocked.Decrement(ref _busyCount);
-                        }
-                    });
-                }
-            }
+                        Console.WriteLine($"  [BACnet] Found {trendLogMap.Count} Trend Log association(s).");
+                        filtered = filtered.Select(obj =>
+                            trendLogMap.TryGetValue(obj.ObjectId, out var logObjId) && obj.LogObjectId == null
+                                ? obj with { LogObjectId = logObjId }
+                                : obj
+                        ).ToList();
+                    }
 
-            if (state.CachedObjects.Count == 0)
-                return new BacnetReadResult();
+                    state.CachedObjects = filtered;
+                    state.LastDiscovery = DateTime.UtcNow;
+                    state.DiscoveryDone = true;
+                    state.AttributesSent = false;   // re-send attributes after rediscovery
+                    state.HierarchyDirty = true;    // signal background provisioner
+                    state.HierarchyReady = false;   // wait for background job to finish provisioning before alarms
 
-            // ── Read properties ───────────────────────────────────────────────
+                    Console.WriteLine($"  [BACnet] {device.Name}: {all.Count} objects found, " +
+                                      $"{filtered.Count} after filter" +
+                                      (trendLogMap.Count > 0 ? $", {trendLogMap.Count} trend logs linked." : "."));
 
-            var props = cfg.Properties ?? BacnetPropsConfig.Default;
-            var telPropIds = ParsePropertyIds(props.EffectiveTelemetry);
-            var attrPropIds = !state.AttributesSent
-                              ? ParsePropertyIds(props.EffectiveAttributes)
-                              : Array.Empty<BacnetPropertyIds>();
+                    // Extension point for subclasses (e.g. DezikoDriver hierarchy walk)
+                    OnPostDiscovery(client, address, state, device, cfg);
+                    Interlocked.Decrement(ref _busyCount);
 
-            var allPropIds = telPropIds.Concat(attrPropIds).Distinct().ToArray();
-
-            foreach (var obj in state.CachedObjects)
-            {
-                var values = ReadObjectProperties(client, address, obj.ObjectId, allPropIds);
-
-                foreach (var propId in telPropIds)
-                {
-                    if (values.TryGetValue(propId, out var raw))
+                    // ── Sync Trend Logs (Historical Backfill) ─────────────────────
+                    if (tsStore != null)
                     {
-                        string key = $"{obj.KeyPrefix}_{PropSuffix(propId)}";
-                        result.Telemetry[key] = FormatValue(obj, propId, raw);
+                        Interlocked.Increment(ref _busyCount);
+                        var syncClient = client;
+                        var syncAddress = address;
+                        _ = Task.Run(() =>
+                        {
+                            try
+                            {
+                                SyncTrendLogsAsync(syncClient, syncAddress, state, tsStore, device);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.Error.WriteLine($"  [BACnet] Trend log sync failed for {device.Name}: {ex.Message}");
+                            }
+                            finally
+                            {
+                                Interlocked.Decrement(ref _busyCount);
+                            }
+                        });
                     }
                 }
 
-                // Attributes (only on first poll after discovery)
-                if (!state.AttributesSent)
+                if (state.CachedObjects.Count == 0)
+                    return new BacnetReadResult();
+
+                // ── Read properties ───────────────────────────────────────────────
+
+                var props = cfg.Properties ?? BacnetPropsConfig.Default;
+                var telPropIds = ParsePropertyIds(props.EffectiveTelemetry);
+                var attrPropIds = !state.AttributesSent
+                                  ? ParsePropertyIds(props.EffectiveAttributes)
+                                  : Array.Empty<BacnetPropertyIds>();
+
+                var allPropIds = telPropIds.Concat(attrPropIds).Distinct().ToArray();
+
+                foreach (var obj in state.CachedObjects)
                 {
-                    foreach (var propId in attrPropIds)
+                    var values = ReadObjectProperties(client, address, obj.ObjectId, allPropIds);
+
+                    foreach (var propId in telPropIds)
                     {
                         if (values.TryGetValue(propId, out var raw))
                         {
                             string key = $"{obj.KeyPrefix}_{PropSuffix(propId)}";
-                            result.Attributes[key] = FormatValue(obj, propId, raw).ToString() ?? "";
+                            result.Telemetry[key] = FormatValue(obj, propId, raw);
+                        }
+                    }
+
+                    // Attributes (only on first poll after discovery)
+                    if (!state.AttributesSent)
+                    {
+                        foreach (var propId in attrPropIds)
+                        {
+                            if (values.TryGetValue(propId, out var raw))
+                            {
+                                string key = $"{obj.KeyPrefix}_{PropSuffix(propId)}";
+                                result.Attributes[key] = FormatValue(obj, propId, raw).ToString() ?? "";
+                            }
+                        }
+                    }
+
+                    // Decode status flags bit-string into separate boolean telemetry
+                    if (allPropIds.Contains(BacnetPropertyIds.PROP_STATUS_FLAGS) && values.TryGetValue(BacnetPropertyIds.PROP_STATUS_FLAGS, out var stRaw) && stRaw is BacnetBitString stBs)
+                    {
+                        ExpandStatusFlags(result.Telemetry, obj.KeyPrefix + "_status", stBs);
+
+                        // ── Diagnostic Alarms ─────────────────────────────────────
+                        if (alarmStore != null)
+                        {
+                            HandleObjectAlarms(alarmStore, device, state, obj, stRaw, values, client, address);
                         }
                     }
                 }
 
-                // Decode status flags bit-string into separate boolean telemetry
-                if (allPropIds.Contains(BacnetPropertyIds.PROP_STATUS_FLAGS) && values.TryGetValue(BacnetPropertyIds.PROP_STATUS_FLAGS, out var stRaw) && stRaw is BacnetBitString stBs)
+                if (!state.AttributesSent && attrPropIds.Length > 0)
+                    state.AttributesSent = true;
+
+                // Propagate the dirty flag once per discovery cycle
+                if (state.HierarchyDirty)
                 {
-                    ExpandStatusFlags(result.Telemetry, obj.KeyPrefix + "_status", stBs);
-
-                    // ── Diagnostic Alarms ─────────────────────────────────────
-                    if (alarmStore != null)
-                    {
-                        HandleObjectAlarms(alarmStore, device, state, obj, stRaw, values, client, address);
-                    }
+                    result.HierarchyDirty = true;
+                    state.HierarchyDirty = false;
                 }
-            }
-
-            if (!state.AttributesSent && attrPropIds.Length > 0)
-                state.AttributesSent = true;
-
-            // Propagate the dirty flag once per discovery cycle
-            if (state.HierarchyDirty)
-            {
-                result.HierarchyDirty = true;
-                state.HierarchyDirty = false;
-            }
 
             }
             finally
@@ -511,7 +513,7 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         foreach (var v in fullList)
                             if (v.Value is BacnetObjectId id) objectIds.Add(id);
-                        
+
                         if (objectIds.Count > 0)
                         {
                             Console.WriteLine($"  [BACnet] Successfully read {objectIds.Count} objects in bulk.");
@@ -1053,7 +1055,7 @@ namespace Pulswerk.Drivers.BACnet
                             // For complex properties (Schedule/Calendar), keep the full list.
                             // For simple properties, take the first value.
                             object? val = (pv.value.Count == 1) ? pv.value[0].Value : pv.value;
-                            
+
                             // Check if the value is actually a Bacnet error string or object
                             if (val != null && val.ToString()!.Contains("ERROR_")) continue;
                             result[propId] = val;
@@ -1123,7 +1125,7 @@ namespace Pulswerk.Drivers.BACnet
             Array.Copy(ipBytes, adr, 4);
             adr[4] = (byte)((port >> 8) & 0xFF);
             adr[5] = (byte)(port & 0xFF);
-            
+
             var directAddress = new BacnetAddress(BacnetAddressTypes.IP, 0, adr);
             Console.WriteLine($"  [BACnet] Attempting Who-Is for device {deviceId} via {ip}:{port}...");
 
@@ -1133,11 +1135,11 @@ namespace Pulswerk.Drivers.BACnet
             void OnIam(BacnetClient _, BacnetAddress adr, uint id,
                        uint maxApdu, BacnetSegmentations seg, ushort vendor)
             {
-                if (id == deviceId) 
-                { 
-                    iamAddress = adr; 
+                if (id == deviceId)
+                {
+                    iamAddress = adr;
                     Console.WriteLine($"  [BACnet] Got I-Am from {adr} (Net={adr.net}, Adr={BitConverter.ToString(adr.adr)})");
-                    signal.Set(); 
+                    signal.Set();
                 }
             }
 
@@ -1173,7 +1175,7 @@ namespace Pulswerk.Drivers.BACnet
         {
             if (_clientsByConnection.TryGetValue(conn.Id, out var shared)) return shared;
 
-            var bindAddr = conn.LocalAddress ?? "0.0.0.0";
+            var bindAddr = string.IsNullOrWhiteSpace(conn.LocalAddress) ? "0.0.0.0" : conn.LocalAddress;
             var bindPort = conn.LocalPort ?? 0;
             if (bindPort > 0 && _clientsByEndpoint.TryGetValue((bindAddr, bindPort), out var endpointShared))
                 return endpointShared;
@@ -1197,7 +1199,7 @@ namespace Pulswerk.Drivers.BACnet
             }
 
             // 3. Create new
-            var transport = new BacnetIpUdpProtocolTransport(bindPort, true, false, 1472, bindAddr);
+            var transport = new BacnetIpUdpProtocolTransport(bindPort, false, false, 1472, bindAddr);
             var client = new BacnetClient(transport);
             client.Start();
 
@@ -1584,7 +1586,7 @@ namespace Pulswerk.Drivers.BACnet
 
                         string timeStr = tVal is DateTime dt ? dt.ToString("HH:mm") : tVal?.ToString() ?? "??:??";
                         string valueStr = vVal?.ToString() ?? "?";
-                        
+
                         times.Add($"{timeStr}➔{valueStr}");
                     }
                 }
@@ -2185,7 +2187,7 @@ namespace Pulswerk.Drivers.BACnet
                     uint arrayIndex = (uint)(i + 1);
                     var propRef = new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_WEEKLY_SCHEDULE, arrayIndex);
                     var propValue = new BacnetPropertyValue { property = propRef, value = dayValues, priority = 0 };
-                    
+
                     if (!client.WritePropertyMultipleRequest(address, oid, new[] { propValue }))
                     {
                         Console.Error.WriteLine($"  [BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
@@ -2215,14 +2217,14 @@ namespace Pulswerk.Drivers.BACnet
             // 1. Try to find the key in the discovery cache (handles modern/structured keys)
             // Telemetry keys are stored as "device.Id_SanitisedName_value"
             // The 'key' passed here might be the full key OR just the suffix after device.Id
-            
+
             // Check full match first
             var cached = state.CachedObjects.FirstOrDefault(o => (o.KeyPrefix + "_value") == key);
             if (cached == null)
             {
                 // Try matching by suffix (common when called from DashboardDataService)
                 cached = state.CachedObjects.FirstOrDefault(o => o.ObjectName.EndsWith(key.Replace("_value", ""), StringComparison.OrdinalIgnoreCase));
-                
+
                 // Final attempt: check if the key is the sanitised suffix
                 if (cached == null && state.CachedObjects.Count > 0)
                 {
@@ -2308,7 +2310,7 @@ namespace Pulswerk.Drivers.BACnet
                 else
                 {
                     var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(child.ObjectName)}";
-                    var telemetryKey = $"{keyPrefix}_value"; 
+                    var telemetryKey = $"{keyPrefix}_value";
 
                     bool isWritable = false;
                     List<string>? enumValues = null;

@@ -216,9 +216,9 @@ namespace Pulswerk.Host
             foreach (var conn in cfg.Connections.Where(c => c.Type == "bacnet-ip"))
             {
                 int bindPort = conn.LocalPort ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing localPort.");
-                string bindAddr = conn.LocalAddress ?? "0.0.0.0"; // Default to all interfaces if not specified
+                string bindAddr = string.IsNullOrWhiteSpace(conn.LocalAddress) ? "0.0.0.0" : conn.LocalAddress;
 
-                _logger!.Info($"  [BACnet] Initialising connection '{conn.Id}' (port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
+                _logger!.Info($"  [BACnet] Initialising connection '{conn.Id}' (addr={bindAddr}, port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
                 try
                 {
                     // Check if we already have a client for this port to avoid "Address already in use"
@@ -226,7 +226,7 @@ namespace Pulswerk.Host
                     
                     if (client == null)
                     {
-                        var transport = new BacnetIpUdpProtocolTransport(bindPort, true, false, 1472, bindAddr);
+                        var transport = new BacnetIpUdpProtocolTransport(bindPort, false, false, 1472, bindAddr);
                         client = new BacnetClient(transport, (int)(conn.LocalDeviceId ?? 1234));
                         client.Start();
                         _logger!.Info($"  [BACnet] Started new client for '{conn.Id}' on port {bindPort}.");
@@ -236,7 +236,7 @@ namespace Pulswerk.Host
                         _logger!.Info($"  [BACnet] Reusing existing client for '{conn.Id}' on port {bindPort}.");
                     }
 
-                    BacnetDriver.SetClientForConnection(conn.Id, client);
+                    BacnetDriver.RegisterClient(conn.Id, bindAddr, bindPort, client);
                 }
                 catch (Exception ex)
                 {
