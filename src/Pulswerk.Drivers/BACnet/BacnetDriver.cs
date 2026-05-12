@@ -741,11 +741,18 @@ namespace Pulswerk.Drivers.BACnet
 
                         if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
                         {
-                            foreach (var res in batchResults)
+                            for (int j = 0; j < batchResults.Count && j < batch.Count; j++)
                             {
-                                if (res.values != null && res.values.Count > 0 && res.values[0].value != null && res.values[0].value.Count > 0)
+                                var res = batchResults[j];
+                                var oid = batch[j];
+                                if (res.values == null) continue;
+
+                                foreach (var pv in res.values)
                                 {
-                                    allNames[res.objectIdentifier] = res.values[0].value[0].Value?.ToString() ?? res.objectIdentifier.ToString();
+                                    if (pv.value != null && pv.value.Count > 0)
+                                    {
+                                        allNames[oid] = pv.value[0].Value?.ToString() ?? oid.ToString();
+                                    }
                                 }
                             }
                         }
@@ -754,8 +761,11 @@ namespace Pulswerk.Drivers.BACnet
                     if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} names fetched");
                 }
             }
-            
+
+            var result = new List<BacnetObjectInfo>();
+            int objectsWithLabels = 0;
             int processed = 0;
+
             foreach (var oid in candidates)
             {
                 processed++;
