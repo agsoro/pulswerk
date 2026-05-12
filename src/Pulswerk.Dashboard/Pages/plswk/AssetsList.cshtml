@@ -31,49 +31,57 @@
 
     <!-- Table Container -->
     <div class="flex-1 bg-slate-800/20 backdrop-blur-sm border border-white/5 rounded-2xl overflow-hidden flex flex-col shadow-2xl">
-        <div class="overflow-x-auto flex-1">
-            <table class="w-full text-left border-collapse" id="assetsTable">
-                <thead class="sticky top-0 bg-slate-900/80 backdrop-blur-xl z-20 border-b border-white/5">
+        <!-- Fixed header -->
+        <div class="bg-slate-900/80 backdrop-blur-xl border-b border-white/5 z-20">
+            <table class="w-full text-left border-collapse" id="headerTable">
+                <thead>
                     <tr class="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500 font-black">
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="connection">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="connection" style="width:10%">
                             <div class="flex items-center gap-1.5">Connection <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="device">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="device" style="width:10%">
                             <div class="flex items-center gap-1.5">Device <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="name">
-                            <div class="flex items-center gap-1.5">Identity & Path <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="name" style="width:22%">
+                            <div class="flex items-center gap-1.5">Identity &amp; Path <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="id">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="id" style="width:20%">
                             <div class="flex items-center gap-1.5">Key / Tag <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="type">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="type" style="width:10%">
                             <div class="flex items-center gap-1.5">Type <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" data-sort="value">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" data-sort="value" style="width:10%">
                             <div class="flex items-center justify-end gap-1.5">Current Value <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" data-sort="lastUpdate">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" data-sort="lastUpdate" style="width:8%">
                             <div class="flex items-center justify-end gap-1.5">Update <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
                         </th>
-                        <th class="px-6 py-4 text-center">Actions</th>
+                        <th class="px-6 py-4 text-center" style="width:10%">Actions</th>
                     </tr>
                 </thead>
-                <tbody id="tableBody" class="divide-y divide-white/[0.03]">
-                    <!-- Data rows populated by JS -->
-                    <tr>
-                        <td colspan="8" class="px-6 py-32 text-center">
-                            <div class="flex flex-col items-center gap-4">
-                                <div class="relative w-16 h-16">
-                                    <div class="absolute inset-0 rounded-full border-4 border-cyan-500/10"></div>
-                                    <div class="absolute inset-0 rounded-full border-4 border-cyan-500 border-t-transparent animate-spin"></div>
-                                </div>
-                                <p class="text-slate-400 font-medium animate-pulse">Synchronizing inventory...</p>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
             </table>
+        </div>
+        <!-- Virtual scroll viewport -->
+        <div class="flex-1 overflow-y-auto" id="scrollViewport">
+            <div id="virtualSpacer" style="position:relative">
+                <table class="w-full text-left border-collapse" id="assetsTable">
+                    <tbody id="tableBody" class="divide-y divide-white/[0.03]">
+                        <!-- Data rows populated by virtual scroller -->
+                        <tr>
+                            <td colspan="8" class="px-6 py-32 text-center">
+                                <div class="flex flex-col items-center gap-4">
+                                    <div class="relative w-16 h-16">
+                                        <div class="absolute inset-0 rounded-full border-4 border-cyan-500/10"></div>
+                                        <div class="absolute inset-0 rounded-full border-4 border-cyan-500 border-t-transparent animate-spin"></div>
+                                    </div>
+                                    <p class="text-slate-400 font-medium animate-pulse">Synchronizing inventory...</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
@@ -83,23 +91,33 @@
 
 @section Scripts {
     <script>
+        // ── Virtual scroll configuration ──────────────────────────────────────
+        const ROW_HEIGHT = 57;          // px per row (measured from actual row height)
+        const BUFFER_ROWS = 10;         // extra rows rendered above/below viewport
+
         let allPoints = [];
         let filteredPoints = [];
         let sortField = 'name';
         let sortDir = 1;
+
+        // Virtual scroll state
+        let lastRangeStart = -1;
+        let lastRangeEnd = -1;
+        let rafPending = false;
 
         async function loadPoints() {
             try {
                 const response = await fetch('?handler=Points');
                 allPoints = await response.json();
                 filteredPoints = [...allPoints];
-                renderTable();
+                applySort();
+                scheduleRender();
                 updateStats();
             } catch (error) {
                 console.error("Failed to load points:", error);
                 document.getElementById('tableBody').innerHTML = `
                     <tr>
-                        <td colspan="7" class="px-6 py-20 text-center text-red-400/50">
+                        <td colspan="8" class="px-6 py-20 text-center text-red-400/50">
                             <i class="fas fa-exclamation-triangle text-3xl mb-4"></i>
                             <p>Failed to load data points</p>
                         </td>
@@ -107,9 +125,23 @@
             }
         }
 
-        function renderTable() {
+        // ── Virtual scroll renderer ──────────────────────────────────────────
+
+        function scheduleRender() {
+            if (rafPending) return;
+            rafPending = true;
+            requestAnimationFrame(renderVirtual);
+        }
+
+        function renderVirtual() {
+            rafPending = false;
+            const viewport = document.getElementById('scrollViewport');
+            const spacer = document.getElementById('virtualSpacer');
             const tbody = document.getElementById('tableBody');
-            if (filteredPoints.length === 0) {
+            const total = filteredPoints.length;
+
+            if (total === 0) {
+                spacer.style.height = 'auto';
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="8" class="px-6 py-32 text-center">
@@ -119,76 +151,107 @@
                             </div>
                         </td>
                     </tr>`;
+                lastRangeStart = -1;
+                lastRangeEnd = -1;
                 return;
             }
 
-            tbody.innerHTML = filteredPoints.map(p => {
-                const safeName = (p.name || 'Unnamed').replace(/'/g, "\\'");
-                const safeFullName = (p.fullName || '').replace(/'/g, "\\'");
-                const safeUnits = (p.units || '').replace(/'/g, "\\'");
-                const safePathEnc = encodeURIComponent(JSON.stringify(p.parentPath || []));
-                
-                const isCalculated = p.type === 'CALCULATED';
-                const isSchedule = p.type === 'OBJECT_SCHEDULE';
-                
-                const valueDisplay = isSchedule 
-                    ? `<span class="text-slate-500 text-[0.7rem] font-bold tracking-tight uppercase"><i class="fas fa-calendar-alt mr-1.5 opacity-40"></i>Schedule</span>`
-                    : `<span class="text-sm font-bold text-sky-400 tabular-nums point-value" data-key="${p.key}">${formatNumber(p.value, 2)}</span>`;
+            const totalHeight = total * ROW_HEIGHT;
+            spacer.style.height = totalHeight + 'px';
 
-                return `
-                    <tr class="hover:bg-white/[0.02] transition-all group border-l-2 border-l-transparent hover:border-l-sky-500/50">
-                        <td class="px-6 py-4">
-                            <div class="text-[0.8rem] text-slate-400 font-medium">${p.connection || '-'}</div>
-                        </td>
-                        <td class="px-6 py-4">
-                            <div class="text-[0.8rem] text-slate-300 font-medium">${p.device || '-'}</div>
-                        </td>
-                        <td class="px-6 py-4">
-                            <div class="text-[0.8rem] text-white font-semibold group-hover:text-sky-400 transition-colors">${p.name}</div>
-                            <div class="text-[0.65rem] text-slate-500 font-medium truncate max-w-xs opacity-50">${p.path || '/'}</div>
-                        </td>
-                        <td class="px-6 py-4">
-                            <span class="text-[0.75rem] text-slate-500 font-mono opacity-80">${p.key}</span>
-                        </td>
-                        <td class="px-6 py-4">
-                            <span class="text-[0.7rem] font-bold uppercase tracking-wider text-slate-500">${p.type || 'Point'}</span>
-                        </td>
-                        <td class="px-6 py-4 text-right">
-                            <div class="flex items-baseline justify-end gap-1.5">
-                                ${valueDisplay}
-                                <span class="text-[0.65rem] font-bold text-slate-600 uppercase">${p.units || ''}</span>
-                            </div>
-                        </td>
-                        <td class="px-6 py-4 text-right">
-                            <span class="text-[0.75rem] text-slate-500 font-medium last-update" data-key="${p.key}">
-                                ${p.lastUpdate || '-'}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4">
-                            <div class="flex justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-all">
-                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
-                                        title="Trend" onclick="openHistory('${p.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')">
-                                    <i class="fas fa-chart-area text-xs"></i>
-                                </button>
-                                ${p.type === 'OBJECT_SCHEDULE' ? `
-                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
-                                        title="Schedule View" onclick="openScheduleView('${p.key}', '${safeName}', '${safePathEnc}')">
-                                    <i class="fas fa-calendar-alt text-xs"></i>
-                                </button>` : ''}
-                                ${p.isWritable && p.type !== 'OBJECT_SCHEDULE' ? `
-                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
-                                        title="Edit Value" onclick="openEdit('${p.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${p.type}', '${encodeURIComponent(JSON.stringify(p.enumValues || null))}')">
-                                    <i class="fas fa-pen text-xs"></i>
-                                </button>` : ''}
-                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 transition-all" 
-                                        title="Properties" onclick="openProperties('${p.key}', '${safeName}', '${safePathEnc}')">
-                                    <i class="fas fa-cog text-xs"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
+            const scrollTop = viewport.scrollTop;
+            const viewportHeight = viewport.clientHeight;
+
+            let startIdx = Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_ROWS;
+            let endIdx = Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + BUFFER_ROWS;
+            startIdx = Math.max(0, startIdx);
+            endIdx = Math.min(total - 1, endIdx);
+
+            // Skip re-render if the visible range hasn't changed
+            if (startIdx === lastRangeStart && endIdx === lastRangeEnd) return;
+            lastRangeStart = startIdx;
+            lastRangeEnd = endIdx;
+
+            const rows = [];
+            for (let i = startIdx; i <= endIdx; i++) {
+                rows.push(renderRow(filteredPoints[i], i));
+            }
+
+            // Position the table at the correct offset within the spacer
+            const table = document.getElementById('assetsTable');
+            table.style.position = 'absolute';
+            table.style.top = (startIdx * ROW_HEIGHT) + 'px';
+            table.style.left = '0';
+            table.style.right = '0';
+
+            tbody.innerHTML = rows.join('');
+        }
+
+        function renderRow(p, index) {
+            const safeName = (p.name || 'Unnamed').replace(/'/g, "\\'");
+            const safeFullName = (p.fullName || '').replace(/'/g, "\\'");
+            const safeUnits = (p.units || '').replace(/'/g, "\\'");
+            const safePathEnc = encodeURIComponent(JSON.stringify(p.parentPath || []));
+            
+            const isSchedule = p.type === 'OBJECT_SCHEDULE';
+            
+            const valueDisplay = isSchedule 
+                ? `<span class="text-slate-500 text-[0.7rem] font-bold tracking-tight uppercase"><i class="fas fa-calendar-alt mr-1.5 opacity-40"></i>Schedule</span>`
+                : `<span class="text-sm font-bold text-sky-400 tabular-nums point-value" data-key="${p.key}">${formatNumber(p.value, 2)}</span>`;
+
+            return `
+                <tr class="hover:bg-white/[0.02] transition-all group border-l-2 border-l-transparent hover:border-l-sky-500/50" style="height:${ROW_HEIGHT}px">
+                    <td class="px-6 py-3" style="width:10%">
+                        <div class="text-[0.8rem] text-slate-400 font-medium">${p.connection || '-'}</div>
+                    </td>
+                    <td class="px-6 py-3" style="width:10%">
+                        <div class="text-[0.8rem] text-slate-300 font-medium">${p.device || '-'}</div>
+                    </td>
+                    <td class="px-6 py-3" style="width:22%">
+                        <div class="text-[0.8rem] text-white font-semibold group-hover:text-sky-400 transition-colors truncate">${p.name}</div>
+                        <div class="text-[0.65rem] text-slate-500 font-medium truncate max-w-xs opacity-50">${p.path || '/'}</div>
+                    </td>
+                    <td class="px-6 py-3" style="width:20%">
+                        <span class="text-[0.75rem] text-slate-500 font-mono opacity-80 truncate block">${p.key}</span>
+                    </td>
+                    <td class="px-6 py-3" style="width:10%">
+                        <span class="text-[0.7rem] font-bold uppercase tracking-wider text-slate-500">${p.type || 'Point'}</span>
+                    </td>
+                    <td class="px-6 py-3 text-right" style="width:10%">
+                        <div class="flex items-baseline justify-end gap-1.5">
+                            ${valueDisplay}
+                            <span class="text-[0.65rem] font-bold text-slate-600 uppercase">${p.units || ''}</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-3 text-right" style="width:8%">
+                        <span class="text-[0.75rem] text-slate-500 font-medium last-update" data-key="${p.key}">
+                            ${p.lastUpdate || '-'}
+                        </span>
+                    </td>
+                    <td class="px-6 py-3" style="width:10%">
+                        <div class="flex justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-all">
+                            <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
+                                    title="Trend" onclick="openHistory('${p.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')">
+                                <i class="fas fa-chart-area text-xs"></i>
+                            </button>
+                            ${p.type === 'OBJECT_SCHEDULE' ? `
+                            <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
+                                    title="Schedule View" onclick="openScheduleView('${p.key}', '${safeName}', '${safePathEnc}')">
+                                <i class="fas fa-calendar-alt text-xs"></i>
+                            </button>` : ''}
+                            ${p.isWritable && p.type !== 'OBJECT_SCHEDULE' ? `
+                            <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
+                                    title="Edit Value" onclick="openEdit('${p.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${p.type}', '${encodeURIComponent(JSON.stringify(p.enumValues || null))}')">
+                                <i class="fas fa-pen text-xs"></i>
+                            </button>` : ''}
+                            <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 transition-all" 
+                                    title="Properties" onclick="openProperties('${p.key}', '${safeName}', '${safePathEnc}')">
+                                <i class="fas fa-cog text-xs"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
         }
 
         function updateStats() {
@@ -196,22 +259,30 @@
             counter.innerHTML = `<span class="opacity-50">SHOWN:</span> ${filteredPoints.length} <span class="mx-2 opacity-20">|</span> <span class="opacity-50">TOTAL:</span> ${allPoints.length}`;
         }
 
-        // Search Implementation
+        // ── Search ──────────────────────────────────────────────────────────
+        let searchTimeout = null;
         document.getElementById('assetSearch').addEventListener('input', (e) => {
-            const term = e.target.value.toLowerCase();
-            filteredPoints = allPoints.filter(p => 
-                (p.name || '').toLowerCase().includes(term) ||
-                (p.key || '').toLowerCase().includes(term) ||
-                (p.device || '').toLowerCase().includes(term) ||
-                (p.connection || '').toLowerCase().includes(term) ||
-                (p.path || '').toLowerCase().includes(term)
-            );
-            applySort();
-            renderTable();
-            updateStats();
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const term = e.target.value.toLowerCase();
+                filteredPoints = allPoints.filter(p => 
+                    (p.name || '').toLowerCase().includes(term) ||
+                    (p.key || '').toLowerCase().includes(term) ||
+                    (p.device || '').toLowerCase().includes(term) ||
+                    (p.connection || '').toLowerCase().includes(term) ||
+                    (p.path || '').toLowerCase().includes(term)
+                );
+                applySort();
+                // Reset scroll to top on new search
+                document.getElementById('scrollViewport').scrollTop = 0;
+                lastRangeStart = -1;
+                lastRangeEnd = -1;
+                scheduleRender();
+                updateStats();
+            }, 150);
         });
 
-        // Sorting Implementation
+        // ── Sorting ─────────────────────────────────────────────────────────
         document.querySelectorAll('th[data-sort]').forEach(th => {
             th.addEventListener('click', () => {
                 const field = th.dataset.sort;
@@ -228,7 +299,9 @@
                 icon.className = `fas fa-sort-${sortDir === 1 ? 'up' : 'down'} ml-1 text-cyan-400`;
                 
                 applySort();
-                renderTable();
+                lastRangeStart = -1;
+                lastRangeEnd = -1;
+                scheduleRender();
             });
         });
 
@@ -249,30 +322,44 @@
             });
         }
 
+        // ── Live value updates (DOM-patching, no full re-render) ─────────
         async function refreshLiveValues() {
             try {
                 const response = await fetch('?handler=Points');
                 const latest = await response.json();
                 
-                latest.forEach(p => {
-                    // Update in our master list so sort/search remains accurate
-                    const masterIdx = allPoints.findIndex(mp => mp.key === p.key);
-                    if (masterIdx !== -1) {
-                        allPoints[masterIdx].value = p.value;
-                        allPoints[masterIdx].lastUpdate = p.lastUpdate;
+                // Build a lookup map for O(1) updates
+                const latestMap = new Map();
+                latest.forEach(p => latestMap.set(p.key, p));
+
+                // Update master array
+                allPoints.forEach(mp => {
+                    const lp = latestMap.get(mp.key);
+                    if (lp) {
+                        mp.value = lp.value;
+                        mp.lastUpdate = lp.lastUpdate;
                     }
+                });
 
-                    // Update DOM directly for efficiency
-                    const valEl = document.querySelector(`.point-value[data-key="${p.key}"]`);
-                    if (valEl) valEl.textContent = formatNumber(p.value, 2);
-
-                    const tsEl = document.querySelector(`.last-update[data-key="${p.key}"]`);
-                    if (tsEl) tsEl.textContent = p.lastUpdate || '-';
+                // Patch visible DOM elements directly (no re-render needed)
+                document.querySelectorAll('.point-value[data-key]').forEach(el => {
+                    const lp = latestMap.get(el.dataset.key);
+                    if (lp) el.textContent = formatNumber(lp.value, 2);
+                });
+                document.querySelectorAll('.last-update[data-key]').forEach(el => {
+                    const lp = latestMap.get(el.dataset.key);
+                    if (lp) el.textContent = lp.lastUpdate || '-';
                 });
             } catch (e) {}
         }
 
+        // ── Scroll handler ──────────────────────────────────────────────────
+        document.getElementById('scrollViewport').addEventListener('scroll', () => {
+            scheduleRender();
+        }, { passive: true });
+
+        // ── Init ────────────────────────────────────────────────────────────
         loadPoints();
-        setInterval(refreshLiveValues, 2000);
+        setInterval(refreshLiveValues, 3000);
     </script>
 }
