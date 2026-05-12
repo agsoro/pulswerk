@@ -775,65 +775,80 @@ namespace Pulswerk.Drivers.BACnet
                 .ToList();
 
             Console.WriteLine($"    [BACnet]   Fetching properties for {candidatesList.Count} potential objects in batches...");
+            bool rpmSegFault = false;   // set once → skip batch RPM from then on
             for (int i = 0; i < candidatesList.Count; i += 50)
             {
                 var batch = candidatesList.Skip(i).Take(50).ToList();
-                try
+
+                // ── Attempt batch RPM (50 objects at a time) ──────────────────
+                if (!rpmSegFault)
                 {
-                    var readSpecs = batch.Select(oid => {
-                        var props = new List<BacnetPropertyReference> {
-                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue),
-                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
-                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
-                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
-                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
+                    try
+                    {
+                        var readSpecs = batch.Select(oid => {
+                            var props = new List<BacnetPropertyReference> {
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
+                            };
+                            if (extraProps != null)
+                            {
+                                foreach (var ep in extraProps)
+                                    props.Add(new BacnetPropertyReference((uint)ep, uint.MaxValue));
+                            }
+                            return new BacnetReadAccessSpecification(oid, props);
+                        }).ToList();
+
+                        if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
+                        {
+                            ProcessRpmResults(batchResults, allNames, allDescs, allUnits, allCommandable, allStateText, extraProps, extraResults);
+                            if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} objects fetched");
+                            continue;  // batch succeeded — next batch
+                        }
+                    }
+                    catch (Exception ex) when (ex.Message.Contains("SEGMENTATION"))
+                    {
+                        rpmSegFault = true;
+                        Console.WriteLine($"    [BACnet]   Device does not support segmentation — switching to single-object reads.");
+                    }
+                    catch { /* other RPM failure — fall through to single-object reads */ }
+                }
+
+                // ── Fallback: single-object RPM or individual reads ───────────
+                foreach (var oid in batch)
+                {
+                    try
+                    {
+                        // Try RPM for a single object first (most efficient fallback)
+                        var singleSpec = new List<BacnetReadAccessSpecification> {
+                            new BacnetReadAccessSpecification(oid, new List<BacnetPropertyReference> {
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
+                            })
                         };
                         if (extraProps != null)
                         {
                             foreach (var ep in extraProps)
-                                props.Add(new BacnetPropertyReference((uint)ep, uint.MaxValue));
+                                singleSpec[0].propertyReferences.Add(new BacnetPropertyReference((uint)ep, uint.MaxValue));
                         }
-                        return new BacnetReadAccessSpecification(oid, props);
-                    }).ToList();
 
-                    if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
-                    {
-                        foreach (var res in batchResults)
+                        if (client.ReadPropertyMultipleRequest(address, singleSpec, out IList<BacnetReadAccessResult> singleResults))
                         {
-                            var oid = res.objectIdentifier;
-                            if (res.values == null) continue;
-
-                            foreach (var pv in res.values)
-                            {
-                                if (pv.value == null || pv.value.Count == 0) continue;
-                                var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
-
-                                if (propId == BacnetPropertyIds.PROP_OBJECT_NAME)
-                                    allNames[oid] = pv.value[0].Value?.ToString() ?? "";
-                                else if (propId == BacnetPropertyIds.PROP_DESCRIPTION)
-                                    allDescs[oid] = pv.value[0].Value?.ToString() ?? "";
-                                else if (propId == BacnetPropertyIds.PROP_UNITS)
-                                    allUnits[oid] = UnitMapper.Format(pv.value[0].Value);
-                                else if (propId == BacnetPropertyIds.PROP_PRIORITY_ARRAY)
-                                    allCommandable.Add(oid);
-                                else if (propId == BacnetPropertyIds.PROP_STATE_TEXT)
-                                {
-                                    var list = new List<string>();
-                                    foreach (var v in pv.value) list.Add(v.Value?.ToString() ?? "");
-                                    allStateText[oid] = list;
-                                }
-                                else if (extraProps != null && extraProps.Contains(propId))
-                                {
-                                    if (!extraResults.TryGetValue(oid, out var dict))
-                                        extraResults[oid] = dict = new();
-                                    dict[propId] = pv.value.ToList();
-                                }
-                            }
+                            ProcessRpmResults(singleResults, allNames, allDescs, allUnits, allCommandable, allStateText, extraProps, extraResults);
+                            continue;
                         }
                     }
+                    catch { /* single RPM also failed — fall through to individual reads */ }
+
+                    // Ultimate fallback: individual ReadPropertyRequest calls
+                    ReadSingleProps(client, address, oid, allNames, allDescs, allUnits, allCommandable, extraProps, extraResults);
                 }
-                catch { }
-                if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} objects fetched");
+                if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} objects fetched (single-object mode)");
             }
 
             var result = new List<BacnetObjectInfo>();
@@ -882,6 +897,118 @@ namespace Pulswerk.Drivers.BACnet
                 Console.WriteLine($"    [BACnet]   Loaded state labels for {objectsWithLabels} objects.");
 
             return new DiscoveryResult(result, extraResults);
+        }
+
+        /// <summary>
+        /// Processes the results of a ReadPropertyMultiple response into the lookup dictionaries.
+        /// Shared between batch RPM and single-object RPM paths.
+        /// </summary>
+        private static void ProcessRpmResults(
+            IList<BacnetReadAccessResult> results,
+            Dictionary<BacnetObjectId, string> allNames,
+            Dictionary<BacnetObjectId, string> allDescs,
+            Dictionary<BacnetObjectId, string> allUnits,
+            HashSet<BacnetObjectId> allCommandable,
+            Dictionary<BacnetObjectId, List<string>> allStateText,
+            List<BacnetPropertyIds>? extraProps,
+            Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraResults)
+        {
+            foreach (var res in results)
+            {
+                var oid = res.objectIdentifier;
+                if (res.values == null) continue;
+
+                foreach (var pv in res.values)
+                {
+                    if (pv.value == null || pv.value.Count == 0) continue;
+                    var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
+
+                    if (propId == BacnetPropertyIds.PROP_OBJECT_NAME)
+                        allNames[oid] = pv.value[0].Value?.ToString() ?? "";
+                    else if (propId == BacnetPropertyIds.PROP_DESCRIPTION)
+                        allDescs[oid] = pv.value[0].Value?.ToString() ?? "";
+                    else if (propId == BacnetPropertyIds.PROP_UNITS)
+                        allUnits[oid] = UnitMapper.Format(pv.value[0].Value);
+                    else if (propId == BacnetPropertyIds.PROP_PRIORITY_ARRAY)
+                        allCommandable.Add(oid);
+                    else if (propId == BacnetPropertyIds.PROP_STATE_TEXT)
+                    {
+                        var list = new List<string>();
+                        foreach (var v in pv.value) list.Add(v.Value?.ToString() ?? "");
+                        allStateText[oid] = list;
+                    }
+                    else if (extraProps != null && extraProps.Contains(propId))
+                    {
+                        if (!extraResults.TryGetValue(oid, out var dict))
+                            extraResults[oid] = dict = new();
+                        dict[propId] = pv.value.ToList();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Ultimate fallback: reads core properties one-by-one via individual ReadPropertyRequest calls.
+        /// Used when both batch and single-object RPM fail (e.g. device doesn't support RPM at all).
+        /// </summary>
+        private static void ReadSingleProps(
+            BacnetClient client, BacnetAddress address, BacnetObjectId oid,
+            Dictionary<BacnetObjectId, string> allNames,
+            Dictionary<BacnetObjectId, string> allDescs,
+            Dictionary<BacnetObjectId, string> allUnits,
+            HashSet<BacnetObjectId> allCommandable,
+            List<BacnetPropertyIds>? extraProps,
+            Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraResults)
+        {
+            // PROP_OBJECT_NAME
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_OBJECT_NAME, out var vals) && vals.Count > 0)
+                    allNames[oid] = vals[0].Value?.ToString() ?? "";
+            }
+            catch { }
+
+            // PROP_DESCRIPTION
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_DESCRIPTION, out var vals) && vals.Count > 0)
+                    allDescs[oid] = vals[0].Value?.ToString() ?? "";
+            }
+            catch { }
+
+            // PROP_UNITS
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_UNITS, out var vals) && vals.Count > 0)
+                    allUnits[oid] = UnitMapper.Format(vals[0].Value);
+            }
+            catch { }
+
+            // PROP_PRIORITY_ARRAY (check for commandable)
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_PRIORITY_ARRAY, out _))
+                    allCommandable.Add(oid);
+            }
+            catch { }
+
+            // Extra properties (vendor-specific)
+            if (extraProps != null)
+            {
+                foreach (var ep in extraProps)
+                {
+                    try
+                    {
+                        if (client.ReadPropertyRequest(address, oid, ep, out var vals) && vals.Count > 0)
+                        {
+                            if (!extraResults.TryGetValue(oid, out var dict))
+                                extraResults[oid] = dict = new();
+                            dict[ep] = vals.ToList();
+                        }
+                    }
+                    catch { }
+                }
+            }
         }
 
         protected virtual List<BacnetPropertyIds> GetExtraDiscoveryProperties() => new();

@@ -110,6 +110,10 @@ namespace Pulswerk.Drivers
             else
             {
                 s = raw.ToString()?.ToLowerInvariant() ?? "";
+                // BACnet error responses (e.g., "error_class_property: error_code_unknown_property")
+                // occur when the object type doesn't support PROP_UNITS — treat as empty
+                if (s.StartsWith("error_class") || string.IsNullOrWhiteSpace(s))
+                    return "";
             }
 
             return Map(s);
