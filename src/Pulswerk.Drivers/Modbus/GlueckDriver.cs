@@ -56,7 +56,7 @@ namespace Pulswerk.Drivers.Modbus
                 // Read inputs
                 ushort utilLimitRaw = ModbusConnection.ReadUInt16(master, slaveId, REG_UTILITY_LIMIT_IN, input: true);
                 uint feedbackLimitRaw = ModbusConnection.ReadUInt32(master, slaveId, REG_FEEDBACK_LIMIT_IN, swapped: true, input: true);
-                uint powerRaw = ModbusConnection.ReadUInt32(master, slaveId, REG_GENERATION_POWER_IN, swapped: true, input: true);
+                int powerRaw = ModbusConnection.ReadInt32(master, slaveId, REG_GENERATION_POWER_IN, swapped: true, input: true);
 
                 // Handle Watchdog (every minute)
                 if ((DateTime.UtcNow - _lastWatchdogWrite).TotalMinutes >= 1.0)
@@ -77,7 +77,7 @@ namespace Pulswerk.Drivers.Modbus
                 {
                     [TelemetryKeys.UtilityLimitPct] = (double)utilLimitRaw,
                     [TelemetryKeys.PowerLimitPct] = (double)feedbackLimitRaw,
-                    [TelemetryKeys.PowerKw] = Math.Round(powerRaw / 1000.0, 3) // Assuming Watts to kW
+                    [TelemetryKeys.PowerKw] = (double)powerRaw
                 };
             });
         }
