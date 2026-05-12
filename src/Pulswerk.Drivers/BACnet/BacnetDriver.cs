@@ -669,8 +669,13 @@ namespace Pulswerk.Drivers.BACnet
             var result = new List<BacnetObjectInfo>();
             int objectsWithLabels = 0;
 
+            int processed = 0;
             foreach (var oid in candidates)
             {
+                processed++;
+                if (processed % 50 == 0)
+                    Console.WriteLine($"    [BACnet]   Processing objects... {processed}/{candidates.Count}");
+
                 if (result.Count >= cap) break;
 
                 // Include DEVICE object so we can monitor system status etc.

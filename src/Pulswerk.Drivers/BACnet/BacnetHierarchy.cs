@@ -183,8 +183,12 @@ namespace Pulswerk.Drivers.BACnet
             string indent = new string(' ', depth * 2 + 4);
             Console.WriteLine($"{indent}[{objectName}]  ({subordinates.Count} children)");
 
+            int childIdx = 0;
             foreach (var childId in subordinates)
             {
+                childIdx++;
+                if (subordinates.Count > 20 && childIdx % 10 == 0)
+                    Console.WriteLine($"{indent}  ... processing child {childIdx}/{subordinates.Count}");
                 try
                 {
                     if (childId.type == BacnetObjectTypes.OBJECT_STRUCTURED_VIEW)
@@ -382,6 +386,7 @@ namespace Pulswerk.Drivers.BACnet
             // 3. Large lists: reliable index read
             for (uint i = 1; i <= count; i++)
             {
+                if (i % 50 == 0) Console.WriteLine($"  [Hierarchy] ... reading list index {i}/{count}");
                 try
                 {
                     if (client.ReadPropertyRequest(address, targetObj,
@@ -451,6 +456,7 @@ namespace Pulswerk.Drivers.BACnet
             // 3. Reliable index-based read
             for (uint i = 1; i <= count; i++)
             {
+                if (count > 50 && i % 50 == 0) Console.WriteLine($"  [Hierarchy] ... reading subordinate {i}/{count}");
                 try
                 {
                     if (client.ReadPropertyRequest(address, viewId,

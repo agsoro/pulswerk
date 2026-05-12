@@ -240,9 +240,11 @@ namespace Pulswerk.Host
             {
                 var capturedDevice = device;
                 var capturedConn = connections[device.ConnectionId];
-                int intervalMs = capturedDevice.PollIntervalSeconds.HasValue
-                                    ? capturedDevice.PollIntervalSeconds.Value * 1000
-                                    : globalIntervalMs;
+                int defaultIntervalSeconds = (device.DeviceType == "bacnet" || device.DeviceType == "deziko") 
+                                               ? 120 
+                                               : cfg.Polling.IntervalSeconds;
+
+                int intervalMs = (capturedDevice.PollIntervalSeconds ?? defaultIntervalSeconds) * 1000;
 
                 _ = Task.Run(async () =>
                 {

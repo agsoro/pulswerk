@@ -112,9 +112,9 @@ namespace Pulswerk.Core
         /// <summary>
         /// Per-device poll interval in seconds. Overrides the global polling.intervalSeconds.
         /// Controls how often non-COV / fallback-polled values are read from the device.
-        /// When omitted, the global default is used.
+        /// Defaults: 120s for BACnet (COV-optimized), 30s or global interval for others.
         /// </summary>
-        [property: JsonPropertyName("pollIntervalSeconds")] int? PollIntervalSeconds = 30
+        [property: JsonPropertyName("pollIntervalSeconds")] int? PollIntervalSeconds = null
     )
     {
         public string AccessToken =>
