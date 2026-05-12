@@ -200,64 +200,20 @@ namespace Pulswerk.Drivers.BACnet
                     }
                     else if (childId.type != BacnetObjectTypes.OBJECT_DEVICE)
                     {
-                        // Data-point leaf
-                        var leaf = ReadLeafNode(client, address, childId, visited);
-                        if (leaf is not null)
-                            node.Children.Add(leaf);
+                        // Data-point leaf: return a stub node. 
+                        // The details (FriendlyName, Units, etc.) will be filled in from 
+                        // the discovery cache by the driver's DTO converter.
+                        node.Children.Add(new DezikoNode
+                        {
+                            ObjectId = childId,
+                            IsView = false
+                        });
                     }
                 }
                 catch { /* skip broken child */ }
             }
 
             return node;
-        }
-
-        static DezikoNode? ReadLeafNode(
-            BacnetClient client, BacnetAddress address,
-            BacnetObjectId oid,
-            HashSet<BacnetObjectId> visited)
-        {
-            if (!visited.Add(oid)) return null;
-
-            try
-            {
-                string objectName = ReadStringProp(client, address, oid,
-                                                   BacnetPropertyIds.PROP_OBJECT_NAME)
-                                    ?? oid.ToString();
-
-                string description = ReadStringProp(client, address, oid,
-                                                    BacnetPropertyIds.PROP_DESCRIPTION)
-                                     ?? "";
-
-                string profileName = ReadStringProp(client, address, oid,
-                                                    PropProfileName)
-                                     ?? "";
-
-                // PROP_UNITS is an enum value – read as raw and convert to string
-                string units = ReadUnitsProp(client, address, oid);
-
-                ReadObjectIdProp(client, address, oid, PropTrendLogReference, out var logId);
-
-                var namingPath = ReadStringListProp(client, address, oid, PropNamingPath);
-                string nameExt = ReadStringProp(client, address, oid, PropNameExtension) ?? "";
-
-                return new DezikoNode
-                {
-                    ObjectId = oid,
-                    ObjectName = objectName,
-                    NamingPath = namingPath,
-                    NameExtension = nameExt,
-                    Description = description,
-                    ProfileName = profileName,
-                    Units = units,
-                    IsView = false,
-                    LogObjectId = logId,
-                };
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         // ── Property read helpers ─────────────────────────────────────────────

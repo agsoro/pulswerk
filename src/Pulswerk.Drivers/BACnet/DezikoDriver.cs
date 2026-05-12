@@ -33,25 +33,54 @@ namespace Pulswerk.Drivers.BACnet
         protected const BacnetPropertyIds PropTrendLogReference = (BacnetPropertyIds)4452;
 
         // ── Proprietary property enrichment ──────────────────────────────────
+        protected override List<BacnetPropertyIds> GetExtraDiscoveryProperties() => new()
+        {
+            PropNameExtension,
+            PropNamingPath,
+            PropCategory4941,
+            PropTrendLogReference
+        };
 
         /// <inheritdoc />
         protected override BacnetObjectInfo EnrichObjectInfo(
             BacnetClient client, BacnetAddress address,
-            BacnetObjectInfo info)
+            BacnetObjectInfo info,
+            Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraProps)
         {
-            // Read Deziko proprietary properties
-            string nameExt = ReadStringProp(client, address, info.ObjectId, PropNameExtension);
-            var namingPath = ReadStringListProp(client, address, info.ObjectId, PropNamingPath);
+            if (!extraProps.TryGetValue(info.ObjectId, out var props))
+                return info;
 
-            ReadIntProp(client, address, info.ObjectId, PropCategory4941, out int category);
-            ReadObjectIdProp(client, address, info.ObjectId, PropTrendLogReference, out var logId);
+            string nameExt = info.NameExtension;
+            if (props.TryGetValue(PropNameExtension, out var vals1) && vals1.Count > 0)
+                nameExt = vals1[0].Value?.ToString() ?? "";
+
+            var namingPath = info.NamingPath;
+            if (props.TryGetValue(PropNamingPath, out var vals2))
+            {
+                namingPath = new List<string>();
+                foreach (var v in vals2)
+                {
+                    string? s = v.Value?.ToString();
+                    if (!string.IsNullOrEmpty(s)) namingPath.Add(s);
+                }
+            }
+
+            int category = info.Category;
+            if (props.TryGetValue(PropCategory4941, out var vals3) && vals3.Count > 0)
+                category = Convert.ToInt32(vals3[0].Value);
+
+            BacnetObjectId? logId = info.LogObjectId;
+            if (props.TryGetValue(PropTrendLogReference, out var vals4) && vals4.Count > 0)
+            {
+                if (vals4[0].Value is BacnetObjectId oid) logId = oid;
+            }
 
             return info with
             {
                 NameExtension = nameExt,
                 NamingPath = namingPath,
                 Category = category,
-                LogObjectId = logId ?? info.LogObjectId  // keep standard trend log ref if no proprietary one
+                LogObjectId = logId
             };
         }
 

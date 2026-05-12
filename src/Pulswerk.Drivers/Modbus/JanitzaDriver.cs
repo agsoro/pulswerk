@@ -22,9 +22,9 @@ namespace Pulswerk.Drivers.Modbus
 
     class JanitzaDriver : BaseModbusDriver
     {
-        const ushort REG_TOTAL_ACTIVE_POWER_W = 19020;
-        const ushort REG_IMPORT_ENERGY_WH = 19060;
-        const ushort REG_EXPORT_ENERGY_WH = 19062;
+        const ushort REG_POWER_SUM_W = 19026;
+        const ushort REG_IMPORT_SUM_WH = 19062;
+        const ushort REG_EXPORT_SUM_WH = 19076;
 
         public override string DriverName => "Janitza";
 
@@ -34,8 +34,6 @@ namespace Pulswerk.Drivers.Modbus
             TelemetryKeys.EnergyExportKwh
         };
 
-
-
         public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
@@ -43,14 +41,16 @@ namespace Pulswerk.Drivers.Modbus
 
             return ModbusConnection.WithMaster(conn, master =>
             {
-                var pwRegs = master.ReadHoldingRegisters(slaveId, REG_TOTAL_ACTIVE_POWER_W, 2);
-                var enRegs = master.ReadHoldingRegisters(slaveId, REG_IMPORT_ENERGY_WH, 4);
+                // Read individually since registers are non-contiguous in this model
+                float powerW = ModbusConnection.ReadFloat32(master, slaveId, REG_POWER_SUM_W);
+                float importWh = ModbusConnection.ReadFloat32(master, slaveId, REG_IMPORT_SUM_WH);
+                float exportWh = ModbusConnection.ReadFloat32(master, slaveId, REG_EXPORT_SUM_WH);
 
                 return new Telemetry
                 {
-                    [TelemetryKeys.PowerKw] = Math.Round(ModbusConnection.RegsToFloat(pwRegs, 0) / 1000.0, 3),
-                    [TelemetryKeys.EnergyImportKwh] = Math.Round(ModbusConnection.RegsToFloat(enRegs, 0) / 1000.0, 3),
-                    [TelemetryKeys.EnergyExportKwh] = Math.Round(ModbusConnection.RegsToFloat(enRegs, 2) / 1000.0, 3),
+                    [TelemetryKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
+                    [TelemetryKeys.EnergyImportKwh] = Math.Round(importWh / 1000.0, 3),
+                    [TelemetryKeys.EnergyExportKwh] = Math.Round(exportWh / 1000.0, 3),
                 };
             });
         }

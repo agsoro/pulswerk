@@ -147,6 +147,11 @@ namespace Pulswerk.Drivers.BACnet
     // =========================================================================
     //  Discovered object descriptor (cached after discovery)
     // =========================================================================
+    public record DiscoveryResult(
+        List<BacnetObjectInfo> Objects,
+        Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> ExtraProperties
+    );
+
     public record BacnetObjectInfo(
         string TechDeviceId,
         uint DeviceId,
@@ -155,6 +160,7 @@ namespace Pulswerk.Drivers.BACnet
         List<string> NamingPath,     // friendly path segments (vendor-specific)
         string NameExtension = "",   // friendly alias (vendor-specific)
         string Description = "",     // from PROP_DESCRIPTION
+        string Units = "",           // from PROP_UNITS
         string ProfileName = "",     // from PROP_PROFILE_NAME (168)
         bool Commandable = false,    // true when PROP_PRIORITY_ARRAY present
         int Category = -1,           // vendor-specific category
@@ -330,10 +336,12 @@ namespace Pulswerk.Drivers.BACnet
                     Interlocked.Increment(ref _busyCount);
                     Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
                     var all = DiscoverObjects(client, address, device.DeviceId.Value);
-                    var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value);
+                    var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value, GetExtraDiscoveryProperties());
+                    var filtered = resultDict.Objects;
 
                     // Enrich objects with vendor-specific properties (override in subclass)
-                    filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
+                    // Now uses the extra properties already fetched in the batch read
+                    filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj, resultDict.ExtraProperties)).ToList();
 
                     // ── Resolve Trend Log associations ───────────────────────────
                     // Standard BACnet: TrendLog objects reference their monitored
@@ -692,14 +700,15 @@ namespace Pulswerk.Drivers.BACnet
         }
 
         // =====================================================================
-        //  Filter – reads PROP_OBJECT_NAME / PROP_DESCRIPTION, applies rules,
-        //           probes PROP_PRIORITY_ARRAY to detect commandable objects
+        //  Filter – reads properties, applies rules, caches results
         // =====================================================================
-        protected static List<BacnetObjectInfo> ApplyFilter(
+        protected static DiscoveryResult ApplyFilter(
             BacnetClient client, BacnetAddress address,
             List<BacnetObjectId> candidates, BacnetFilterConfig filter,
-            string techDeviceId, uint deviceInstanceId)
+            string techDeviceId, uint deviceInstanceId,
+            List<BacnetPropertyIds>? extraProps = null)
         {
+            var extraResults = new Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>>();
             // Build type allowlist (null = accept all)
             HashSet<BacnetObjectTypes>? allowedTypes = null;
             if (filter.ObjectTypes is { Count: > 0 })
@@ -717,156 +726,137 @@ namespace Pulswerk.Drivers.BACnet
             Regex? excludeNameRx = filter.ExcludeNamePattern is not null ? new Regex(filter.ExcludeNamePattern, RegexOptions.IgnoreCase) : null;
             Regex? includeDescRx = filter.DescriptionPattern is not null ? new Regex(filter.DescriptionPattern, RegexOptions.IgnoreCase) : null;
 
-            bool needName = true; // Always read names for consistent telemetry keys
-            bool needDesc = includeDescRx != null;
-
             int cap = (filter.MaxObjects is > 0) ? filter.MaxObjects.Value : int.MaxValue;
 
-            // Optimization: Read names in batches using ReadPropertyMultiple
             var allNames = new Dictionary<BacnetObjectId, string>();
-            if (needName || needDesc)
+            var allDescs = new Dictionary<BacnetObjectId, string>();
+            var allUnits = new Dictionary<BacnetObjectId, string>();
+            var allCommandable = new HashSet<BacnetObjectId>();
+            var allStateText = new Dictionary<BacnetObjectId, List<string>>();
+
+            var candidatesList = candidates
+                .Where(oid => allowedTypes == null || allowedTypes.Contains(oid.type))
+                .Where(oid => filter.InstanceRange == null || (oid.instance >= filter.InstanceRange.Min && oid.instance <= filter.InstanceRange.Max))
+                .ToList();
+
+            Console.WriteLine($"    [BACnet]   Fetching properties for {candidatesList.Count} potential objects in batches...");
+            for (int i = 0; i < candidatesList.Count; i += 50)
             {
-                var candidatesList = candidates
-                    .Where(oid => allowedTypes == null || allowedTypes.Contains(oid.type))
-                    .Where(oid => filter.InstanceRange == null || (oid.instance >= filter.InstanceRange.Min && oid.instance <= filter.InstanceRange.Max))
-                    .ToList();
-
-                Console.WriteLine($"    [BACnet]   Fetching names for {candidatesList.Count} potential objects in batches...");
-                for (int i = 0; i < candidatesList.Count; i += 50)
+                var batch = candidatesList.Skip(i).Take(50).ToList();
+                try
                 {
-                    var batch = candidatesList.Skip(i).Take(50).ToList();
-                    try
-                    {
-                        var readSpecs = batch.Select(oid => new BacnetReadAccessSpecification(oid, new List<BacnetPropertyReference> {
-                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue)
-                        })).ToList();
-
-                        if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
+                    var readSpecs = batch.Select(oid => {
+                        var props = new List<BacnetPropertyReference> {
+                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue),
+                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
+                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
+                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
+                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
+                        };
+                        if (extraProps != null)
                         {
-                            for (int j = 0; j < batchResults.Count && j < batch.Count; j++)
-                            {
-                                var res = batchResults[j];
-                                var oid = batch[j];
-                                if (res.values == null) continue;
+                            foreach (var ep in extraProps)
+                                props.Add(new BacnetPropertyReference((uint)ep, uint.MaxValue));
+                        }
+                        return new BacnetReadAccessSpecification(oid, props);
+                    }).ToList();
 
-                                foreach (var pv in res.values)
+                    if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
+                    {
+                        foreach (var res in batchResults)
+                        {
+                            var oid = res.objectIdentifier;
+                            if (res.values == null) continue;
+
+                            foreach (var pv in res.values)
+                            {
+                                if (pv.value == null || pv.value.Count == 0) continue;
+                                var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
+
+                                if (propId == BacnetPropertyIds.PROP_OBJECT_NAME)
+                                    allNames[oid] = pv.value[0].Value?.ToString() ?? "";
+                                else if (propId == BacnetPropertyIds.PROP_DESCRIPTION)
+                                    allDescs[oid] = pv.value[0].Value?.ToString() ?? "";
+                                else if (propId == BacnetPropertyIds.PROP_UNITS)
+                                    allUnits[oid] = UnitMapper.Format(pv.value[0].Value);
+                                else if (propId == BacnetPropertyIds.PROP_PRIORITY_ARRAY)
+                                    allCommandable.Add(oid);
+                                else if (propId == BacnetPropertyIds.PROP_STATE_TEXT)
                                 {
-                                    if (pv.value != null && pv.value.Count > 0)
-                                    {
-                                        allNames[oid] = pv.value[0].Value?.ToString() ?? oid.ToString();
-                                    }
+                                    var list = new List<string>();
+                                    foreach (var v in pv.value) list.Add(v.Value?.ToString() ?? "");
+                                    allStateText[oid] = list;
+                                }
+                                else if (extraProps != null && extraProps.Contains(propId))
+                                {
+                                    if (!extraResults.TryGetValue(oid, out var dict))
+                                        extraResults[oid] = dict = new();
+                                    dict[propId] = pv.value.ToList();
                                 }
                             }
                         }
                     }
-                    catch { /* fallback to individual reads in the main loop if RPM fails */ }
-                    if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} names fetched");
                 }
+                catch { }
+                if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} objects fetched");
             }
 
             var result = new List<BacnetObjectInfo>();
             int objectsWithLabels = 0;
-            int processed = 0;
 
-            foreach (var oid in candidates)
+            foreach (var oid in candidatesList)
             {
-                processed++;
-                if (processed % 100 == 0 && candidates.Count > 500)
-                    Console.WriteLine($"    [BACnet]   Filtering objects... {processed}/{candidates.Count}");
-
                 if (result.Count >= cap) break;
 
-                // 1. Type allowlist (no network I/O)
-                if (allowedTypes != null && !allowedTypes.Contains(oid.type)) continue;
-
-                // 2. Instance range (no network I/O)
-                if (filter.InstanceRange is not null)
-                    if (oid.instance < filter.InstanceRange.Min ||
-                        oid.instance > filter.InstanceRange.Max) continue;
-
-                // 3. Name filters – use cached name or read individually if missing
-                if (!allNames.TryGetValue(oid, out string? objectName))
-                {
-                    objectName = needName || needDesc ? ReadObjectName(client, address, oid) : oid.ToString();
-                }
-
+                if (!allNames.TryGetValue(oid, out string? objectName)) objectName = oid.ToString();
                 if (includeNameRx != null && !includeNameRx.IsMatch(objectName)) continue;
                 if (excludeNameRx != null && excludeNameRx.IsMatch(objectName)) continue;
 
-                // 4. Description filter
-                string description = "";
-                if (needDesc)
-                {
-                    description = ReadDescription(client, address, oid);
-                    if (!includeDescRx!.IsMatch(description)) continue;
-                }
+                if (!allDescs.TryGetValue(oid, out string? description)) description = "";
+                if (includeDescRx != null && !includeDescRx.IsMatch(description)) continue;
 
-                // 5. Commandability probe:
-                //    BACnet-standard: only objects with PROP_PRIORITY_ARRAY are commandable.
-                //    We only probe output/value types (AO, AV, BO, BV, MO, MV) to
-                //    avoid unnecessary network I/O on sensor inputs.
-                bool commandable = false;
-                if (IsCommandableType(oid.type))
-                {
-                    try
-                    {
-                        commandable = client.ReadPropertyRequest(
-                            address, oid,
-                            BacnetPropertyIds.PROP_PRIORITY_ARRAY,
-                            out IList<BacnetValue> _);
-                    }
-                    catch { /* device may reject – treat as non-commandable */ }
-                }
+                allUnits.TryGetValue(oid, out string? units);
+                bool commandable = allCommandable.Contains(oid);
+                allStateText.TryGetValue(oid, out List<string>? stateText);
 
-                // 6. Vendor-specific properties (populated by subclasses via EnrichObjectInfo)
-                string nameExt = "";
-                var namingPath = new List<string>();
-                int category = -1;
-                BacnetObjectId? logId = null;
-
-                // 9. Profile Name (standard 168)
-                string profileName = ReadStringProp(client, address, oid, PropProfileName) ?? "";
-
-                // 10. State Text (Standard 110) for Multi-State objects
-                List<string>? stateText = null;
-                if (IsMultiState(oid.type))
-                {
-                    stateText = ReadStringListProp(client, address, oid, BacnetPropertyIds.PROP_STATE_TEXT);
-                }
-                // 11. Inactive/Active Text (Standard 46/4) for Binary objects
-                else if (IsBinary(oid.type))
+                // Fallback for binary state text if not in batch
+                if (stateText == null && IsBinary(oid.type))
                 {
                     string inactive = ReadStringProp(client, address, oid, BacnetPropertyIds.PROP_INACTIVE_TEXT);
                     string active = ReadStringProp(client, address, oid, BacnetPropertyIds.PROP_ACTIVE_TEXT);
                     if (!string.IsNullOrEmpty(inactive) || !string.IsNullOrEmpty(active))
-                    {
-                        stateText = new List<string> {
-                            string.IsNullOrEmpty(inactive) ? "0" : inactive,
-                            string.IsNullOrEmpty(active) ? "1" : active
-                        };
-                    }
+                        stateText = new List<string> { string.IsNullOrEmpty(inactive) ? "0" : inactive, string.IsNullOrEmpty(active) ? "1" : active };
                 }
 
                 if (stateText != null && stateText.Count > 0) objectsWithLabels++;
 
-                // 12. Limits and Thresholds (Standard 45, 59, 25, 52)
-                double? highLimit = null, lowLimit = null, deadband = null;
-                uint? limitEnable = null;
-                if (IsAnalog(oid.type))
-                {
-                    ReadDoubleProp(client, address, oid, BacnetPropertyIds.PROP_HIGH_LIMIT, out highLimit);
-                    ReadDoubleProp(client, address, oid, BacnetPropertyIds.PROP_LOW_LIMIT, out lowLimit);
-                    ReadDoubleProp(client, address, oid, BacnetPropertyIds.PROP_DEADBAND, out deadband);
-                    ReadUintProp(client, address, oid, BacnetPropertyIds.PROP_LIMIT_ENABLE, out limitEnable);
-                }
-
-                result.Add(new BacnetObjectInfo(techDeviceId, deviceInstanceId, oid, objectName, namingPath, nameExt, description, profileName, commandable, category, logId, stateText, highLimit, lowLimit, deadband, limitEnable));
+                result.Add(new BacnetObjectInfo(
+                    TechDeviceId: techDeviceId,
+                    DeviceId: deviceInstanceId,
+                    ObjectId: oid,
+                    ObjectName: objectName,
+                    NamingPath: new List<string>(),
+                    Description: description ?? "",
+                    Units: units ?? "",
+                    Commandable: commandable,
+                    StateText: stateText
+                ));
             }
 
             if (objectsWithLabels > 0)
                 Console.WriteLine($"    [BACnet]   Loaded state labels for {objectsWithLabels} objects.");
 
-            return result;
+            return new DiscoveryResult(result, extraResults);
+        }
+
+        protected virtual List<BacnetPropertyIds> GetExtraDiscoveryProperties() => new();
+
+        protected virtual BacnetObjectInfo EnrichObjectInfo(
+            BacnetClient client, BacnetAddress address,
+            BacnetObjectInfo info,
+            Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraProps)
+        {
+            return info;
         }
 
         static bool IsAnalog(BacnetObjectTypes t) => t is
@@ -1824,10 +1814,11 @@ namespace Pulswerk.Drivers.BACnet
         {
             Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
             var all = DiscoverObjects(client, address, device.DeviceId!.Value);
-            var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId!.Value);
+            var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId!.Value, GetExtraDiscoveryProperties());
+            var filtered = resultDict.Objects;
 
             // Enrich objects with vendor-specific properties (override in subclass)
-            filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
+            filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj, resultDict.ExtraProperties)).ToList();
 
             // Resolve Trend Log associations (standard BACnet prop 132)
             var trendLogMap = ResolveTrendLogMap(client, address, all);
@@ -2309,13 +2300,25 @@ namespace Pulswerk.Drivers.BACnet
                 }
                 else
                 {
-                    var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(child.ObjectName)}";
-                    var telemetryKey = $"{keyPrefix}_value";
-
+                    string objectName = child.ObjectName;
+                    string friendlyName = child.FriendlyName;
+                    string description = child.Description;
+                    string units = child.Units;
                     bool isWritable = false;
                     List<string>? enumValues = null;
+
                     if (objectLookup.TryGetValue(child.ObjectId, out var info))
                     {
+                        // Use enriched info from discovery cache
+                        objectName = info.ObjectName;
+                        description = info.Description;
+                        units = info.NamingPath?.Count > 0 ? "" : ""; // handled by UnitMapper usually
+
+                        // Reconstruct friendly name from NamingPath/NameExtension if available in cache
+                        if (info.NamingPath?.Count > 0) friendlyName = info.NamingPath.Last();
+                        else if (!string.IsNullOrEmpty(info.NameExtension)) friendlyName = info.NameExtension;
+                        else friendlyName = string.IsNullOrWhiteSpace(info.ObjectName) ? child.ObjectId.ToString() : info.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last();
+
                         isWritable = info.Commandable;
 
                         bool isMultiState = child.ObjectId.type is
@@ -2334,13 +2337,16 @@ namespace Pulswerk.Drivers.BACnet
                             enumValues = info.StateText;
                     }
 
+                    var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(objectName)}";
+                    var telemetryKey = $"{keyPrefix}_value";
+
                     var pDto = new AssetPointDto
                     {
                         Id = $"{techDeviceId}_{child.ObjectId}",
-                        Name = child.FriendlyName,
-                        FullName = child.ObjectName,
-                        Description = child.Description,
-                        Units = child.Units,
+                        Name = friendlyName,
+                        FullName = objectName,
+                        Description = description,
+                        Units = units,
                         Type = child.ObjectId.type.ToString(),
                         Key = telemetryKey,
                         IsWritable = isWritable,
