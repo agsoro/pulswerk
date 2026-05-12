@@ -2303,12 +2303,20 @@ namespace Pulswerk.Drivers.BACnet
             {
                 // ── Normal path: convert Structured View tree to DTO ─────────
                 var referencedIds = new HashSet<BacnetObjectId>();
+                var stats = new TreeConversionStats();
                 foreach (var rootNode in tree!.Roots)
                 {
-                    var dto = ConvertNodeToDto(rootNode, device.Id, device.DeviceId!.Value, lookup, new List<PathSegmentDto>());
+                    var dto = ConvertNodeToDto(rootNode, device.Id, device.DeviceId!.Value, lookup, new List<PathSegmentDto>(), stats);
                     root.Children.Add(dto);
                     CollectReferencedIds(rootNode, referencedIds);
                 }
+
+                Console.WriteLine(
+                    $"  [Hierarchy] {device.Name}: tree conversion — " +
+                    $"leaves={stats.TotalTreeLeaves}, " +
+                    $"resolved={stats.ResolvedFromCache}, " +
+                    $"not-in-cache={stats.NotInCache}, " +
+                    $"discovered={discovered.Count}");
 
                 // ── Orphan handling: items in CachedObjects not in the tree ──
                 var orphaned = discovered
@@ -2477,7 +2485,11 @@ namespace Pulswerk.Drivers.BACnet
             _ => "Other Objects"
         };
 
-        private AssetNodeDto ConvertNodeToDto(DezikoNode node, string techDeviceId, uint deviceInstanceId, Dictionary<BacnetObjectId, BacnetObjectInfo> objectLookup, List<PathSegmentDto> currentPath)
+        private AssetNodeDto ConvertNodeToDto(
+            DezikoNode node, string techDeviceId, uint deviceInstanceId,
+            Dictionary<BacnetObjectId, BacnetObjectInfo> objectLookup,
+            List<PathSegmentDto> currentPath,
+            TreeConversionStats stats)
         {
             string uniqueId = $"{techDeviceId}_{node.ObjectId}";
             var dto = new AssetNodeDto
@@ -2495,30 +2507,28 @@ namespace Pulswerk.Drivers.BACnet
             {
                 if (child.IsView)
                 {
-                    dto.Children.Add(ConvertNodeToDto(child, techDeviceId, deviceInstanceId, objectLookup, newPath));
+                    dto.Children.Add(ConvertNodeToDto(child, techDeviceId, deviceInstanceId, objectLookup, newPath, stats));
                 }
                 else
                 {
-                    string objectName = child.ObjectName;
-                    string friendlyName = child.FriendlyName;
-                    string description = child.Description;
-                    string units = child.Units;
-                    bool isWritable = false;
-                    List<string>? enumValues = null;
+                    stats.TotalTreeLeaves++;
 
                     if (objectLookup.TryGetValue(child.ObjectId, out var info))
                     {
-                        // Use enriched info from discovery cache
-                        objectName = info.ObjectName;
-                        description = info.Description;
-                        units = info.NamingPath?.Count > 0 ? "" : ""; // handled by UnitMapper usually
+                        // ── Resolved from discovery cache ────────────────────
+                        stats.ResolvedFromCache++;
 
-                        // Reconstruct friendly name from NamingPath/NameExtension if available in cache
+                        string objectName = info.ObjectName;
+                        string friendlyName;
                         if (info.NamingPath?.Count > 0) friendlyName = info.NamingPath.Last();
                         else if (!string.IsNullOrEmpty(info.NameExtension)) friendlyName = info.NameExtension;
-                        else friendlyName = string.IsNullOrWhiteSpace(info.ObjectName) ? child.ObjectId.ToString() : info.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last();
+                        else friendlyName = string.IsNullOrWhiteSpace(info.ObjectName)
+                            ? child.ObjectId.ToString()
+                            : info.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last();
 
-                        isWritable = info.Commandable;
+                        string description = info.Description;
+                        bool isWritable = info.Commandable;
+                        List<string>? enumValues = null;
 
                         bool isMultiState = child.ObjectId.type is
                             BacnetObjectTypes.OBJECT_MULTI_STATE_INPUT or
@@ -2534,30 +2544,66 @@ namespace Pulswerk.Drivers.BACnet
                             enumValues = info.StateText;
                         else if (isBinary && info.StateText?.Count >= 2)
                             enumValues = info.StateText;
+
+                        var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(objectName)}";
+                        var telemetryKey = $"{keyPrefix}_value";
+
+                        dto.Points.Add(new AssetPointDto
+                        {
+                            Id = $"{techDeviceId}_{child.ObjectId}",
+                            Name = friendlyName,
+                            FullName = objectName,
+                            Description = description,
+                            Units = "",
+                            Type = child.ObjectId.type.ToString(),
+                            Key = telemetryKey,
+                            IsWritable = isWritable,
+                            EnumValues = enumValues,
+                            ParentId = uniqueId,
+                            ParentPath = newPath
+                        });
                     }
-
-                    var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(objectName)}";
-                    var telemetryKey = $"{keyPrefix}_value";
-
-                    var pDto = new AssetPointDto
+                    else
                     {
-                        Id = $"{techDeviceId}_{child.ObjectId}",
-                        Name = friendlyName,
-                        FullName = objectName,
-                        Description = description,
-                        Units = units,
-                        Type = child.ObjectId.type.ToString(),
-                        Key = telemetryKey,
-                        IsWritable = isWritable,
-                        EnumValues = enumValues,
-                        ParentId = uniqueId,
-                        ParentPath = newPath
-                    };
-                    dto.Points.Add(pDto);
+                        // ── Not in CachedObjects (filtered out during discovery) ─
+                        // The tree references this object but discovery didn't keep it.
+                        // Still create a minimal point using the stub's ObjectId
+                        // so the item is at least visible (with "---" value).
+                        stats.NotInCache++;
+
+                        string stubName = !string.IsNullOrWhiteSpace(child.ObjectName)
+                            ? child.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last()
+                            : child.ObjectId.ToString();
+
+                        // Build a fallback key from ObjectId since we have no ObjectName
+                        string fallbackKey = $"{techDeviceId}_{BacnetObjectInfo.ShortTypeName(child.ObjectId.type)}_{child.ObjectId.instance}_value";
+
+                        dto.Points.Add(new AssetPointDto
+                        {
+                            Id = $"{techDeviceId}_{child.ObjectId}",
+                            Name = stubName,
+                            FullName = child.ObjectId.ToString(),
+                            Description = child.Description,
+                            Units = "",
+                            Type = child.ObjectId.type.ToString(),
+                            Key = fallbackKey,
+                            IsWritable = false,
+                            ParentId = uniqueId,
+                            ParentPath = newPath
+                        });
+                    }
                 }
             }
 
             return dto;
+        }
+
+        /// <summary>Tracks conversion stats for diagnostic logging.</summary>
+        private class TreeConversionStats
+        {
+            public int TotalTreeLeaves;
+            public int ResolvedFromCache;
+            public int NotInCache;
         }
 
         public Task<List<PropertyDto>> GetExtendedPropertiesAsync(ConnectionConfig connection, DeviceConfig device, string key)
