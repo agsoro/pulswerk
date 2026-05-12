@@ -52,6 +52,7 @@ services:
     restart: unless-stopped
     ports:
       - "5000:5000"
+      - "47808:47808/udp"
     depends_on:
       influxdb:
         condition: service_started
