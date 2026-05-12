@@ -306,6 +306,8 @@ function renderModalBreadcrumb(id, path) {
 let currentScheduleData = [];
 let isEditingSchedule = false;
 let currentScheduleKey = null;
+let scheduleValueType = 'real';    // 'boolean' | 'enumerated' | 'real'
+let scheduleStates = null;         // ['Off','On'] or ['State1','State2',...]
 
 async function openScheduleView(key, name, pathEnc) {
     const modal = document.getElementById('scheduleModal');
@@ -315,6 +317,8 @@ async function openScheduleView(key, name, pathEnc) {
     
     currentScheduleKey = key;
     isEditingSchedule = false;
+    scheduleValueType = 'real';
+    scheduleStates = null;
     toggleScheduleEdit(false);
 
     let path = [];
@@ -331,6 +335,20 @@ async function openScheduleView(key, name, pathEnc) {
         const response = await fetch(`?handler=Properties&key=${key}`);
         const props = await response.json();
         const schedProp = props.find(p => p.name === 'Weekly Schedule');
+        
+        // Read schedule metadata from backend
+        const typeProp = props.find(p => p.name === '_scheduleValueType');
+        if (typeProp) scheduleValueType = typeProp.value;
+        
+        const statesProp = props.find(p => p.name === '_scheduleStates');
+        if (statesProp) {
+            try { scheduleStates = JSON.parse(statesProp.value); } catch(e) {}
+        }
+        
+        // For boolean without explicit states, use defaults
+        if (scheduleValueType === 'boolean' && !scheduleStates) {
+            scheduleStates = ['Off', 'On'];
+        }
         
         loading.classList.add('hidden');
         view.classList.remove('hidden');
@@ -366,6 +384,42 @@ function closeSchedule() {
     document.getElementById('scheduleModal').style.display = 'none';
 }
 
+function formatScheduleValue(val) {
+    if (scheduleStates && val >= 0 && val < scheduleStates.length) {
+        return scheduleStates[val];
+    }
+    return val;
+}
+
+function renderScheduleValueInput(dayIndex, entryIndex, value) {
+    if (scheduleValueType === 'boolean') {
+        const checked = value ? 'checked' : '';
+        const label = value ? 'ON' : 'OFF';
+        const labelColor = value ? 'color:#38bdf8' : 'color:#64748b';
+        return `
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+                <span class="bool-toggle" style="width:32px;height:16px;position:relative;display:inline-block">
+                    <input type="checkbox" ${checked} style="width:0;height:0;opacity:0"
+                           onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', this.checked ? 1 : 0)">
+                    <span class="bool-toggle-slider" style="border-radius:16px"></span>
+                </span>
+                <span style="font-size:0.65rem;font-weight:700;${labelColor}">${label}</span>
+            </label>`;
+    }
+    
+    if (scheduleValueType === 'enumerated' && scheduleStates) {
+        const options = scheduleStates.map((s, i) => 
+            `<option value="${i}" ${i === value ? 'selected' : ''}>${s}</option>`
+        ).join('');
+        return `<select style="background:#1e293b;color:#38bdf8;font-weight:700;font-size:0.7rem;border:1px solid #475569;border-radius:4px;padding:2px 4px;outline:none"
+                        onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseInt(this.value))">${options}</select>`;
+    }
+    
+    // Default: number input for real values
+    return `<input type="number" step="0.1" class="bg-transparent text-sky-400 font-bold text-[0.7rem] border-none focus:ring-0 w-10 p-0 text-center" 
+                   value="${value}" onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseFloat(this.value))">`;
+}
+
 function renderSchedule() {
     const grid = document.getElementById('scheduleGrid');
     grid.innerHTML = '';
@@ -381,8 +435,7 @@ function renderSchedule() {
                     <div class="sched-entry-edit">
                         <input type="time" class="bg-transparent text-slate-300 text-[0.7rem] border-none focus:ring-0 w-[4.5rem] p-0" 
                                value="${e.time}" onchange="updateScheduleEntry(${day.dayIndex}, ${idx}, 'time', this.value)">
-                        <input type="number" step="0.1" class="bg-transparent text-sky-400 font-bold text-[0.7rem] border-none focus:ring-0 w-10 p-0 text-center" 
-                               value="${e.value}" onchange="updateScheduleEntry(${day.dayIndex}, ${idx}, 'value', this.value)">
+                        ${renderScheduleValueInput(day.dayIndex, idx, e.value)}
                         <button class="text-red-400 hover:text-red-300 px-1 text-sm leading-none" onclick="removeScheduleEntry(${day.dayIndex}, ${idx})">&times;</button>
                     </div>
                 `;
@@ -390,7 +443,7 @@ function renderSchedule() {
                 return `
                     <div class="sched-entry-view">
                         <span class="text-slate-400"><i class="far fa-clock mr-1 opacity-70"></i>${e.time}</span>
-                        <span class="font-bold text-sky-400 border-l border-white/10 pl-2">${e.value}</span>
+                        <span class="font-bold text-sky-400 border-l border-white/10 pl-2">${formatScheduleValue(e.value)}</span>
                     </div>
                 `;
             }
@@ -418,21 +471,26 @@ function toggleScheduleEdit(edit) {
     isEditingSchedule = edit;
     const btnEdit = document.getElementById('btnEditSchedule');
     const btnActions = document.getElementById('editScheduleActions');
+    const status = document.getElementById('scheduleStatus');
+    const saveBtn = document.getElementById('scheduleSaveBtn');
     if (btnEdit) btnEdit.classList.toggle('hidden', edit);
     if (btnActions) btnActions.classList.toggle('hidden', !edit);
+    if (status) { status.textContent = ''; status.className = 'status-msg'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>'; }
     renderSchedule();
 }
 
 function updateScheduleEntry(dayIdx, entryIdx, field, value) {
-    if (field === 'value') value = parseFloat(value);
+    if (field === 'value') value = (scheduleValueType === 'real') ? parseFloat(value) : parseInt(value);
     currentScheduleData[dayIdx].entries[entryIdx][field] = value;
+    if (field === 'value') renderSchedule(); // re-render to update toggle/select state
 }
 
 function addScheduleEntry(dayIdx) {
     const lastEntry = currentScheduleData[dayIdx].entries[currentScheduleData[dayIdx].entries.length - 1];
+    const defaultValue = (scheduleValueType === 'boolean') ? 1 : (lastEntry ? lastEntry.value : 0);
     const newTime = lastEntry ? lastEntry.time : "08:00";
-    const newVal = lastEntry ? lastEntry.value : 21.0;
-    currentScheduleData[dayIdx].entries.push({ time: newTime, value: newVal });
+    currentScheduleData[dayIdx].entries.push({ time: newTime, value: defaultValue });
     renderSchedule();
 }
 
@@ -442,13 +500,14 @@ function removeScheduleEntry(dayIdx, entryIdx) {
 }
 
 async function saveSchedule() {
-    const btnActions = document.getElementById('editScheduleActions');
-    if (!btnActions) return;
-    const btn = btnActions.querySelector('button:last-child');
-    const originalText = btn.innerHTML;
+    const btn = document.getElementById('scheduleSaveBtn');
+    const status = document.getElementById('scheduleStatus');
+    if (!btn) return;
+
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
-    btn.className = "px-3 py-1 bg-sky-800 text-white text-xs rounded opacity-70 cursor-not-allowed";
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> <span>Sending...</span>';
+    status.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Sending schedule to device...';
+    status.className = 'status-msg info';
 
     try {
         currentScheduleData.forEach(day => {
@@ -468,17 +527,35 @@ async function saveSchedule() {
             })
         });
 
-        const result = await response.json();
-        if (result.success) {
-            toggleScheduleEdit(false);
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+                status.innerHTML = '<i class="fas fa-check-circle"></i> Success! Schedule updated.';
+                status.className = 'status-msg success';
+                btn.innerHTML = '<i class="fas fa-check mr-1"></i> <span>Updated</span>';
+                setTimeout(() => {
+                    toggleScheduleEdit(false);
+                    status.textContent = '';
+                    status.className = 'status-msg';
+                }, 1200);
+            } else {
+                status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
+                status.className = 'status-msg error';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
+            }
         } else {
-            alert("Failed to save schedule. Check device connection.");
+            const err = await response.text();
+            status.innerHTML = '<i class="fas fa-bug"></i> Error: ' + err;
+            status.className = 'status-msg error';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
         }
     } catch (error) {
         console.error("Save error:", error);
-        alert("An error occurred while saving.");
-    } finally {
+        status.innerHTML = '<i class="fas fa-wifi"></i> Failed to connect';
+        status.className = 'status-msg error';
         btn.disabled = false;
-        btn.innerHTML = originalText;
+        btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
     }
 }

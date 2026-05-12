@@ -2188,6 +2188,44 @@ namespace Pulswerk.Drivers.BACnet
                 var days = JsonSerializer.Deserialize<List<DailyScheduleDto>>(json);
                 if (days == null) return;
 
+                // ── Detect the value tag from PROP_SCHEDULE_DEFAULT ──────────
+                // The schedule default tells us whether values are REAL, ENUMERATED, UNSIGNED, etc.
+                var valueTag = BacnetApplicationTags.BACNET_APPLICATION_TAG_ENUMERATED; // safe default for boolean schedules
+                try
+                {
+                    if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_SCHEDULE_DEFAULT, out var defVals)
+                        && defVals.Count > 0)
+                    {
+                        valueTag = defVals[0].Tag;
+                    }
+                }
+                catch { /* fallback to enumerated */ }
+
+                // If we still couldn't detect, try reading existing schedule to get the tag
+                if (valueTag == BacnetApplicationTags.BACNET_APPLICATION_TAG_NULL)
+                {
+                    try
+                    {
+                        if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_WEEKLY_SCHEDULE, out var schedVals)
+                            && schedVals.Count > 0)
+                        {
+                            // Find first value entry (skip TIME entries)
+                            foreach (var sv in schedVals)
+                            {
+                                if (sv.Tag != BacnetApplicationTags.BACNET_APPLICATION_TAG_TIME
+                                    && sv.Tag != BacnetApplicationTags.BACNET_APPLICATION_TAG_NULL)
+                                {
+                                    valueTag = sv.Tag;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                Console.WriteLine($"  [BACnet] Writing schedule for {oid} with value tag: {valueTag}");
+
                 // BACnet Weekly_Schedule is an array of 7 DailySchedule (SEQUENCE OF TimeValue)
                 // arrayIndex 1 = Monday, ..., 7 = Sunday
                 for (int i = 0; i < 7; i++)
@@ -2206,7 +2244,19 @@ namespace Pulswerk.Drivers.BACnet
                                 // Use DateTime for the TIME tag, as the library extracts the time part from it.
                                 var timeValue = new DateTime(1, 1, 1, ts.Hours, ts.Minutes, ts.Seconds);
                                 dayValues.Add(new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_TIME, timeValue));
-                                dayValues.Add(new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_REAL, (float)entry.Value));
+
+                                // Encode value with the detected tag
+                                object encodedValue = valueTag switch
+                                {
+                                    BacnetApplicationTags.BACNET_APPLICATION_TAG_REAL => (float)entry.Value,
+                                    BacnetApplicationTags.BACNET_APPLICATION_TAG_DOUBLE => entry.Value,
+                                    BacnetApplicationTags.BACNET_APPLICATION_TAG_UNSIGNED_INT => (uint)entry.Value,
+                                    BacnetApplicationTags.BACNET_APPLICATION_TAG_SIGNED_INT => (int)entry.Value,
+                                    BacnetApplicationTags.BACNET_APPLICATION_TAG_ENUMERATED => (uint)entry.Value,
+                                    BacnetApplicationTags.BACNET_APPLICATION_TAG_BOOLEAN => entry.Value != 0,
+                                    _ => (uint)entry.Value // default to unsigned for unknown tags
+                                };
+                                dayValues.Add(new BacnetValue(valueTag, encodedValue));
                             }
                         }
                     }
@@ -2835,6 +2885,34 @@ namespace Pulswerk.Drivers.BACnet
                     }
                 }
                 catch { /* live read failed, return cached properties only */ }
+
+                // ── Schedule metadata for the editor UI ──────────────────────
+                if (info.ObjectId.type == BacnetObjectTypes.OBJECT_SCHEDULE)
+                {
+                    // Detect value type from Schedule Default
+                    var defProp = props.FirstOrDefault(p => p.Name == "Schedule Default");
+                    string schedType = "real"; // default
+                    if (defProp != null)
+                    {
+                        if (int.TryParse(defProp.Value, out int defVal) && (defVal == 0 || defVal == 1))
+                            schedType = "boolean";
+                        else if (int.TryParse(defProp.Value, out _))
+                            schedType = "enumerated";
+                    }
+
+                    // Check state text from the cached object
+                    if (info.StateText?.Count > 0)
+                    {
+                        schedType = "enumerated";
+                        props.Add(new PropertyDto
+                        {
+                            Name = "_scheduleStates",
+                            Value = JsonSerializer.Serialize(info.StateText)
+                        });
+                    }
+
+                    props.Add(new PropertyDto { Name = "_scheduleValueType", Value = schedType });
+                }
 
                 return props;
             });
