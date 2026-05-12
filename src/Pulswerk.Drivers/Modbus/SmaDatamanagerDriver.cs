@@ -23,7 +23,7 @@ namespace Pulswerk.Drivers.Modbus
         const ushort REG_POWER_W = 30775;
         const ushort REG_ENERGY_WH = 30513;
 
-        public override string DriverName => "SMA_DataManager";
+        public override string DriverName => "SMADM";
         // public bool IsBusy => false;
 
         public override IEnumerable<string> GetTelemetryKeys() => new[] {
