@@ -28,6 +28,8 @@ namespace Pulswerk.Host
         static ConsoleLogger? _logger;
         static DashboardDataService? _dataService;
         static Dictionary<string, IDeviceDriver> _drivers = new();
+        static Dictionary<string, int> _failCounts = new();
+        const int FAIL_THRESHOLD = 10;
         static LogBuffer? _logBuffer => _logger?.Buffer;
 
         static async Task Main()
@@ -426,33 +428,33 @@ namespace Pulswerk.Host
                 if (attributes.Count > 0)
                     _dataService?.UpdateAttributes(attributes);
 
-                _logger!.Info(
-                    $"[{DateTime.Now:HH:mm:ss}] [{reader.DriverName,-10}] {device.Name,-38} " +
-                    $"{(telemetry.Count == 0 ? "(no values)" : $"items={telemetry.Count}")}");
-
-                if (attributes.Count > 0)
-                    _logger!.Info(
-                        $"{"",13}  {"[attrs]",-10}  " +
-                        $"{string.Join(", ", attributes.Keys.Take(5))}" +
-                        $"{(attributes.Count > 5 ? $" … +{attributes.Count - 5} more" : "")}");
-
-                // ── Clear Communication Loss Alarm on success ─────────────────
+                // ── Clear Communication Loss Alarm on recovery ────────────────
+                _failCounts[device.Name] = 0;
                 if (offlineDevices.Remove(device.Name))
                 {
                     alarmStore.ClearByOriginAndType(device.Name, "Communication Loss");
+                    _logger!.Info(
+                        $"[{DateTime.Now:HH:mm:ss}] [{reader.DriverName,-10}] {device.Name,-38} ✓ back online");
                 }
             }
             catch (Exception ex)
             {
-                _logger!.Error($"[{DateTime.Now:HH:mm:ss}] ERROR [{device.DeviceType}] {device.Name}: {ex.Message}");
+                // ── Track consecutive failures, only log/alarm after threshold ──
+                _failCounts.TryGetValue(device.Name, out int count);
+                _failCounts[device.Name] = ++count;
 
-                // ── Communication Loss Alarm ──────────────────────────────────
-                if (offlineDevices.Add(device.Name))
+                if (count == FAIL_THRESHOLD)
                 {
-                    alarmStore.CreateOrUpdate(
-                        device.Name, "DEVICE",
-                        "Communication Loss", "CRITICAL",
-                        $"Device {device.Name} is not responding: {ex.Message}");
+                    _logger!.Warning(
+                        $"[{DateTime.Now:HH:mm:ss}] [{device.DeviceType,-10}] {device.Name,-38} offline ({count} consecutive failures)");
+
+                    if (offlineDevices.Add(device.Name))
+                    {
+                        alarmStore.CreateOrUpdate(
+                            device.Name, "DEVICE",
+                            "Communication Loss", "CRITICAL",
+                            $"Device {device.Name} is not responding after {count} attempts.");
+                    }
                 }
             }
 
