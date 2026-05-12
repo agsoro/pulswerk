@@ -208,6 +208,10 @@ namespace Pulswerk.Drivers.BACnet
 
         private static readonly ConcurrentDictionary<string, BacnetAckContext> _ackRegistry = new();
 
+        private static readonly ConcurrentDictionary<string, BacnetClient> _clientsByConnection = new();
+        public static void SetClientForConnection(string connId, BacnetClient client) => _clientsByConnection[connId] = client;
+        public static void ClearClients() => _clientsByConnection.Clear();
+
         /// <summary>
         /// Sends a BACnet AcknowledgeAlarm service to the originating field device.
         /// This mirrors the Deziko behaviour: when an operator acknowledges an
@@ -260,16 +264,20 @@ namespace Pulswerk.Drivers.BACnet
         public virtual BacnetReadResult ReadFull(ConnectionConfig conn, DeviceConfig device,
             AlarmStore? alarmStore = null, TelemetryStore? tsStore = null)
         {
-            if (device.BacnetDeviceId is null)
-                throw new InvalidOperationException($"Device '{device.Name}' is missing bacnetDeviceId.");
+            if (device.DeviceId is null)
+                throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId.");
 
             var cfg = device;  // BACnet config is flat on DeviceConfig
 
-            using var client = OpenClient(conn);
+            var client = OpenClient(conn);
+            try
+            {
 
             // ── Resolve BacnetAddress ─────────────────────────────────────────
-            var address = ResolveAddress(client, conn.Host, conn.Port,
-                                         device.BacnetDeviceId.Value,
+            // Use device-specific host if provided; otherwise fallback to connection host 
+            // (though in the new model, connection host is the local bind IP).
+            var address = ResolveAddress(client, device.Address ?? "", 47808,
+                                         device.DeviceId.Value,
                                          cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
             // ResolveAddress always returns a non-null address (direct IP fallback)
 
@@ -285,8 +293,8 @@ namespace Pulswerk.Drivers.BACnet
             {
                 Interlocked.Increment(ref _busyCount);
                 Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
-                var all = DiscoverObjects(client, address, device.BacnetDeviceId.Value);
-                var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.BacnetDeviceId.Value);
+                var all = DiscoverObjects(client, address, device.DeviceId.Value);
+                var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.DeviceId.Value);
 
                 // Enrich objects with vendor-specific properties (override in subclass)
                 filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
@@ -407,6 +415,13 @@ namespace Pulswerk.Drivers.BACnet
             {
                 result.HierarchyDirty = true;
                 state.HierarchyDirty = false;
+            }
+
+            }
+            finally
+            {
+                if (!_clientsByConnection.Values.Contains(client))
+                    client.Dispose();
             }
 
             return result;
@@ -652,6 +667,7 @@ namespace Pulswerk.Drivers.BACnet
             int cap = (filter.MaxObjects is > 0) ? filter.MaxObjects.Value : int.MaxValue;
 
             var result = new List<BacnetObjectInfo>();
+            int objectsWithLabels = 0;
 
             foreach (var oid in candidates)
             {
@@ -716,8 +732,6 @@ namespace Pulswerk.Drivers.BACnet
                 if (IsMultiState(oid.type))
                 {
                     stateText = ReadStringListProp(client, address, oid, BacnetPropertyIds.PROP_STATE_TEXT);
-                    if (stateText.Count > 0)
-                        Console.WriteLine($"    [BACnet]   Found {stateText.Count} state labels for {oid}");
                 }
                 // 11. Inactive/Active Text (Standard 46/4) for Binary objects
                 else if (IsBinary(oid.type))
@@ -730,9 +744,10 @@ namespace Pulswerk.Drivers.BACnet
                             string.IsNullOrEmpty(inactive) ? "0" : inactive,
                             string.IsNullOrEmpty(active) ? "1" : active
                         };
-                        Console.WriteLine($"    [BACnet]   Found binary labels for {oid}: {stateText[0]} / {stateText[1]}");
                     }
                 }
+
+                if (stateText != null && stateText.Count > 0) objectsWithLabels++;
 
                 // 12. Limits and Thresholds (Standard 45, 59, 25, 52)
                 double? highLimit = null, lowLimit = null, deadband = null;
@@ -747,6 +762,9 @@ namespace Pulswerk.Drivers.BACnet
 
                 result.Add(new BacnetObjectInfo(deviceId, oid, objectName, namingPath, nameExt, description, profileName, commandable, category, logId, stateText, highLimit, lowLimit, deadband, limitEnable));
             }
+
+            if (objectsWithLabels > 0)
+                Console.WriteLine($"    [BACnet]   Loaded state labels for {objectsWithLabels} objects.");
 
             return result;
         }
@@ -1017,8 +1035,10 @@ namespace Pulswerk.Drivers.BACnet
         //  Helpers
         // =====================================================================
 
-        static BacnetClient OpenClient(ConnectionConfig conn)
+        protected virtual BacnetClient OpenClient(ConnectionConfig conn)
         {
+            if (_clientsByConnection.TryGetValue(conn.Id, out var shared)) return shared;
+
             var transport = new BacnetIpUdpProtocolTransport(port: 0, useExclusivePort: true);
             var client = new BacnetClient(transport);
             client.Start();
@@ -1503,8 +1523,8 @@ namespace Pulswerk.Drivers.BACnet
             // Long-lived client (one UDP socket per device)
             state.CovClient = OpenClient(conn);
             state.CovAddress = ResolveAddress(
-                state.CovClient, conn.Host, conn.Port,
-                device.BacnetDeviceId!.Value,
+                state.CovClient, conn.Address, conn.Port,
+                device.DeviceId!.Value,
                 cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
 
             // Register COV notification handler
@@ -1591,8 +1611,8 @@ namespace Pulswerk.Drivers.BACnet
             DeviceConfig device, DeviceConfig cfg, DiscoveryState state)
         {
             Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
-            var all = DiscoverObjects(client, address, device.BacnetDeviceId!.Value);
-            var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.BacnetDeviceId!.Value);
+            var all = DiscoverObjects(client, address, device.DeviceId!.Value);
+            var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.DeviceId!.Value);
 
             // Enrich objects with vendor-specific properties (override in subclass)
             filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
@@ -1710,8 +1730,8 @@ namespace Pulswerk.Drivers.BACnet
                    > TimeSpan.FromMinutes(disc.RefreshIntervalMinutes))
             {
                 state.CovAddress = ResolveAddress(
-                    state.CovClient, conn.Host, conn.Port,
-                    device.BacnetDeviceId!.Value,
+                    state.CovClient, conn.Address, conn.Port,
+                    device.DeviceId!.Value,
                     cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
                 RunDiscoveryInternal(state.CovClient, state.CovAddress, device, cfg, state);
                 state.CovSubExpiry.Clear();  // force resubscription of everything
@@ -1831,7 +1851,8 @@ namespace Pulswerk.Drivers.BACnet
                 }
                 finally
                 {
-                    s.CovClient.Dispose();
+                    if (!_clientsByConnection.Values.Contains(s.CovClient))
+                        s.CovClient.Dispose();
                     s.CovClient = null;
                 }
             }
@@ -1842,9 +1863,9 @@ namespace Pulswerk.Drivers.BACnet
         // =====================================================================
         public void Write(ConnectionConfig conn, DeviceConfig device, string key, double value)
         {
-            if (device.BacnetDeviceId is null)
+            if (device.DeviceId is null)
                 throw new InvalidOperationException(
-                    $"Device '{device.Name}' is missing bacnetDeviceId.");
+                    $"Device '{device.Name}' is missing deviceId.");
 
             var cfg = device;  // BACnet config is flat on DeviceConfig
 
@@ -1867,11 +1888,13 @@ namespace Pulswerk.Drivers.BACnet
                     $"Object '{key}' ({objectId}) is not commandable (no PROP_PRIORITY_ARRAY). " +
                     "Write rejected to protect the device logic.");
 
-            using var client = OpenClient(conn);
-            var address = ResolveAddress(
-                client, conn.Host, conn.Port,
-                device.BacnetDeviceId.Value,
-                cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
+            var client = OpenClient(conn);
+            try
+            {
+                var address = ResolveAddress(
+                    client, device.Address ?? "", 47808,
+                    device.DeviceId.Value,
+                    cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
 
             // Choose the right application tag:
             //   Binary objects expect an ENUMERATED (0/1); all others expect REAL
@@ -1891,6 +1914,12 @@ namespace Pulswerk.Drivers.BACnet
             if (!ok)
                 throw new Exception(
                     $"BACnet WriteProperty returned NAK for key '{key}' ({objectId}).");
+            }
+            finally
+            {
+                if (!_clientsByConnection.Values.Contains(client))
+                    client.Dispose();
+            }
         }
 
         protected virtual BacnetObjectId? ResolveObjectIdFromKey(string key, DiscoveryState state)

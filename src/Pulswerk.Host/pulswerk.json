@@ -17,20 +17,21 @@
     {
       "id": "modbus-building-a",
       "type": "modbus-tcp",
-      "host": "192.168.1.100",
+      "address": "192.168.1.100",
       "port": 502
     },
     {
       "id": "modbus-building-b",
       "type": "modbus-tcp",
-      "host": "192.168.1.101",
+      "address": "192.168.1.101",
       "port": 502
     },
     {
       "id": "bacnet-deziko",
       "type": "bacnet-ip",
-      "host": "192.168.1.200",
-      "port": 47808
+      "localAddress": "0.0.0.0",
+      "localPort": 47808,
+      "localDeviceId": 1234
     }
   ],
   "devices": [
@@ -38,25 +39,25 @@
       "name": "Main Meter Building A",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
-      "slaveId": 1
+      "deviceId": 1
     },
     {
       "name": "Sub Meter Floor 2",
       "deviceType": "janitza",
       "connectionId": "modbus-building-b",
-      "slaveId": 1
+      "deviceId": 1
     },
     {
       "name": "Sub Meter Floor 3",
       "deviceType": "janitza",
       "connectionId": "modbus-building-b",
-      "slaveId": 2
+      "deviceId": 2
     },
     {
       "name": "Main Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
-      "slaveId": 10,
+      "deviceId": 10,
       "path": [
         "Building",
         "Main Meter"
@@ -67,7 +68,7 @@
       "name": "Sub Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
-      "slaveId": 11,
+      "deviceId": 11,
       "path": [
         "Building",
         "Main Meter",
@@ -79,7 +80,7 @@
       "name": "Floor Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
-      "slaveId": 12,
+      "deviceId": 12,
       "path": [
         "Building",
         "Main Meter",
@@ -92,13 +93,13 @@
       "name": "Glueck Controller Zone 1",
       "deviceType": "glueck",
       "connectionId": "modbus-building-a",
-      "slaveId": 3
+      "deviceId": 3
     },
     {
       "name": "ASP01",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",
-      "bacnetDeviceId": 10,
+      "deviceId": 10,
       "assetType": "BACnet Node",
       "filter": {
         "excludeNamePattern": "^(UNUSED|SPARE|TEST)"
@@ -108,7 +109,7 @@
       "name": "Test BACnet AHU",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",
-      "bacnetDeviceId": 10,
+      "deviceId": 20,
       "assetType": "BACnet Zone"
     }
   ],

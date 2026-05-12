@@ -80,7 +80,7 @@ namespace Pulswerk.Drivers.BACnet
             if (cfg.HierarchyEnabled)
             {
                 Console.WriteLine($"  [Deziko] Walking Structured Views on {device.Name}…");
-                state.Tree = BacnetHierarchy.Walk(client, address, device.BacnetDeviceId!.Value);
+                state.Tree = BacnetHierarchy.Walk(client, address, device.DeviceId!.Value);
                 Console.WriteLine($"  [Deziko] Hierarchy walk complete — " +
                                   $"{state.Tree.Roots.Count} root(s).");
             }

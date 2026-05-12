@@ -195,7 +195,7 @@ namespace Pulswerk.Dashboard
                 if (isBacnet)
                 {
                     var bacnetDrv = Drivers.TryGetValue(device.Name, out var drv) ? drv as BacnetDriver : null;
-                    if (bacnetDrv == null || device.BacnetDeviceId == null) continue;
+                    if (bacnetDrv == null || device.DeviceId == null) continue;
                     var discovered = bacnetDrv.GetDiscoveredObjects(device.Name);
                     if (discovered == null || discovered.Count == 0) continue;
 
@@ -206,7 +206,7 @@ namespace Pulswerk.Dashboard
 
                     foreach (var rootNode in tree.Roots)
                     {
-                        var dto = ConvertNode(rootNode, device.BacnetDeviceId.Value, lookup, new List<PathSegmentDto>());
+                        var dto = ConvertNode(rootNode, device.DeviceId.Value, lookup, new List<PathSegmentDto>());
                         MergeDtoIntoTree(root, dto, rootNode.NamingPath);
                     }
                 }
@@ -614,7 +614,7 @@ namespace Pulswerk.Dashboard
                     client.Start();
                     var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
                     if (conn == null) return props;
-                    var address = BacnetDriver.ResolveAddress(client, conn.Host, conn.Port, device.BacnetDeviceId!.Value, 1000);
+                    var address = BacnetDriver.ResolveAddress(client, conn.Address, conn.Port, device.DeviceId!.Value, 1000);
 
                     var extraPropIds = new[] {
                         BacnetPropertyIds.PROP_ALL,             // Try to get everything at once

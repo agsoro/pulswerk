@@ -34,8 +34,8 @@ namespace Pulswerk.Drivers.Modbus
 
         public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
-            byte slaveId = device.SlaveId
-                ?? throw new InvalidOperationException($"Device '{device.Name}' is missing slaveId.");
+            byte slaveId = (byte)(device.DeviceId
+                ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
 
             return ModbusConnection.WithMaster(conn, master =>
             {

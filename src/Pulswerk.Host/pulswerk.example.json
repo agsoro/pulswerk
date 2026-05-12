@@ -17,14 +17,15 @@
     {
       "id": "modbus-building-a",
       "type": "modbus-tcp",
-      "host": "192.168.1.100",
+      "address": "192.168.1.100",
       "port": 502
     },
     {
       "id": "bacnet-deziko",
       "type": "bacnet-ip",
-      "host": "192.168.1.200",
-      "port": 47808
+      "localAddress": "0.0.0.0",
+      "localPort": 47808,
+      "localDeviceId": 1234
     }
   ],
   "devices": [
@@ -32,14 +33,14 @@
       "name": "Main Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
-      "slaveId": 1,
+      "deviceId": 1,
       "assetType": "Meter"
     },
     {
       "name": "HVAC AHU 01",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",
-      "bacnetDeviceId": 10,
+      "deviceId": 10,
       "assetType": "BACnet Node"
       // Most settings (COV enabled, poll rate, filter, telemetry properties)
       // are now inferred from code-based defaults for "deziko" devices.

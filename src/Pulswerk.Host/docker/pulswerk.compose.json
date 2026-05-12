@@ -1,4 +1,4 @@
-﻿{
+{
   // ── InfluxDB ─────────────────────────────────────────────────────────────
   // "influxdb" resolves to the sibling container on the compose network.
   "influxdb": {
@@ -26,22 +26,23 @@
     {
       "id": "modbus-test",
       "type": "modbus-tcp",
-      "host": "modbus-sim",
+      "address": "modbus-sim",
       "port": 502,
       "name": "Modbus Sim 1"
     },
     {
       "id": "modbus-test2",
       "type": "modbus-tcp",
-      "host": "modbus-sim2",
+      "address": "modbus-sim2",
       "port": 502,
       "name": "Modbus Sim 2"
     },
     {
       "id": "bacnet-deziko",
       "type": "bacnet-ip",
-      "host": "bacnet-sim",
-      "port": 47808,
+      "localAddress": "0.0.0.0",
+      "localPort": 47808,
+      "localDeviceId": 1234,
       "name": "Deziko BACnet"
     }
   ],
@@ -51,7 +52,7 @@
       "name": "Main Meter Building A",
       "deviceType": "janitza",
       "connectionId": "modbus-test",
-      "slaveId": 1,
+      "deviceId": 1,
       "pollIntervalSeconds": 30,
       "path": [
         "Building A",
@@ -63,7 +64,7 @@
       "name": "Sub Meter Floor 2",
       "deviceType": "janitza",
       "connectionId": "modbus-test",
-      "slaveId": 2,
+      "deviceId": 2,
       "pollIntervalSeconds": 30,
       "path": [
         "Building A",
@@ -76,7 +77,7 @@
       "name": "Sub Meter Floor 3",
       "deviceType": "janitza",
       "connectionId": "modbus-test2",
-      "slaveId": 1,
+      "deviceId": 1,
       "pollIntervalSeconds": 30,
       "path": [
         "Building A",
@@ -89,7 +90,7 @@
       "name": "HVAC Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-test2",
-      "slaveId": 2,
+      "deviceId": 2,
       "pollIntervalSeconds": 30,
       "path": [
         "Building A",
@@ -102,7 +103,7 @@
       "name": "Test BACnet AHU",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",
-      "bacnetDeviceId": 10,
+      "deviceId": 10,
       "assetType": "BACnet Zone"
     }
   ],

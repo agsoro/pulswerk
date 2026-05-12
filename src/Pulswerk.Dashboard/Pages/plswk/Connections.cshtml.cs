@@ -58,12 +58,7 @@ namespace Pulswerk.Dashboard.Pages
                         _ => d.DeviceType
                     };
 
-                    string address = d.DeviceType.ToLowerInvariant() switch
-                    {
-                        "janitza" or "glueck" or "abb" or "sunspec" =>
-                            d.SlaveId.HasValue ? $"Slave {d.SlaveId}" : "–",
-                        _ => d.BacnetDeviceId.HasValue ? $"Device {d.BacnetDeviceId}" : "–"
-                    };
+                    string address = d.DeviceId.HasValue ? $"ID {d.DeviceId}" : "–";
 
                     return new ConnectedDeviceDto
                     {
@@ -84,8 +79,8 @@ namespace Pulswerk.Dashboard.Pages
                     Id = conn.Id,
                     Name = conn.EffectiveName,
                     Type = tbType,
-                    Host = conn.Host,
-                    Port = conn.Port,
+                    Address = conn.Type == "bacnet-ip" ? conn.LocalAddress : conn.Address,
+                    Port = (conn.Type == "bacnet-ip" ? conn.LocalPort : conn.Port) ?? 0,
                     Status = (connDevices.Count == 0 || !isOffline) ? "online" : "offline",
                     LastSeen = lastPolled == default
                                     ? "Never"
@@ -102,7 +97,7 @@ namespace Pulswerk.Dashboard.Pages
         public string Id { get; set; } = "";
         public string Name { get; set; } = "";
         public string Type { get; set; } = "";
-        public string Host { get; set; } = "";
+        public string Address { get; set; } = "";
         public int Port { get; set; }
         public string Status { get; set; } = "";
         public string LastSeen { get; set; } = "";

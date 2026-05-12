@@ -43,8 +43,21 @@ namespace Pulswerk.Core
     public record ConnectionConfig(
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("type")] string Type,   // "modbus-tcp" | "bacnet-ip"
-        [property: JsonPropertyName("host")] string Host,
-        [property: JsonPropertyName("port")] int Port,
+
+        /// <summary>Remote address (for Modbus Gateway).</summary>
+        [property: JsonPropertyName("address")] string? Address = null,
+        
+        /// <summary>Remote port (for Modbus Gateway).</summary>
+        [property: JsonPropertyName("port")] int? Port = null,
+        
+        /// <summary>Local bind address (for BACnet).</summary>
+        [property: JsonPropertyName("localAddress")] string? LocalAddress = null,
+
+        /// <summary>Local bind port (for BACnet).</summary>
+        [property: JsonPropertyName("localPort")] int? LocalPort = null,
+
+        /// <summary>Optional local BACnet Device ID for this connection (default 1234).</summary>
+        [property: JsonPropertyName("localDeviceId")] uint? LocalDeviceId = null,
 
         /// <summary>Human-readable display name for this connection in the dashboard.</summary>
         [property: JsonPropertyName("name")] string? Name = null
@@ -68,15 +81,15 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("deviceType")] string DeviceType,
         [property: JsonPropertyName("connectionId")] string ConnectionId,
+        
+        /// <summary>Target address. For Modbus, this is the gateway; for BACnet, this is the device IP (optional fallback for Who-Is).</summary>
+        [property: JsonPropertyName("address")] string? Address = null,
 
-        // Modbus
-        [property: JsonPropertyName("slaveId")] byte? SlaveId,
+        /// <summary>Device identifier (Slave ID for Modbus, Device Instance for BACnet).</summary>
+        [property: JsonPropertyName("deviceId")] uint? DeviceId,
 
         // Modbus manual hierarchy path
         [property: JsonPropertyName("path")] List<string>? Path,
-
-        // BACnet device identifier
-        [property: JsonPropertyName("bacnetDeviceId")] uint? BacnetDeviceId,
 
         // BACnet / general config (all optional; code defaults apply when omitted)
         [property: JsonPropertyName("whoIsTimeoutMs")] int WhoIsTimeoutMs = 2000,

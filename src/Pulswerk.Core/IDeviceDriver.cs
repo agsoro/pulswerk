@@ -8,7 +8,7 @@ namespace Pulswerk.Core
     /// <summary>
     /// Implement one class per device type.
     /// Read() receives the resolved ConnectionConfig so the driver knows host/port,
-    /// plus the DeviceConfig for device-specific parameters (slaveId, bacnetDeviceId, …).
+    /// plus the DeviceConfig for device-specific parameters (deviceId, address, …).
     /// </summary>
     public interface IDeviceDriver
     {

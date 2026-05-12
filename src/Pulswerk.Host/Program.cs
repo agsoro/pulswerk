@@ -181,6 +181,26 @@ namespace Pulswerk.Host
             }
 
             int globalIntervalMs = (cfg.Polling?.IntervalSeconds ?? 30) * 1000;
+            
+            // ── Initialize BACnet clients per connection ─────────────────────
+            foreach (var conn in cfg.Connections.Where(c => c.Type == "bacnet-ip"))
+            {
+                int bindPort = conn.LocalPort ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing localPort.");
+                string bindAddr = conn.LocalAddress ?? "0.0.0.0"; // Default to all interfaces if not specified
+
+                _logger!.Info($"  [BACnet] Initialising connection '{conn.Id}' (port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
+                try
+                {
+                    var transport = new BacnetIpUdpProtocolTransport(bindPort, useExclusivePort: true, local_endpoint: bindAddr);
+                    var client = new BacnetClient(transport, conn.LocalDeviceId ?? 1234);
+                    client.Start();
+                    BacnetDriver.SetClientForConnection(conn.Id, client);
+                }
+                catch (Exception ex)
+                {
+                    _logger!.Error($"  [BACnet] Failed to start client for connection '{conn.Id}' on port {bindPort}: {ex.Message}");
+                }
+            }
 
             // ── COV init: set up long-lived clients for COV-enabled BACnet devices ──
             foreach (var d in cfg.Devices)
@@ -363,10 +383,9 @@ namespace Pulswerk.Host
                 if (attributes.Count > 0)
                     _dataService?.UpdateAttributes(attributes);
 
-                string tvLine = string.Join("  ", telemetry.Select(kv => $"{kv.Key}={kv.Value}"));
                 _logger!.Info(
                     $"[{DateTime.Now:HH:mm:ss}] [{reader.DriverName,-10}] {device.Name,-38} " +
-                    $"{(telemetry.Count == 0 ? "(no values)" : tvLine)}");
+                    $"{(telemetry.Count == 0 ? "(no values)" : $"items={telemetry.Count}")}");
 
                 if (attributes.Count > 0)
                     _logger!.Info(

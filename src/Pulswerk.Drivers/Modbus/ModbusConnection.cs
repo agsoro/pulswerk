@@ -16,7 +16,8 @@ namespace Pulswerk.Drivers.Modbus
         public static T WithMaster<T>(ConnectionConfig conn, Func<IModbusMaster, T> action)
         {
             using var tcp = new TcpClient();
-            tcp.Connect(conn.Host, conn.Port);
+            tcp.Connect(conn.Address ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address."), 
+                        conn.Port ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port."));
             using var master = new ModbusFactory().CreateMaster(tcp);
             return action(master);
         }
