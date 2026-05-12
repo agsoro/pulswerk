@@ -232,8 +232,18 @@ namespace Pulswerk.Drivers.BACnet
         private static readonly ConcurrentDictionary<string, BacnetAckContext> _ackRegistry = new();
 
         private static readonly ConcurrentDictionary<string, BacnetClient> _clientsByConnection = new();
-        public static void SetClientForConnection(string connId, BacnetClient client) => _clientsByConnection[connId] = client;
-        public static void ClearClients() => _clientsByConnection.Clear();
+        private static readonly ConcurrentDictionary<(string, int), BacnetClient> _clientsByEndpoint = new();
+
+        public static void SetClientForConnection(string connId, BacnetClient client)
+        {
+            _clientsByConnection[connId] = client;
+        }
+
+        public static void ClearClients()
+        {
+            _clientsByConnection.Clear();
+            _clientsByEndpoint.Clear();
+        }
 
         /// <summary>
         /// Sends a BACnet AcknowledgeAlarm service to the originating field device.
@@ -494,7 +504,7 @@ namespace Pulswerk.Drivers.BACnet
             try
             {
                 var prevTimeout = client.Timeout;
-                client.Timeout = 10000; // higher timeout for bulk read
+                client.Timeout = 15000; // higher timeout for bulk read
                 try
                 {
                     if (client.ReadPropertyRequest(address, deviceObjId, BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> fullList))
@@ -649,6 +659,8 @@ namespace Pulswerk.Drivers.BACnet
                 ["MI"] = BacnetObjectTypes.OBJECT_MULTI_STATE_INPUT,
                 ["MO"] = BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT,
                 ["MV"] = BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE,
+                ["IV"] = BacnetObjectTypes.OBJECT_INTEGER_VALUE,
+                ["SV"] = BacnetObjectTypes.OBJECT_STRUCTURED_VIEW,
             };
 
         /// <summary>
@@ -708,15 +720,47 @@ namespace Pulswerk.Drivers.BACnet
 
             int cap = (filter.MaxObjects is > 0) ? filter.MaxObjects.Value : int.MaxValue;
 
-            var result = new List<BacnetObjectInfo>();
-            int objectsWithLabels = 0;
+            // Optimization: Read names in batches using ReadPropertyMultiple
+            var allNames = new Dictionary<BacnetObjectId, string>();
+            if (needName || needDesc)
+            {
+                var candidatesList = candidates
+                    .Where(oid => allowedTypes == null || allowedTypes.Contains(oid.type))
+                    .Where(oid => filter.InstanceRange == null || (oid.instance >= filter.InstanceRange.Min && oid.instance <= filter.InstanceRange.Max))
+                    .ToList();
 
+                Console.WriteLine($"    [BACnet]   Fetching names for {candidatesList.Count} potential objects in batches...");
+                for (int i = 0; i < candidatesList.Count; i += 50)
+                {
+                    var batch = candidatesList.Skip(i).Take(50).ToList();
+                    try
+                    {
+                        var readSpecs = batch.Select(oid => new BacnetReadAccessSpecification(oid, new List<BacnetPropertyReference> {
+                            new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue)
+                        })).ToList();
+
+                        if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
+                        {
+                            foreach (var res in batchResults)
+                            {
+                                if (res.values != null && res.values.Count > 0 && res.values[0].value != null && res.values[0].value.Count > 0)
+                                {
+                                    allNames[res.objectIdentifier] = res.values[0].value[0].Value?.ToString() ?? res.objectIdentifier.ToString();
+                                }
+                            }
+                        }
+                    }
+                    catch { /* fallback to individual reads in the main loop if RPM fails */ }
+                    if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} names fetched");
+                }
+            }
+            
             int processed = 0;
             foreach (var oid in candidates)
             {
                 processed++;
-                if (processed % 50 == 0)
-                    Console.WriteLine($"    [BACnet]   Processing objects... {processed}/{candidates.Count}");
+                if (processed % 100 == 0 && candidates.Count > 500)
+                    Console.WriteLine($"    [BACnet]   Filtering objects... {processed}/{candidates.Count}");
 
                 if (result.Count >= cap) break;
 
@@ -728,15 +772,16 @@ namespace Pulswerk.Drivers.BACnet
                     if (oid.instance < filter.InstanceRange.Min ||
                         oid.instance > filter.InstanceRange.Max) continue;
 
-                // 3. Name filters – read PROP_OBJECT_NAME only when needed
-                string objectName = needName || needDesc
-                    ? ReadObjectName(client, address, oid)
-                    : oid.ToString();
+                // 3. Name filters – use cached name or read individually if missing
+                if (!allNames.TryGetValue(oid, out string? objectName))
+                {
+                    objectName = needName || needDesc ? ReadObjectName(client, address, oid) : oid.ToString();
+                }
 
                 if (includeNameRx != null && !includeNameRx.IsMatch(objectName)) continue;
                 if (excludeNameRx != null && excludeNameRx.IsMatch(objectName)) continue;
 
-                // 4. Description filter – read PROP_DESCRIPTION only when needed
+                // 4. Description filter
                 string description = "";
                 if (needDesc)
                 {
@@ -1110,13 +1155,46 @@ namespace Pulswerk.Drivers.BACnet
         //  Helpers
         // =====================================================================
 
-        protected virtual BacnetClient OpenClient(ConnectionConfig conn)
+        /// <summary>
+        /// Returns an existing client for the given connection if available.
+        /// Checks by Connection ID and then by Local Endpoint (IP/Port).
+        /// </summary>
+        public static BacnetClient? GetSharedClient(ConnectionConfig conn)
         {
             if (_clientsByConnection.TryGetValue(conn.Id, out var shared)) return shared;
 
-            var transport = new BacnetIpUdpProtocolTransport(port: conn.LocalPort ?? 0, useExclusivePort: true);
+            var bindAddr = conn.LocalAddress ?? "0.0.0.0";
+            var bindPort = conn.LocalPort ?? 0;
+            if (bindPort > 0 && _clientsByEndpoint.TryGetValue((bindAddr, bindPort), out var endpointShared))
+                return endpointShared;
+
+            return null;
+        }
+
+        protected virtual BacnetClient OpenClient(ConnectionConfig conn)
+        {
+            // 1. Try by Connection ID
+            if (_clientsByConnection.TryGetValue(conn.Id, out var shared)) return shared;
+
+            // 2. Try by Endpoint (Address + Port)
+            var bindAddr = conn.LocalAddress ?? "0.0.0.0";
+            var bindPort = conn.LocalPort ?? 0;
+            if (bindPort > 0 && _clientsByEndpoint.TryGetValue((bindAddr, bindPort), out var endpointShared))
+            {
+                // Register this connection ID for the existing client
+                _clientsByConnection[conn.Id] = endpointShared;
+                return endpointShared;
+            }
+
+            // 3. Create new
+            var transport = new BacnetIpUdpProtocolTransport(bindPort, true, false, 1472, bindAddr);
             var client = new BacnetClient(transport);
             client.Start();
+
+            // Register both ways
+            _clientsByConnection[conn.Id] = client;
+            if (bindPort > 0) _clientsByEndpoint[(bindAddr, bindPort)] = client;
+
             return client;
         }
 
@@ -1650,6 +1728,9 @@ namespace Pulswerk.Drivers.BACnet
             state.CovClient.OnCOVNotification +=
                 (sender, adr, invokeId, _, _, monitoredObjId, _, needConfirm, values, _) =>
                 {
+                    // Security: Verify source address to avoid crosstalk if multiple devices share one client
+                    if (state.CovAddress != null && !adr.Equals(state.CovAddress)) return;
+
                     // ACK confirmed notifications
                     if (needConfirm)
                         try

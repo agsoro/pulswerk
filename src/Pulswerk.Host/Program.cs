@@ -221,9 +221,21 @@ namespace Pulswerk.Host
                 _logger!.Info($"  [BACnet] Initialising connection '{conn.Id}' (port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
                 try
                 {
-                    var transport = new BacnetIpUdpProtocolTransport(bindPort, true, false, 1472, bindAddr);
-                    var client = new BacnetClient(transport, (int)(conn.LocalDeviceId ?? 1234));
-                    client.Start();
+                    // Check if we already have a client for this port to avoid "Address already in use"
+                    var client = BacnetDriver.GetSharedClient(conn); 
+                    
+                    if (client == null)
+                    {
+                        var transport = new BacnetIpUdpProtocolTransport(bindPort, true, false, 1472, bindAddr);
+                        client = new BacnetClient(transport, (int)(conn.LocalDeviceId ?? 1234));
+                        client.Start();
+                        _logger!.Info($"  [BACnet] Started new client for '{conn.Id}' on port {bindPort}.");
+                    }
+                    else
+                    {
+                        _logger!.Info($"  [BACnet] Reusing existing client for '{conn.Id}' on port {bindPort}.");
+                    }
+
                     BacnetDriver.SetClientForConnection(conn.Id, client);
                 }
                 catch (Exception ex)
