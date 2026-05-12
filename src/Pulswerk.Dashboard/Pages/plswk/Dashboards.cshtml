@@ -38,6 +38,10 @@
     .widget-actions button:hover { color:#38bdf8; background:rgba(56,189,248,0.1); }
     .widget-body { flex:1; padding:0.75rem; min-height:0; position:relative; overflow:hidden; display:flex; flex-direction:column; }
     .widget-body canvas { width:100%!important; flex:1; min-height:0; }
+    /* Dense chart legend – compact scrollable strip */
+    .widget-body .apexcharts-legend { max-height:56px; overflow-y:auto !important; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.1) transparent; }
+    .widget-body .apexcharts-legend::-webkit-scrollbar { width:3px; }
+    .widget-body .apexcharts-legend::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.12); border-radius:4px; }
     .widget-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,0.6); z-index:5; border-radius:0 0 1rem 1rem; }
     .widget-loading i { font-size:1.25rem; color:#38bdf8; }
 

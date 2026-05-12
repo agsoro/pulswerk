@@ -1,5 +1,10 @@
 // dashboards.js – Custom dashboard engine
-const COLORS = ['#38bdf8','#f59e0b','#10b981','#a78bfa','#f472b6','#fb923c','#34d399','#60a5fa','#e879f9','#fbbf24'];
+const COLORS = [
+    '#38bdf8','#f59e0b','#10b981','#a78bfa','#f472b6',  // sky, amber, emerald, violet, pink
+    '#fb923c','#34d399','#60a5fa','#e879f9','#fbbf24',  // orange, teal, blue, fuchsia, yellow
+    '#22d3ee','#ef4444','#84cc16','#c084fc','#f97316',  // cyan, red, lime, purple, orange-deep
+    '#2dd4bf','#818cf8','#facc15','#ec4899','#14b8a6',  // teal-bright, indigo, yellow-warm, pink-hot, teal-dark
+];
 const PRESETS = [
     {label:'Last 5 min',ms:300000},{label:'Last 15 min',ms:900000},{label:'Last 1 hour',ms:3600000},
     {label:'Last 6 hours',ms:21600000},{label:'Last 12 hours',ms:43200000},{label:'Last 24 hours',ms:86400000},
@@ -155,7 +160,8 @@ async function renderTimeseries(w,body,cfg){
     let data;
     try{data=await api(`WidgetData&keys=${keys.join(',')}&startTs=${startTs}&endTs=${endTs}`);}catch(e){return;}
 
-    const series=[], colors=[], statsHtml=[];
+    const many = keys.length > 5;  // threshold for "dense" chart mode
+    const series=[], colors=[];
     keys.forEach((key,i)=>{
         const color=COLORS[i%COLORS.length];
         const raw=data?.[key]||[];
@@ -164,52 +170,41 @@ async function renderTimeseries(w,body,cfg){
         const meta=allKeys.find(k=>k.key===key);
         series.push({name:meta?.fullName||friendlyName(key),data:points});
         colors.push(color);
-
-        if(points.length){
-            const vals=points.map(p=>p.y);
-            const min=Math.min(...vals),max=Math.max(...vals),avg=vals.reduce((a,b)=>a+b,0)/vals.length;
-            const meta=allKeys.find(k=>k.key===key);
-            const kn=meta?.fullName||friendlyName(key);
-            statsHtml.push(`<span style="font-size:0.68rem;color:${color};display:flex;align-items:center;gap:0.3rem">
-                <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span>
-                ${esc(kn)}: <span style="color:#94a3b8">min</span> ${formatNumber(min,1)} <span style="color:#94a3b8">avg</span> ${formatNumber(avg,1)} <span style="color:#94a3b8">max</span> ${formatNumber(max,1)}</span>`);
-        }
     });
 
     const existingChart = charts[w.id];
     if(existingChart){
         existingChart.updateSeries(series);
-        const statsEl=document.getElementById('stats_'+w.id);
-        if(statsEl) statsEl.innerHTML=statsHtml.join('');
         return;
     }
 
-    body.innerHTML='<div style="flex:1;min-height:0;position:relative"><div id="chart_'+w.id+'" style="height:100%"></div></div>'
-        +'<div class="ts-stats" id="stats_'+w.id+'" style="display:flex;gap:0.75rem;padding:0.4rem 0.5rem 0;flex-wrap:wrap;flex-shrink:0;"></div>';
-    
-    const statsEl=document.getElementById('stats_'+w.id);
-    if(statsEl) statsEl.innerHTML=statsHtml.join('');
+    body.innerHTML='<div style="flex:1;min-height:0;position:relative"><div id="chart_'+w.id+'" style="height:100%"></div></div>';
 
+    // ── Chart config adapts to series count ─────────────────────
+    const useArea = !many && cfg.chartType !== 'bar';
     const options = {
         series: series,
         chart: {
-            type: cfg.chartType==='bar'?'bar':'area',
+            type: useArea ? 'area' : (cfg.chartType==='bar'?'bar':'line'),
             height: '100%',
             fontFamily: 'Inter, sans-serif',
-            animations: { enabled: true, easing: 'easeinout', speed: 400 },
+            animations: { enabled: !many, easing: 'easeinout', speed: 400 },
             toolbar: { show: false },
             sparkline: { enabled: false },
             stacked: !!cfg.stacked,
         },
         colors: colors,
-        stroke: { curve: 'smooth', width: 2 },
-        fill: {
+        stroke: {
+            curve: 'straight',
+            width: many ? 1.5 : 2,
+        },
+        fill: useArea ? {
             type: 'gradient',
             gradient: {
                 shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0.05,
                 stops: [0, 90, 100]
             }
-        },
+        } : { opacity: 0 },
         dataLabels: { enabled: false },
         grid: {
             show: true, borderColor: 'rgba(255,255,255,0.05)',
@@ -228,11 +223,16 @@ async function renderTimeseries(w,body,cfg){
         },
         legend: {
             show: cfg.showLegend!==false, position: 'top', horizontalAlign: 'right',
-            labels: { colors: '#94a3b8' }, markers: { width: 8, height: 8, radius: 12 }
+            fontSize: many ? '10px' : '11px',
+            labels: { colors: '#94a3b8' },
+            markers: { width: many ? 6 : 8, height: many ? 6 : 8, radius: 12 },
+            itemMargin: { horizontal: many ? 4 : 8, vertical: 1 },
         },
         tooltip: {
             theme: 'dark', x: { format: 'dd MMM HH:mm:ss' },
-            y: { formatter: (v)=>formatNumber(v, 2) }
+            y: { formatter: (v)=>formatNumber(v, 2) },
+            shared: !many,          // individual tooltips when dense
+            intersect: many,
         }
     };
 

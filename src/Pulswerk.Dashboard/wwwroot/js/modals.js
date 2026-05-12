@@ -77,7 +77,7 @@ function renderChart(data) {
                 stops: [20, 100]
             }
         },
-        stroke: { curve: 'smooth', width: 2 },
+        stroke: { curve: 'straight', width: 2 },
         dataLabels: { enabled: false },
         xaxis: {
             type: 'datetime',
