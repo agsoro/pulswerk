@@ -258,9 +258,11 @@ namespace Pulswerk.Storage
             return allPoints;
         }
 
-        /// <summary>Query time-series data for multiple keys within a time range.</summary>
+        /// <summary>Query time-series data for multiple keys within a time range.
+        /// Automatically downsamples via aggregateWindow when the range exceeds ~15 minutes
+        /// to keep chart payloads lean (~300 points per series max).</summary>
         public async Task<Dictionary<string, List<TsPoint>>> QueryMultipleAsync(
-            List<string> keys, long startTs, long endTs, int limit = 1000)
+            List<string> keys, long startTs, long endTs, int maxPointsPerKey = 300)
         {
             var result = new Dictionary<string, List<TsPoint>>();
             if (keys == null || keys.Count == 0) return result;
@@ -269,12 +271,31 @@ namespace Pulswerk.Storage
             var keyFilter = string.Join(" or ",
                 keys.Select(k => $"r.key == \"{EscapeFlux(k)}\""));
 
+            // ── Adaptive downsampling ──────────────────────────────────────
+            // Compute a sensible aggregateWindow size so we get at most ~maxPointsPerKey
+            // points per series.  For short ranges we skip aggregation entirely.
+            long spanMs = endTs - startTs;
+            long windowMs = spanMs / maxPointsPerKey;  // target interval
+
+            // Only aggregate when window would be ≥ 10 seconds (i.e. span > ~50 min)
+            bool downsample = windowMs >= 10_000;
+            string aggregatePipeline = "";
+            if (downsample)
+            {
+                // Round window to a clean Flux duration
+                string windowDur = FormatFluxDuration(windowMs);
+                aggregatePipeline = $"""
+                      |> aggregateWindow(every: {windowDur}, fn: mean, createEmpty: false)
+                    """;
+            }
+
             var flux = $"""
                 from(bucket: "{_bucket}")
                   |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(endTs)})
                   |> filter(fn: (r) => r._measurement == "telemetry" and ({keyFilter}))
-                  |> sort(columns: ["_time"])
-                  |> limit(n: {limit})
+                  |> filter(fn: (r) => r._field == "value")
+                {aggregatePipeline}  |> sort(columns: ["_time"])
+                  |> limit(n: {maxPointsPerKey})
                 """;
 
             // Initialize result dict
@@ -311,6 +332,16 @@ namespace Pulswerk.Storage
             }
 
             return result;
+        }
+
+        /// <summary>Format milliseconds to a clean Flux duration string (e.g., "30s", "5m", "1h").</summary>
+        private static string FormatFluxDuration(long ms)
+        {
+            if (ms >= 3_600_000)
+                return $"{Math.Max(1, ms / 3_600_000)}h";
+            if (ms >= 60_000)
+                return $"{Math.Max(1, ms / 60_000)}m";
+            return $"{Math.Max(10, ms / 1000)}s";
         }
 
         private async Task<List<TsPoint>> ExecuteQueryAsync(string flux)
