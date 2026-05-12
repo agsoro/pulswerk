@@ -2293,7 +2293,10 @@ namespace Pulswerk.Drivers.BACnet
             if (discovered == null || discovered.Count == 0 || device.DeviceId == null)
                 return new AssetNodeDto { Id = device.Name, Name = device.Name, Type = "BACnet Device", IsView = true };
 
-            var lookup = discovered.ToDictionary(o => o.ObjectId, o => o);
+            var dataPoints = discovered
+                .Where(o => !IsMetaObjectType(o.ObjectId.type))
+                .ToList();
+
             var root = new AssetNodeDto { Id = device.Name, Name = device.Name, IsView = true, Type = "BACnet Device" };
 
             var tree = GetDiscoveredTree(device.Name);
@@ -2301,13 +2304,16 @@ namespace Pulswerk.Drivers.BACnet
 
             if (hasTree)
             {
-                // ── Normal path: convert Structured View tree to DTO ─────────
-                var referencedIds = new HashSet<BacnetObjectId>();
+                // Check if the Structured View tree actually contains data-point leaves
+                var lookup = discovered.ToDictionary(o => o.ObjectId, o => o);
                 var stats = new TreeConversionStats();
+                var referencedIds = new HashSet<BacnetObjectId>();
+                var treeChildren = new List<AssetNodeDto>();
+
                 foreach (var rootNode in tree!.Roots)
                 {
                     var dto = ConvertNodeToDto(rootNode, device.Id, device.DeviceId!.Value, lookup, new List<PathSegmentDto>(), stats);
-                    root.Children.Add(dto);
+                    treeChildren.Add(dto);
                     CollectReferencedIds(rootNode, referencedIds);
                 }
 
@@ -2316,82 +2322,199 @@ namespace Pulswerk.Drivers.BACnet
                     $"leaves={stats.TotalTreeLeaves}, " +
                     $"resolved={stats.ResolvedFromCache}, " +
                     $"not-in-cache={stats.NotInCache}, " +
-                    $"discovered={discovered.Count}");
+                    $"discovered={discovered.Count}, " +
+                    $"dataPoints={dataPoints.Count}");
 
-                // ── Orphan handling: items in CachedObjects not in the tree ──
-                var orphaned = discovered
-                    .Where(o => !referencedIds.Contains(o.ObjectId)
-                             && !IsMetaObjectType(o.ObjectId.type))
-                    .ToList();
-
-                if (orphaned.Count > 0)
+                if (stats.TotalTreeLeaves > 0)
                 {
+                    // ── Normal path: tree has data-point leaves ───────────────
+                    root.Children.AddRange(treeChildren);
+
+                    // Add orphaned items not referenced by the tree
+                    var orphaned = dataPoints
+                        .Where(o => !referencedIds.Contains(o.ObjectId))
+                        .ToList();
+
+                    if (orphaned.Count > 0)
+                    {
+                        Console.WriteLine(
+                            $"  [Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
+                            $"not referenced by any Structured View — adding to 'Uncategorized'.");
+
+                        var uncatNode = new AssetNodeDto
+                        {
+                            Id = $"{device.Id}_uncategorized",
+                            Name = "Uncategorized",
+                            Description = $"{orphaned.Count} data points not referenced by any Structured View",
+                            IsView = true,
+                            Type = "Folder"
+                        };
+                        var uncatPath = new List<PathSegmentDto>
+                        {
+                            new PathSegmentDto { Id = root.Id, Name = root.Name },
+                            new PathSegmentDto { Id = uncatNode.Id, Name = uncatNode.Name }
+                        };
+
+                        foreach (var info in orphaned)
+                            uncatNode.Points.Add(CreatePointDto(info, device.Id, uncatNode.Id, uncatPath));
+
+                        root.Children.Add(uncatNode);
+                    }
+                }
+                else
+                {
+                    // ── NamingPath fallback: tree has views but no data-point leaves ──
+                    // Deziko controllers encode hierarchy via NamingPath (4397) on each
+                    // object rather than listing data points in subordinate lists.
+                    int withPath = dataPoints.Count(o => o.NamingPath?.Count > 0);
                     Console.WriteLine(
-                        $"  [Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
-                        $"not referenced by any Structured View — adding to 'Uncategorized'.");
+                        $"  [Hierarchy] {device.Name}: Structured View tree has 0 data-point leaves — " +
+                        $"building hierarchy from NamingPath ({withPath}/{dataPoints.Count} objects have paths).");
 
-                    var uncatNode = new AssetNodeDto
-                    {
-                        Id = $"{device.Id}_uncategorized",
-                        Name = "Uncategorized",
-                        Description = $"{orphaned.Count} data points not referenced by any Structured View",
-                        IsView = true,
-                        Type = "Folder"
-                    };
-                    var uncatPath = new List<PathSegmentDto>
-                    {
-                        new PathSegmentDto { Id = root.Id, Name = root.Name },
-                        new PathSegmentDto { Id = uncatNode.Id, Name = uncatNode.Name }
-                    };
-
-                    foreach (var info in orphaned)
-                        uncatNode.Points.Add(CreatePointDto(info, device.Id, uncatNode.Id, uncatPath));
-
-                    root.Children.Add(uncatNode);
+                    BuildHierarchyFromNamingPaths(root, dataPoints, device.Id);
                 }
             }
             else
             {
                 // ── Flat fallback: no Structured View tree available ──────────
-                // Group discovered objects by BACnet type so items are still
-                // visible and navigable in the asset tree / list.
                 Console.WriteLine(
                     $"  [Hierarchy] {device.Name}: no Structured View tree — " +
                     $"building flat hierarchy for {discovered.Count} discovered object(s).");
 
-                var dataPoints = discovered
-                    .Where(o => !IsMetaObjectType(o.ObjectId.type))
-                    .ToList();
-
-                // Group by object-type category for easier navigation
-                var grouped = dataPoints
-                    .GroupBy(o => GetObjectTypeCategory(o.ObjectId.type))
-                    .OrderBy(g => g.Key);
-
-                foreach (var group in grouped)
+                // Try NamingPath first, fall back to type-grouping
+                int withPath = dataPoints.Count(o => o.NamingPath?.Count > 0);
+                if (withPath > dataPoints.Count / 2)
                 {
-                    var folderNode = new AssetNodeDto
-                    {
-                        Id = $"{device.Id}_{group.Key.ToLowerInvariant().Replace(" ", "_")}",
-                        Name = group.Key,
-                        Description = $"{group.Count()} data points",
-                        IsView = true,
-                        Type = "Folder"
-                    };
-                    var folderPath = new List<PathSegmentDto>
-                    {
-                        new PathSegmentDto { Id = root.Id, Name = root.Name },
-                        new PathSegmentDto { Id = folderNode.Id, Name = folderNode.Name }
-                    };
-
-                    foreach (var info in group)
-                        folderNode.Points.Add(CreatePointDto(info, device.Id, folderNode.Id, folderPath));
-
-                    root.Children.Add(folderNode);
+                    BuildHierarchyFromNamingPaths(root, dataPoints, device.Id);
+                }
+                else
+                {
+                    BuildFlatHierarchyByType(root, dataPoints, device.Id);
                 }
             }
 
             return root;
+        }
+
+        /// <summary>
+        /// Builds a tree hierarchy from each object's NamingPath segments.
+        /// Objects with NamingPath ["Floor1", "AHU01", "SupplyFan"] create
+        /// nested folders Floor1 → AHU01, with the point under AHU01.
+        /// Objects without a NamingPath go into "Uncategorized".
+        /// </summary>
+        private static void BuildHierarchyFromNamingPaths(
+            AssetNodeDto root, List<BacnetObjectInfo> dataPoints, string techDeviceId)
+        {
+            // Cache of created folder nodes by their full path key
+            var folderCache = new Dictionary<string, AssetNodeDto>();
+            var uncategorized = new List<BacnetObjectInfo>();
+
+            foreach (var info in dataPoints)
+            {
+                if (info.NamingPath == null || info.NamingPath.Count == 0)
+                {
+                    uncategorized.Add(info);
+                    continue;
+                }
+
+                // NamingPath segments define the folder chain
+                // e.g. ["Gebäude", "OG1", "RLT001", "Zuluft"] → 3 folders, point under "RLT001"
+                // The last segment is the point's friendly name
+                var folderSegments = info.NamingPath.Count > 1
+                    ? info.NamingPath.Take(info.NamingPath.Count - 1).ToList()
+                    : new List<string>(); // single segment = point name only, goes at root
+
+                // Build/find the folder chain
+                var parentNode = root;
+                var pathAccum = new List<PathSegmentDto> { new PathSegmentDto { Id = root.Id, Name = root.Name } };
+                string pathKey = "";
+
+                foreach (var segment in folderSegments)
+                {
+                    pathKey = string.IsNullOrEmpty(pathKey) ? segment : $"{pathKey}/{segment}";
+                    string folderId = $"{techDeviceId}_{AssetNodeDto.PathSegmentId(pathKey)}";
+
+                    if (!folderCache.TryGetValue(pathKey, out var folderNode))
+                    {
+                        folderNode = new AssetNodeDto
+                        {
+                            Id = folderId,
+                            Name = segment,
+                            IsView = true,
+                            Type = "Folder"
+                        };
+                        folderCache[pathKey] = folderNode;
+                        parentNode.Children.Add(folderNode);
+                    }
+
+                    pathAccum = new List<PathSegmentDto>(pathAccum)
+                    {
+                        new PathSegmentDto { Id = folderId, Name = segment }
+                    };
+                    parentNode = folderNode;
+                }
+
+                // Create the data point under its folder
+                var pointDto = CreatePointDto(info, techDeviceId, parentNode.Id, pathAccum);
+                parentNode.Points.Add(pointDto);
+            }
+
+            // Handle objects without NamingPath
+            if (uncategorized.Count > 0)
+            {
+                var uncatNode = new AssetNodeDto
+                {
+                    Id = $"{techDeviceId}_uncategorized",
+                    Name = "Uncategorized",
+                    Description = $"{uncategorized.Count} data points without NamingPath",
+                    IsView = true,
+                    Type = "Folder"
+                };
+                var uncatPath = new List<PathSegmentDto>
+                {
+                    new PathSegmentDto { Id = root.Id, Name = root.Name },
+                    new PathSegmentDto { Id = uncatNode.Id, Name = uncatNode.Name }
+                };
+
+                foreach (var info in uncategorized)
+                    uncatNode.Points.Add(CreatePointDto(info, techDeviceId, uncatNode.Id, uncatPath));
+
+                root.Children.Add(uncatNode);
+            }
+        }
+
+        /// <summary>
+        /// Groups data points by BACnet object type for a flat hierarchy.
+        /// Used when no Structured View tree or NamingPath data is available.
+        /// </summary>
+        private static void BuildFlatHierarchyByType(
+            AssetNodeDto root, List<BacnetObjectInfo> dataPoints, string techDeviceId)
+        {
+            var grouped = dataPoints
+                .GroupBy(o => GetObjectTypeCategory(o.ObjectId.type))
+                .OrderBy(g => g.Key);
+
+            foreach (var group in grouped)
+            {
+                var folderNode = new AssetNodeDto
+                {
+                    Id = $"{techDeviceId}_{group.Key.ToLowerInvariant().Replace(" ", "_")}",
+                    Name = group.Key,
+                    Description = $"{group.Count()} data points",
+                    IsView = true,
+                    Type = "Folder"
+                };
+                var folderPath = new List<PathSegmentDto>
+                {
+                    new PathSegmentDto { Id = root.Id, Name = root.Name },
+                    new PathSegmentDto { Id = folderNode.Id, Name = folderNode.Name }
+                };
+
+                foreach (var info in group)
+                    folderNode.Points.Add(CreatePointDto(info, techDeviceId, folderNode.Id, folderPath));
+
+                root.Children.Add(folderNode);
+            }
         }
 
         /// <summary>
