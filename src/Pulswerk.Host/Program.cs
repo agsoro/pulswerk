@@ -81,7 +81,6 @@ namespace Pulswerk.Host
                 return;
             }
 
-            UnitMapper.Initialize(cfg.UnitTranslations);
 
             var connections = cfg.Connections.ToDictionary(c => c.Id);
 

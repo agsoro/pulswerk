@@ -10,8 +10,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("polling")] PollingConfig? Polling,
         [property: JsonPropertyName("connections")] List<ConnectionConfig> Connections,
         [property: JsonPropertyName("devices")] List<DeviceConfig> Devices,
-        [property: JsonPropertyName("monitoring")] MonitoringConfig? Monitoring,
-        [property: JsonPropertyName("unitTranslations")] Dictionary<string, string>? UnitTranslations = null
+        [property: JsonPropertyName("monitoring")] MonitoringConfig? Monitoring
     );
 
     // ── InfluxDB ───────────────────────────────────────────────────────────────

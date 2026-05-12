@@ -1,13 +1,11 @@
 using System.Collections.Generic;
 using System.IO.BACnet;
 using System.Linq;
-using Pulswerk.Core;
 
 namespace Pulswerk.Drivers
 {
     public static class UnitMapper
     {
-        private static Dictionary<string, string>? _translations;
         private static readonly HashSet<string> _loggedUnmapped = new();
 
         /// <summary>
@@ -21,31 +19,12 @@ namespace Pulswerk.Drivers
             // Add more as needed from production "No mapping" logs
         };
 
-        public static void Initialize(Dictionary<string, string>? translations)
-        {
-            if (translations == null)
-            {
-                _translations = null;
-                return;
-            }
-            _translations = new Dictionary<string, string>();
-            foreach (var kv in translations)
-            {
-                var normKey = new string(kv.Key.Where(c => !char.IsWhiteSpace(c) && c != '-' && c != '_').ToArray())
-                                  .ToLowerInvariant();
-                _translations[normKey] = kv.Value;
-            }
-        }
-
         public static string Map(string unit)
         {
             if (string.IsNullOrWhiteSpace(unit)) return "";
 
             var normalized = new string(unit.Where(c => !char.IsWhiteSpace(c) && c != '-' && c != '_').ToArray())
                                  .ToLowerInvariant();
-
-            if (_translations != null && _translations.TryGetValue(normalized, out var translated))
-                return translated;
 
             // Default internal mappings for common BACnet units
             var result = normalized switch

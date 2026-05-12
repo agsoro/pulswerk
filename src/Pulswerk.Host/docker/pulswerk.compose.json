@@ -112,15 +112,5 @@
       "address": "bacnet-sim",
       "assetType": "BACnet Zone"
     }
-  ],
-  "unitTranslations": {
-    "degrees celsius": "°C",
-    "degrees kelvin": "°C",
-    "percent": "%",
-    "pascals": "Pa",
-    "percent relative humidity": "% r.F.",
-    "cubic meters per hour": "m³/h",
-    "liters per second": "l/s",
-    "no units": ""
-  }
+  ]
 }

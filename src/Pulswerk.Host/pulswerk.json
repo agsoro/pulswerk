@@ -122,16 +122,6 @@
       "assetType": "BACnet Zone"
     }
   ],
-  "unitTranslations": {
-    "degrees celsius": "°C",
-    "degrees kelvin": "K",
-    "percent": "%",
-    "pascals": "Pa",
-    "percent relative humidity": "% r.F.",
-    "cubic meters per hour": "m³/h",
-    "liters per second": "l/s",
-    "no units": ""
-  },
   "monitoring": {
     "enabled": true,
     "port": 5000,

@@ -273,27 +273,6 @@ namespace Connector.Tests
             Assert.Equal("bacnet-ip", cfg.Connections[1].Type);
         }
 
-        // ── UnitTranslations ─────────────────────────────────────────────────
-
-        [Fact]
-        public void AppConfig_UnitTranslations_ParsedCorrectly()
-        {
-            string json = """
-            {
-              "connections": [],
-              "devices": [],
-              "unitTranslations": {
-                "degrees celsius": "°C",
-                "percent": "%"
-              }
-            }
-            """;
-
-            var cfg = JsonSerializer.Deserialize<AppConfig>(json);
-            Assert.NotNull(cfg!.UnitTranslations);
-            Assert.Equal(2, cfg.UnitTranslations!.Count);
-            Assert.Equal("°C", cfg.UnitTranslations["degrees celsius"]);
-        }
 
         // ── MonitoringConfig ─────────────────────────────────────────────────
 

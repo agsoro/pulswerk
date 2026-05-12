@@ -46,12 +46,6 @@
       // are now inferred from code-based defaults for "deziko" devices.
     }
   ],
-  "unitTranslations": {
-    "degrees celsius": "°C",
-    "percent": "%",
-    "pascals": "Pa",
-    "no units": ""
-  },
   "monitoring": {
     "enabled": true,
     "port": 5000,
