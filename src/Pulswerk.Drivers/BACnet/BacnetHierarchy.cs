@@ -353,17 +353,27 @@ namespace Pulswerk.Drivers.BACnet
 
             // 1. Read count first
             uint count = 0;
-            try
+            int retry = 0;
+            while (retry++ < 3)
             {
-                if (!client.ReadPropertyRequest(address, targetObj,
-                        propId, out IList<BacnetValue> countVal, arrayIndex: 0)
-                    || countVal.Count == 0)
+                try
                 {
-                    return result;
+                    if (client.ReadPropertyRequest(address, targetObj,
+                            propId, out IList<BacnetValue> countVal, arrayIndex: 0)
+                        && countVal.Count > 0)
+                    {
+                        count = Convert.ToUInt32(countVal[0].Value);
+                        break;
+                    }
+                    if (retry < 3) Thread.Sleep(500);
                 }
-                count = Convert.ToUInt32(countVal[0].Value);
+                catch
+                {
+                    if (retry < 3) Thread.Sleep(500);
+                }
             }
-            catch { return result; }
+
+            if (count == 0) return result;
 
             // 2. Small lists: try bulk read
             if (count < 50)

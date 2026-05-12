@@ -36,9 +36,9 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(data);
         }
 
-        public JsonResult OnGetProperties(string key)
+        public async Task<JsonResult> OnGetPropertiesAsync(string key)
         {
-            var data = _dataService.GetPointProperties(key);
+            var data = await _dataService.GetPropertiesAsync(key);
             return new JsonResult(data);
         }
 
@@ -51,10 +51,25 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(new { success });
         }
 
+        public async Task<IActionResult> OnPostWriteComplex([FromBody] WriteComplexRequest request)
+        {
+            if (request == null || string.IsNullOrEmpty(request.Key))
+                return BadRequest("Invalid request");
+
+            bool success = await _dataService.WriteComplexValueAsync(request.Key, request.Value);
+            return new JsonResult(new { success });
+        }
+
         public class WriteRequest
         {
             public string Key { get; set; } = "";
             public double Value { get; set; }
+        }
+
+        public class WriteComplexRequest
+        {
+            public string Key { get; set; } = "";
+            public object Value { get; set; } = null!;
         }
     }
 }

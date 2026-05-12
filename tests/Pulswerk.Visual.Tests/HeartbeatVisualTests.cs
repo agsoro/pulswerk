@@ -10,7 +10,7 @@ namespace Pulswerk.Visual.Tests
         [Test]
         public async Task HeartbeatPage_RendersCorrectly()
         {
-            await Page.GotoAsync(Url("/Heartbeat"));
+            await Page.GotoAsync(Url("/plswk/Heartbeat"));
             await WaitForDashboard();
             await DisableAnimations();
 
@@ -23,7 +23,7 @@ namespace Pulswerk.Visual.Tests
         [Test]
         public async Task HeartbeatPage_SidebarLink_Works()
         {
-            await Page.GotoAsync(Url("/"));
+            await Page.GotoAsync(Url("/plswk/"));
             await WaitForDashboard();
 
             // Hover over sidebar to expand it

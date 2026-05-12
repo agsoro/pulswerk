@@ -18,6 +18,8 @@ function getPointIcon(type) {
     if (t.includes('pressure')) return '<i class="fas fa-tachometer-alt"></i>';
     if (t.includes('fan') || t.includes('air')) return '<i class="fas fa-wind"></i>';
     if (t.includes('pump')) return '<i class="fas fa-fill-drip"></i>';
+    if (t.includes('calendar')) return '<i class="fas fa-calendar-alt"></i>';
+    if (t.includes('schedule')) return '<i class="fas fa-clock"></i>';
     
     return '<i class="fas fa-tag"></i>';
 }

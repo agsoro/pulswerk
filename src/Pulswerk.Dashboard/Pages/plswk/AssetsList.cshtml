@@ -1,0 +1,278 @@
+@page
+@model Pulswerk.Dashboard.Pages.AssetsListModel
+@{
+    ViewData["Title"] = "Asset Inventory";
+}
+
+<div class="h-[calc(100vh-110px)] flex flex-col gap-6 animate-fade-in">
+    <!-- Header with Search and Stats -->
+    <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-800/40 backdrop-blur-md border border-white/5 rounded-2xl p-5 shadow-2xl">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
+                <i class="fas fa-boxes text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-extrabold text-white tracking-tight">Asset Inventory</h1>
+                <p class="text-[0.7rem] text-slate-400 uppercase tracking-widest font-semibold opacity-60">Real-time telemetry overview</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-4 flex-1 max-w-2xl">
+            <div class="relative flex-1">
+                <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+                <input type="text" id="assetSearch" placeholder="Search by name, key, device..." 
+                       class="w-full bg-slate-900/40 border border-white/5 rounded-xl py-3 pl-12 pr-4 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:bg-slate-900/60 transition-all shadow-inner">
+            </div>
+            <div id="statsCounter" class="px-4 py-2 bg-slate-900/60 border border-white/5 rounded-xl text-[0.7rem] font-mono text-cyan-400/80 shadow-lg shrink-0">
+                Loading...
+            </div>
+        </div>
+    </div>
+
+    <!-- Table Container -->
+    <div class="flex-1 bg-slate-800/20 backdrop-blur-sm border border-white/5 rounded-2xl overflow-hidden flex flex-col shadow-2xl">
+        <div class="overflow-x-auto flex-1">
+            <table class="w-full text-left border-collapse" id="assetsTable">
+                <thead class="sticky top-0 bg-slate-900/80 backdrop-blur-xl z-20 border-b border-white/5">
+                    <tr class="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500 font-black">
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="connection">
+                            <div class="flex items-center gap-1.5">Connection <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="device">
+                            <div class="flex items-center gap-1.5">Device <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="name">
+                            <div class="flex items-center gap-1.5">Identity & Path <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="id">
+                            <div class="flex items-center gap-1.5">Key / Tag <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" data-sort="type">
+                            <div class="flex items-center gap-1.5">Type <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" data-sort="value">
+                            <div class="flex items-center justify-end gap-1.5">Current Value <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" data-sort="lastUpdate">
+                            <div class="flex items-center justify-end gap-1.5">Update <i class="fas fa-sort text-[0.6rem] opacity-20 group-hover:opacity-50"></i></div>
+                        </th>
+                        <th class="px-6 py-4 text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody" class="divide-y divide-white/[0.03]">
+                    <!-- Data rows populated by JS -->
+                    <tr>
+                        <td colspan="8" class="px-6 py-32 text-center">
+                            <div class="flex flex-col items-center gap-4">
+                                <div class="relative w-16 h-16">
+                                    <div class="absolute inset-0 rounded-full border-4 border-cyan-500/10"></div>
+                                    <div class="absolute inset-0 rounded-full border-4 border-cyan-500 border-t-transparent animate-spin"></div>
+                                </div>
+                                <p class="text-slate-400 font-medium animate-pulse">Synchronizing inventory...</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AssetModals")
+@Html.AntiForgeryToken()
+
+@section Scripts {
+    <script>
+        let allPoints = [];
+        let filteredPoints = [];
+        let sortField = 'name';
+        let sortDir = 1;
+
+        async function loadPoints() {
+            try {
+                const response = await fetch('?handler=Points');
+                allPoints = await response.json();
+                filteredPoints = [...allPoints];
+                renderTable();
+                updateStats();
+            } catch (error) {
+                console.error("Failed to load points:", error);
+                document.getElementById('tableBody').innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-6 py-20 text-center text-red-400/50">
+                            <i class="fas fa-exclamation-triangle text-3xl mb-4"></i>
+                            <p>Failed to load data points</p>
+                        </td>
+                    </tr>`;
+            }
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            if (filteredPoints.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="px-6 py-32 text-center">
+                            <div class="flex flex-col items-center gap-2 opacity-20">
+                                <i class="fas fa-search text-4xl mb-2"></i>
+                                <p class="text-slate-400 italic">No assets matching your search criteria</p>
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filteredPoints.map(p => {
+                const safeName = (p.name || 'Unnamed').replace(/'/g, "\\'");
+                const safeFullName = (p.fullName || '').replace(/'/g, "\\'");
+                const safeUnits = (p.units || '').replace(/'/g, "\\'");
+                const safePathEnc = encodeURIComponent(JSON.stringify(p.parentPath || []));
+                
+                const isCalculated = p.type === 'CALCULATED';
+                const isSchedule = p.type === 'OBJECT_SCHEDULE';
+                
+                const valueDisplay = isSchedule 
+                    ? `<span class="text-slate-500 text-[0.7rem] font-bold tracking-tight uppercase"><i class="fas fa-calendar-alt mr-1.5 opacity-40"></i>Schedule</span>`
+                    : `<span class="text-sm font-bold text-sky-400 tabular-nums point-value" data-key="${p.key}">${formatNumber(p.value, 2)}</span>`;
+
+                return `
+                    <tr class="hover:bg-white/[0.02] transition-all group border-l-2 border-l-transparent hover:border-l-sky-500/50">
+                        <td class="px-6 py-4">
+                            <div class="text-[0.8rem] text-slate-400 font-medium">${p.connection || '-'}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-[0.8rem] text-slate-300 font-medium">${p.device || '-'}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-[0.8rem] text-white font-semibold group-hover:text-sky-400 transition-colors">${p.name}</div>
+                            <div class="text-[0.65rem] text-slate-500 font-medium truncate max-w-xs opacity-50">${p.path || '/'}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <span class="text-[0.75rem] text-slate-500 font-mono opacity-80">${p.key}</span>
+                        </td>
+                        <td class="px-6 py-4">
+                            <span class="text-[0.7rem] font-bold uppercase tracking-wider text-slate-500">${p.type || 'Point'}</span>
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="flex items-baseline justify-end gap-1.5">
+                                ${valueDisplay}
+                                <span class="text-[0.65rem] font-bold text-slate-600 uppercase">${p.units || ''}</span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <span class="text-[0.75rem] text-slate-500 font-medium last-update" data-key="${p.key}">
+                                ${p.lastUpdate || '-'}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="flex justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-all">
+                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
+                                        title="Trend" onclick="openHistory('${p.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')">
+                                    <i class="fas fa-chart-area text-xs"></i>
+                                </button>
+                                ${p.type === 'OBJECT_SCHEDULE' ? `
+                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
+                                        title="Schedule View" onclick="openScheduleView('${p.key}', '${safeName}', '${safePathEnc}')">
+                                    <i class="fas fa-calendar-alt text-xs"></i>
+                                </button>` : ''}
+                                ${p.isWritable && p.type !== 'OBJECT_SCHEDULE' ? `
+                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
+                                        title="Edit Value" onclick="openEdit('${p.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${p.type}', '${encodeURIComponent(JSON.stringify(p.enumValues || null))}')">
+                                    <i class="fas fa-pen text-xs"></i>
+                                </button>` : ''}
+                                <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 transition-all" 
+                                        title="Properties" onclick="openProperties('${p.key}', '${safeName}', '${safePathEnc}')">
+                                    <i class="fas fa-cog text-xs"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateStats() {
+            const counter = document.getElementById('statsCounter');
+            counter.innerHTML = `<span class="opacity-50">SHOWN:</span> ${filteredPoints.length} <span class="mx-2 opacity-20">|</span> <span class="opacity-50">TOTAL:</span> ${allPoints.length}`;
+        }
+
+        // Search Implementation
+        document.getElementById('assetSearch').addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            filteredPoints = allPoints.filter(p => 
+                (p.name || '').toLowerCase().includes(term) ||
+                (p.key || '').toLowerCase().includes(term) ||
+                (p.device || '').toLowerCase().includes(term) ||
+                (p.connection || '').toLowerCase().includes(term) ||
+                (p.path || '').toLowerCase().includes(term)
+            );
+            applySort();
+            renderTable();
+            updateStats();
+        });
+
+        // Sorting Implementation
+        document.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const field = th.dataset.sort;
+                if (sortField === field) {
+                    sortDir *= -1;
+                } else {
+                    sortField = field;
+                    sortDir = 1;
+                }
+                
+                // Update icons
+                document.querySelectorAll('th i.fas').forEach(i => i.className = 'fas fa-sort ml-1 opacity-30');
+                const icon = th.querySelector('i');
+                icon.className = `fas fa-sort-${sortDir === 1 ? 'up' : 'down'} ml-1 text-cyan-400`;
+                
+                applySort();
+                renderTable();
+            });
+        });
+
+        function applySort() {
+            filteredPoints.sort((a, b) => {
+                let valA = (a[sortField] || '').toString().toLowerCase();
+                let valB = (b[sortField] || '').toString().toLowerCase();
+                
+                // Numerical sort for value
+                if (sortField === 'value') {
+                    valA = parseFloat(a.value) || 0;
+                    valB = parseFloat(b.value) || 0;
+                }
+
+                if (valA < valB) return -1 * sortDir;
+                if (valA > valB) return 1 * sortDir;
+                return 0;
+            });
+        }
+
+        async function refreshLiveValues() {
+            try {
+                const response = await fetch('?handler=Points');
+                const latest = await response.json();
+                
+                latest.forEach(p => {
+                    // Update in our master list so sort/search remains accurate
+                    const masterIdx = allPoints.findIndex(mp => mp.key === p.key);
+                    if (masterIdx !== -1) {
+                        allPoints[masterIdx].value = p.value;
+                        allPoints[masterIdx].lastUpdate = p.lastUpdate;
+                    }
+
+                    // Update DOM directly for efficiency
+                    const valEl = document.querySelector(`.point-value[data-key="${p.key}"]`);
+                    if (valEl) valEl.textContent = formatNumber(p.value, 2);
+
+                    const tsEl = document.querySelector(`.last-update[data-key="${p.key}"]`);
+                    if (tsEl) tsEl.textContent = p.lastUpdate || '-';
+                });
+            } catch (e) {}
+        }
+
+        loadPoints();
+        setInterval(refreshLiveValues, 2000);
+    </script>
+}

@@ -64,7 +64,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task SidebarExpandedState()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -79,7 +79,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task ConnectionsSelectCard()
     {
-        await Page.GotoAsync(Url("/Connections"));
+        await Page.GotoAsync(Url("/plswk/Connections"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -98,7 +98,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task DashboardsCreateModal()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -117,7 +117,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task DashboardsEditModeToolbar()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -143,7 +143,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task DashboardsTimewindowDropdown()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -169,7 +169,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task DashboardsAddWidgetModal()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -202,7 +202,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task AlarmsAcknowledgeModal()
     {
-        await Page.GotoAsync(Url("/Alarms"));
+        await Page.GotoAsync(Url("/plswk/Alarms"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -224,7 +224,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task AlarmsFilterBySeverity()
     {
-        await Page.GotoAsync(Url("/Alarms?severity=CRITICAL"));
+        await Page.GotoAsync(Url("/plswk/Alarms?severity=CRITICAL"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -236,7 +236,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task AssetsTreeNodeInteraction()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -255,7 +255,7 @@ public class UxAuditInteractionTests : BrowserTestBase
     [Test]
     public async Task AlarmBoxHoverStates()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
 
         await Page.Locator("#box-critical").HoverAsync();

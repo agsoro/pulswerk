@@ -23,11 +23,33 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO.BACnet;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Pulswerk.Core;
 using Pulswerk.Storage;
+
+namespace System.IO.BACnet
+{
+    // Fallback definitions for Weekly_Schedule support if the linked library version misses them
+    public struct BacnetTimeValue
+    {
+        public BacnetTime Time;
+        public BacnetValue Value;
+        public BacnetTimeValue(BacnetTime time, BacnetValue value) { Time = time; Value = value; }
+    }
+    public struct BacnetTime
+    {
+        public byte Hour; public byte Minute; public byte Second; public byte Hundredths;
+        public BacnetTime(byte hour, byte minute, byte second, byte hundredths)
+        {
+            Hour = hour; Minute = minute; Second = second; Hundredths = hundredths;
+        }
+        public override string ToString() => $"{Hour:D2}:{Minute:D2}:{Second:D2}";
+    }
+}
 
 namespace Pulswerk.Drivers.BACnet
 {
@@ -126,6 +148,7 @@ namespace Pulswerk.Drivers.BACnet
     //  Discovered object descriptor (cached after discovery)
     // =========================================================================
     public record BacnetObjectInfo(
+        string TechDeviceId,
         uint DeviceId,
         BacnetObjectId ObjectId,
         string ObjectName,           // technical path (from PROP_OBJECT_NAME)
@@ -143,8 +166,8 @@ namespace Pulswerk.Drivers.BACnet
         uint? LimitEnable = null     // from PROP_LIMIT_ENABLE (52)
     )
     {
-        /// <summary>Sanitised technical ObjectName used as the key prefix, e.g. "dev123_g01_asp01_rlt001_t_su".</summary>
-        public string KeyPrefix => DeviceId == 0 ? Sanitise(ObjectName) : $"dev{DeviceId}_{Sanitise(ObjectName)}";
+        /// <summary>Sanitised technical ObjectName used as the key prefix, e.g. "ahu-01_rlt001_t_su".</summary>
+        public string KeyPrefix => $"{TechDeviceId}_{Sanitise(ObjectName)}";
 
         public static string ShortTypeName(BacnetObjectTypes t) => t switch
         {
@@ -268,6 +291,7 @@ namespace Pulswerk.Drivers.BACnet
                 throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId.");
 
             var cfg = device;  // BACnet config is flat on DeviceConfig
+            var result = new BacnetReadResult();
 
             var client = OpenClient(conn);
             try
@@ -276,7 +300,7 @@ namespace Pulswerk.Drivers.BACnet
             // ── Resolve BacnetAddress ─────────────────────────────────────────
             // Use device-specific host if provided; otherwise fallback to connection host 
             // (though in the new model, connection host is the local bind IP).
-            var address = ResolveAddress(client, device.Address ?? "", 47808,
+            var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
                                          device.DeviceId.Value,
                                          cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
             // ResolveAddress always returns a non-null address (direct IP fallback)
@@ -294,7 +318,7 @@ namespace Pulswerk.Drivers.BACnet
                 Interlocked.Increment(ref _busyCount);
                 Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
                 var all = DiscoverObjects(client, address, device.DeviceId.Value);
-                var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.DeviceId.Value);
+                var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value);
 
                 // Enrich objects with vendor-specific properties (override in subclass)
                 filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
@@ -358,7 +382,6 @@ namespace Pulswerk.Drivers.BACnet
                 return new BacnetReadResult();
 
             // ── Read properties ───────────────────────────────────────────────
-            var result = new BacnetReadResult();
 
             var props = cfg.Properties ?? BacnetPropsConfig.Default;
             var telPropIds = ParsePropertyIds(props.EffectiveTelemetry);
@@ -435,7 +458,15 @@ namespace Pulswerk.Drivers.BACnet
             BacnetClient client, BacnetAddress address,
             DiscoveryState state, DeviceConfig device, DeviceConfig cfg)
         {
-            // Base: nothing extra
+            // If the device has an AssetType set, we trigger the hierarchy walker.
+            // This allows standard BACnet devices to also build trees if requested.
+            if (!string.IsNullOrEmpty(cfg.AssetType))
+            {
+                Console.WriteLine($"  [BACnet] Walking Structured Views on {device.Name} (assetType={cfg.AssetType})…");
+                state.Tree = BacnetHierarchy.Walk(client, address, device.DeviceId!.Value);
+                Console.WriteLine($"  [BACnet] Hierarchy walk complete — " +
+                                  $"{state.Tree.Roots.Count} root(s) found.");
+            }
         }
 
         /// <summary>
@@ -459,64 +490,75 @@ namespace Pulswerk.Drivers.BACnet
             var deviceObjId = new BacnetObjectId(BacnetObjectTypes.OBJECT_DEVICE, deviceId);
             var objectIds = new List<BacnetObjectId>();
 
-            // 1. Always read the count first (Index 0)
-            uint count = 0;
+            // 1. Try to read the full list at once (best performance)
             try
             {
-                if (!client.ReadPropertyRequest(address, deviceObjId,
-                        BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> countVal,
-                        arrayIndex: 0))
+                var prevTimeout = client.Timeout;
+                client.Timeout = 10000; // higher timeout for bulk read
+                try
                 {
-                    Console.Error.WriteLine("  [BACnet] Could not read object list length. Aborting discovery.");
-                    return objectIds;
+                    if (client.ReadPropertyRequest(address, deviceObjId, BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> fullList))
+                    {
+                        foreach (var v in fullList)
+                            if (v.Value is BacnetObjectId id) objectIds.Add(id);
+                        
+                        if (objectIds.Count > 0)
+                        {
+                            Console.WriteLine($"  [BACnet] Successfully read {objectIds.Count} objects in bulk.");
+                            return objectIds;
+                        }
+                    }
                 }
-                count = Convert.ToUInt32(countVal[0].Value);
+                finally { client.Timeout = prevTimeout; }
             }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"  [BACnet] Failed to read object list count: {ex.Message}");
-                return objectIds;
-            }
-            Console.WriteLine($"  [BACnet] Device reports {count} total objects.");
+            catch { /* fallback to index read */ }
 
-            // 2. If the list is small, try a fast bulk read
-            if (count < 50)
+            // 2. Fallback: Read the count first (Index 0)
+            uint count = 0;
+            int retry = 0;
+            while (retry++ < 3)
             {
                 try
                 {
                     if (client.ReadPropertyRequest(address, deviceObjId,
-                            BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> listValues))
+                            BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> countVal,
+                            arrayIndex: 0))
                     {
-                        foreach (var v in listValues)
-                            if (v.Value is BacnetObjectId oid)
-                                objectIds.Add(oid);
-
-                        if (objectIds.Count >= count) return objectIds;
-
-                        Console.WriteLine($"  [BACnet] Bulk read truncated ({objectIds.Count}/{count}) – falling back to index read.");
-                        objectIds.Clear();
+                        if (countVal != null && countVal.Count > 0)
+                        {
+                            count = Convert.ToUInt32(countVal[0].Value);
+                            break;
+                        }
                     }
+                    if (retry < 3) Thread.Sleep(1000);
                 }
-                catch { /* fallback to index read */ }
+                catch
+                {
+                    if (retry < 3) Thread.Sleep(1000);
+                }
             }
 
-            // 3. Reliable index-by-index read (essential for large lists without segmentation)
-            Console.WriteLine($"  [BACnet] Reading {count} objects index-by-index to avoid UDP fragmentation...");
+            if (count == 0)
+            {
+                Console.Error.WriteLine($"  [BACnet] Could not read object list from {address}. Aborting discovery.");
+                return objectIds;
+            }
 
+            // 3. Read the list index-by-index (slow fallback)
+            Console.WriteLine($"  [BACnet] Downloading object list index-by-index ({count} items)…");
             for (uint i = 1; i <= count; i++)
             {
                 try
                 {
                     if (client.ReadPropertyRequest(address, deviceObjId,
-                            BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> entry,
-                            arrayIndex: i)
-                        && entry.Count > 0
-                        && entry[0].Value is BacnetObjectId eid)
+                            BacnetPropertyIds.PROP_OBJECT_LIST, out IList<BacnetValue> objVal,
+                            arrayIndex: i))
                     {
-                        objectIds.Add(eid);
+                        foreach (var v in objVal)
+                            if (v.Value is BacnetObjectId id) objectIds.Add(id);
                     }
                 }
-                catch { /* skip broken entry */ }
+                catch { /* skip broken index */ }
 
                 if (i % 100 == 0) Console.WriteLine($"  [BACnet] ... discovered {i}/{count} objects");
             }
@@ -613,7 +655,7 @@ namespace Pulswerk.Drivers.BACnet
         /// Resolves one entry from the objectTypes allowlist.
         /// Accepts (in order):
         ///   1. Short alias     e.g. "AI", "BO"
-//   2. Full enum name  e.g. "OBJECT_ANALOG_INPUT"
+        ///   2. Full enum name  e.g. "OBJECT_ANALOG_INPUT"
         ///   3. Numeric type ID e.g. "0", "128"
         /// Returns null and logs a warning when the entry cannot be resolved.
         /// </summary>
@@ -642,7 +684,7 @@ namespace Pulswerk.Drivers.BACnet
         protected static List<BacnetObjectInfo> ApplyFilter(
             BacnetClient client, BacnetAddress address,
             List<BacnetObjectId> candidates, BacnetFilterConfig filter,
-            uint deviceId)
+            string techDeviceId, uint deviceInstanceId)
         {
             // Build type allowlist (null = accept all)
             HashSet<BacnetObjectTypes>? allowedTypes = null;
@@ -677,10 +719,6 @@ namespace Pulswerk.Drivers.BACnet
                     Console.WriteLine($"    [BACnet]   Processing objects... {processed}/{candidates.Count}");
 
                 if (result.Count >= cap) break;
-
-                // Include DEVICE object so we can monitor system status etc.
-                // It is not a typical data point, but useful for diagnostics.
-                // if (oid.type == BacnetObjectTypes.OBJECT_DEVICE) continue;
 
                 // 1. Type allowlist (no network I/O)
                 if (allowedTypes != null && !allowedTypes.Contains(oid.type)) continue;
@@ -765,7 +803,7 @@ namespace Pulswerk.Drivers.BACnet
                     ReadUintProp(client, address, oid, BacnetPropertyIds.PROP_LIMIT_ENABLE, out limitEnable);
                 }
 
-                result.Add(new BacnetObjectInfo(deviceId, oid, objectName, namingPath, nameExt, description, profileName, commandable, category, logId, stateText, highLimit, lowLimit, deadband, limitEnable));
+                result.Add(new BacnetObjectInfo(techDeviceId, deviceInstanceId, oid, objectName, namingPath, nameExt, description, profileName, commandable, category, logId, stateText, highLimit, lowLimit, deadband, limitEnable));
             }
 
             if (objectsWithLabels > 0)
@@ -777,7 +815,8 @@ namespace Pulswerk.Drivers.BACnet
         static bool IsAnalog(BacnetObjectTypes t) => t is
             BacnetObjectTypes.OBJECT_ANALOG_INPUT or
             BacnetObjectTypes.OBJECT_ANALOG_OUTPUT or
-            BacnetObjectTypes.OBJECT_ANALOG_VALUE;
+            BacnetObjectTypes.OBJECT_ANALOG_VALUE or
+            BacnetObjectTypes.OBJECT_SCHEDULE;
 
         static bool IsMultiState(BacnetObjectTypes t) => t is
             BacnetObjectTypes.OBJECT_MULTI_STATE_INPUT or
@@ -787,7 +826,8 @@ namespace Pulswerk.Drivers.BACnet
         static bool IsBinary(BacnetObjectTypes t) => t is
             BacnetObjectTypes.OBJECT_BINARY_INPUT or
             BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
-            BacnetObjectTypes.OBJECT_BINARY_VALUE;
+            BacnetObjectTypes.OBJECT_BINARY_VALUE or
+            BacnetObjectTypes.OBJECT_CALENDAR;
 
         public static string ReadStringProp(BacnetClient client, BacnetAddress address, BacnetObjectId oid, BacnetPropertyIds propId)
         {
@@ -897,7 +937,8 @@ namespace Pulswerk.Drivers.BACnet
             BacnetObjectTypes.OBJECT_BINARY_VALUE or
             BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT or
             BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE or
-            BacnetObjectTypes.OBJECT_INTEGER_VALUE;
+            BacnetObjectTypes.OBJECT_INTEGER_VALUE or
+            BacnetObjectTypes.OBJECT_SCHEDULE;
 
 
         static string ReadObjectName(BacnetClient client, BacnetAddress address, BacnetObjectId oid)
@@ -954,7 +995,10 @@ namespace Pulswerk.Drivers.BACnet
                         var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
                         if (pv.value?.Count > 0)
                         {
-                            var val = pv.value[0].Value;
+                            // For complex properties (Schedule/Calendar), keep the full list.
+                            // For simple properties, take the first value.
+                            object? val = (pv.value.Count == 1) ? pv.value[0].Value : pv.value;
+                            
                             // Check if the value is actually a Bacnet error string or object
                             if (val != null && val.ToString()!.Contains("ERROR_")) continue;
                             result[propId] = val;
@@ -970,7 +1014,9 @@ namespace Pulswerk.Drivers.BACnet
                 {
                     if (client.ReadPropertyRequest(address, oid, propId, out IList<BacnetValue> vals)
                         && vals.Count > 0)
-                        result[propId] = vals[0].Value;
+                    {
+                        result[propId] = (vals.Count == 1) ? vals[0].Value : vals;
+                    }
                 }
                 catch { /* property not available on this object */ }
             }
@@ -993,14 +1039,14 @@ namespace Pulswerk.Drivers.BACnet
             // BacnetAddress requires a dotted-decimal IP – resolve hostname if needed
             // (e.g. "bacnet-sim" on the Docker bridge resolves via Docker DNS).
             string ip = host;
-            if (!System.Net.IPAddress.TryParse(host, out _))
+            if (!string.IsNullOrEmpty(host) && !System.Net.IPAddress.TryParse(host, out _))
             {
                 try
                 {
                     var addrs = System.Net.Dns.GetHostAddresses(host);
                     var v4 = addrs.FirstOrDefault(
                         a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
-                    if (v4 != null) ip = v4.ToString();
+                    if (v4 != null) { ip = v4.ToString(); Console.WriteLine($"  [BACnet] Resolved '{host}' to {ip}"); }
                 }
                 catch (Exception ex)
                 {
@@ -1009,8 +1055,22 @@ namespace Pulswerk.Drivers.BACnet
                 }
             }
 
+            // Ensure we have a numeric IP for BacnetAddress
+            if (string.IsNullOrEmpty(ip) || !System.Net.IPAddress.TryParse(ip, out _))
+            {
+                ip = "127.0.0.1";
+                Console.WriteLine($"  [BACnet] WARNING: Using loopback fallback for '{host}'");
+            }
+
             // Build the direct address from config (works for unicast BACnet/IP)
-            var directAddress = new BacnetAddress(BacnetAddressTypes.IP, $"{ip}:{port}");
+            byte[] ipBytes = System.Net.IPAddress.Parse(ip).GetAddressBytes();
+            byte[] adr = new byte[6];
+            Array.Copy(ipBytes, adr, 4);
+            adr[4] = (byte)((port >> 8) & 0xFF);
+            adr[5] = (byte)(port & 0xFF);
+            
+            var directAddress = new BacnetAddress(BacnetAddressTypes.IP, 0, adr);
+            Console.WriteLine($"  [BACnet] Attempting Who-Is for device {deviceId} via {ip}:{port}...");
 
             BacnetAddress? iamAddress = null;
             using var signal = new ManualResetEventSlim(false);
@@ -1018,21 +1078,31 @@ namespace Pulswerk.Drivers.BACnet
             void OnIam(BacnetClient _, BacnetAddress adr, uint id,
                        uint maxApdu, BacnetSegmentations seg, ushort vendor)
             {
-                if (id == deviceId) { iamAddress = adr; signal.Set(); }
+                if (id == deviceId) 
+                { 
+                    iamAddress = adr; 
+                    Console.WriteLine($"  [BACnet] Got I-Am from {adr} (Net={adr.net}, Adr={BitConverter.ToString(adr.adr)})");
+                    signal.Set(); 
+                }
             }
 
             client.OnIam += OnIam;
             try
             {
-                // Broadcast Who-Is (no range) – the target device on the same
-                // subnet will reply with I-Am so we can confirm it is alive.
-                client.WhoIs();
+                // Range-based Who-Is
+                client.WhoIs((int)deviceId, (int)deviceId);
                 signal.Wait(timeoutMs);
             }
-            finally { client.OnIam -= OnIam; }
+            finally
+            {
+                client.OnIam -= OnIam;
+            }
 
-            // Prefer the address from I-Am (contains real transport info);
-            // fall back to the address constructed from config.
+            if (iamAddress != null) Console.WriteLine($"  [BACnet] Received I-Am from {iamAddress} for device {deviceId}.");
+            else Console.WriteLine($"  [BACnet] Who-Is timeout for device {deviceId}. Falling back to {directAddress}.");
+
+            // For BACnet/IP, we MUST ensure the address has the correct port.
+            // If we got an I-Am, use it. Otherwise use our manually built directAddress.
             return iamAddress ?? directAddress;
         }
 
@@ -1044,7 +1114,7 @@ namespace Pulswerk.Drivers.BACnet
         {
             if (_clientsByConnection.TryGetValue(conn.Id, out var shared)) return shared;
 
-            var transport = new BacnetIpUdpProtocolTransport(port: 0, useExclusivePort: true);
+            var transport = new BacnetIpUdpProtocolTransport(port: conn.LocalPort ?? 0, useExclusivePort: true);
             var client = new BacnetClient(transport);
             client.Start();
             return client;
@@ -1382,6 +1452,10 @@ namespace Pulswerk.Drivers.BACnet
             if (propId == BacnetPropertyIds.PROP_UNITS)
                 return UnitMapper.Format(raw);
 
+            // Special handling for Schedules
+            if (propId == BacnetPropertyIds.PROP_WEEKLY_SCHEDULE || propId == BacnetPropertyIds.PROP_EXCEPTION_SCHEDULE)
+                return FormatBacnetSchedule(raw);
+
             if (obj.StateText != null && obj.StateText.Count > 0 && TryToDouble(raw, out double d))
             {
                 int val = (int)d;
@@ -1395,6 +1469,46 @@ namespace Pulswerk.Drivers.BACnet
                 return Math.Round(d2, 4);
 
             return raw.ToString() ?? "";
+        }
+
+        private static string FormatBacnetSchedule(object? raw)
+        {
+            if (raw == null) return "None";
+            if (raw is not System.Collections.IEnumerable list) return raw.ToString() ?? "";
+
+            var days = new List<string>();
+            string[] dayNames = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+            int dayIdx = 0;
+
+            foreach (var day in list)
+            {
+                var times = new List<string>();
+                object? dayVal = day;
+                if (day is BacnetValue bv) dayVal = bv.Value;
+
+                if (dayVal is System.Collections.IEnumerable timeList)
+                {
+                    var enumValues = timeList.Cast<BacnetValue>().ToList();
+                    for (int i = 0; i < enumValues.Count - 1; i += 2)
+                    {
+                        var tVal = enumValues[i].Value;
+                        var vVal = enumValues[i + 1].Value;
+
+                        string timeStr = tVal is DateTime dt ? dt.ToString("HH:mm") : tVal?.ToString() ?? "??:??";
+                        string valueStr = vVal?.ToString() ?? "?";
+                        
+                        times.Add($"{timeStr}➔{valueStr}");
+                    }
+                }
+
+                if (times.Count > 0 && dayIdx < 7)
+                {
+                    days.Add($"{dayNames[dayIdx]}: {string.Join(", ", times)}");
+                }
+                dayIdx++;
+            }
+
+            return days.Count > 0 ? string.Join(" | ", days) : "Empty Schedule";
         }
 
         // ── Per-device mutable discovery state ───────────────────────────────
@@ -1528,8 +1642,8 @@ namespace Pulswerk.Drivers.BACnet
             // Long-lived client (one UDP socket per device)
             state.CovClient = OpenClient(conn);
             state.CovAddress = ResolveAddress(
-                state.CovClient, conn.Address, conn.Port,
-                device.DeviceId!.Value,
+                state.CovClient, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
+                device.DeviceId ?? 0,
                 cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
 
             // Register COV notification handler
@@ -1617,7 +1731,7 @@ namespace Pulswerk.Drivers.BACnet
         {
             Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
             var all = DiscoverObjects(client, address, device.DeviceId!.Value);
-            var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.DeviceId!.Value);
+            var filtered = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId!.Value);
 
             // Enrich objects with vendor-specific properties (override in subclass)
             filtered = filtered.Select(obj => EnrichObjectInfo(client, address, obj)).ToList();
@@ -1735,8 +1849,8 @@ namespace Pulswerk.Drivers.BACnet
                    > TimeSpan.FromMinutes(disc.RefreshIntervalMinutes))
             {
                 state.CovAddress = ResolveAddress(
-                    state.CovClient, conn.Address, conn.Port,
-                    device.DeviceId!.Value,
+                    state.CovClient, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
+                    device.DeviceId ?? 0,
                     cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
                 RunDiscoveryInternal(state.CovClient, state.CovAddress, device, cfg, state);
                 state.CovSubExpiry.Clear();  // force resubscription of everything
@@ -1890,18 +2004,13 @@ namespace Pulswerk.Drivers.BACnet
                     $"Object for key '{key}' ({objectId}) not found in discovery cache for '{device.Name}'. " +
                     "Trigger a rediscovery or check the key name.");
 
-            if (!obj.Commandable)
+            if (!obj.Commandable && !key.Contains("schedule"))
                 throw new InvalidOperationException(
                     $"Object '{key}' ({objectId}) is not commandable (no PROP_PRIORITY_ARRAY). " +
                     "Write rejected to protect the device logic.");
 
-            var client = OpenClient(conn);
-            try
-            {
-                var address = ResolveAddress(
-                    client, device.Address ?? "", 47808,
-                    device.DeviceId.Value,
-                    cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
+            using var client = OpenClient(conn);
+            var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808, device.DeviceId ?? 0, 2000);
 
             // Choose the right application tag:
             //   Binary objects expect an ENUMERATED (0/1); all others expect REAL
@@ -1921,17 +2030,119 @@ namespace Pulswerk.Drivers.BACnet
             if (!ok)
                 throw new Exception(
                     $"BACnet WriteProperty returned NAK for key '{key}' ({objectId}).");
-            }
-            finally
+        }
+        public void WriteComplex(ConnectionConfig conn, DeviceConfig device, string key, object value)
+        {
+            if (device.DeviceId is null) throw new InvalidOperationException("Device is missing deviceId.");
+            var state = GetOrCreateState(device.Name);
+            var objectId = ResolveObjectIdFromKey(key, state);
+            if (objectId == null) throw new ArgumentException($"Cannot resolve object from key '{key}'.");
+
+            using var client = OpenClient(conn);
+            var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808, device.DeviceId ?? 0, 2000);
+
+            string json;
+            if (value is string s) json = s;
+            else if (value is System.Text.Json.JsonElement je)
             {
-                if (!_clientsByConnection.Values.Contains(client))
-                    client.Dispose();
+                // If the JsonElement is a string, it means the JSON was double-encoded 
+                // or passed as a string property. We need the inner content.
+                json = je.ValueKind == System.Text.Json.JsonValueKind.String ? (je.GetString() ?? "") : je.GetRawText();
             }
+            else json = System.Text.Json.JsonSerializer.Serialize(value);
+
+            if (objectId.Value.type == BacnetObjectTypes.OBJECT_SCHEDULE)
+            {
+                WriteWeeklySchedule(client, address, objectId.Value, json);
+                return;
+            }
+
+            throw new NotSupportedException($"Complex write not supported for key '{key}' (type {objectId.Value.type}).");
+        }
+
+        private void WriteWeeklySchedule(BacnetClient client, BacnetAddress address, BacnetObjectId oid, string json)
+        {
+            try
+            {
+                var days = JsonSerializer.Deserialize<List<DailyScheduleDto>>(json);
+                if (days == null) return;
+
+                // BACnet Weekly_Schedule is an array of 7 DailySchedule (SEQUENCE OF TimeValue)
+                // arrayIndex 1 = Monday, ..., 7 = Sunday
+                for (int i = 0; i < 7; i++)
+                {
+                    var dayData = days.FirstOrDefault(d => d.DayIndex == i);
+                    var dayValues = new List<BacnetValue>();
+
+                    if (dayData?.Entries != null)
+                    {
+                        // Sort entries by time (mandatory for BACnet schedules)
+                        var sortedEntries = dayData.Entries.OrderBy(e => e.Time).ToList();
+                        foreach (var entry in sortedEntries)
+                        {
+                            if (TimeSpan.TryParse(entry.Time, out var ts))
+                            {
+                                // Use DateTime for the TIME tag, as the library extracts the time part from it.
+                                var timeValue = new DateTime(1, 1, 1, ts.Hours, ts.Minutes, ts.Seconds);
+                                dayValues.Add(new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_TIME, timeValue));
+                                dayValues.Add(new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_REAL, (float)entry.Value));
+                            }
+                        }
+                    }
+
+                    // Use WritePropertyMultipleRequest to specify array index
+                    uint arrayIndex = (uint)(i + 1);
+                    var propRef = new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_WEEKLY_SCHEDULE, arrayIndex);
+                    var propValue = new BacnetPropertyValue { property = propRef, value = dayValues, priority = 0 };
+                    
+                    if (!client.WritePropertyMultipleRequest(address, oid, new[] { propValue }))
+                    {
+                        Console.Error.WriteLine($"  [BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Failed to write weekly schedule: {ex.Message}", ex);
+            }
+        }
+
+        private class DailyScheduleDto
+        {
+            [JsonPropertyName("dayIndex")] public int DayIndex { get; set; }
+            [JsonPropertyName("entries")] public List<ScheduleEntryDto>? Entries { get; set; }
+        }
+
+        private class ScheduleEntryDto
+        {
+            [JsonPropertyName("time")] public string Time { get; set; } = "";
+            [JsonPropertyName("value")] public double Value { get; set; }
         }
 
         protected virtual BacnetObjectId? ResolveObjectIdFromKey(string key, DiscoveryState state)
         {
-            // Try legacy parsing (e.g. "ao_3_supply_temp_sp_value")
+            // 1. Try to find the key in the discovery cache (handles modern/structured keys)
+            // Telemetry keys are stored as "device.Id_SanitisedName_value"
+            // The 'key' passed here might be the full key OR just the suffix after device.Id
+            
+            // Check full match first
+            var cached = state.CachedObjects.FirstOrDefault(o => (o.KeyPrefix + "_value") == key);
+            if (cached == null)
+            {
+                // Try matching by suffix (common when called from DashboardDataService)
+                cached = state.CachedObjects.FirstOrDefault(o => o.ObjectName.EndsWith(key.Replace("_value", ""), StringComparison.OrdinalIgnoreCase));
+                
+                // Final attempt: check if the key is the sanitised suffix
+                if (cached == null && state.CachedObjects.Count > 0)
+                {
+                    string devicePrefix = state.CachedObjects[0].TechDeviceId + "_";
+                    cached = state.CachedObjects.FirstOrDefault(o => (o.KeyPrefix + "_value") == (devicePrefix + key));
+                }
+            }
+
+            if (cached != null) return cached.ObjectId;
+
+            // 2. Try legacy parsing (e.g. "ao_3_supply_temp_sp_value")
             if (TryParseKeyToObjectId(key, out var objectId))
                 return objectId;
 
@@ -1957,6 +2168,173 @@ namespace Pulswerk.Drivers.BACnet
 
             result = new BacnetObjectId(objType, instance);
             return true;
+        }
+
+        // ── IDeviceDriver Hierarchy & Properties ─────────────────────────────
+
+        public AssetNodeDto GetAssetHierarchy(DeviceConfig device)
+        {
+            var discovered = GetDiscoveredObjects(device.Name);
+            if (discovered == null || discovered.Count == 0 || device.DeviceId == null)
+                return new AssetNodeDto { Id = device.Name, Name = device.Name, Type = "BACnet Device", IsView = true };
+
+            var tree = GetDiscoveredTree(device.Name);
+            if (tree == null)
+                return new AssetNodeDto { Id = device.Name, Name = device.Name, Type = "BACnet Device", IsView = true };
+
+            var lookup = discovered.ToDictionary(o => o.ObjectId, o => o);
+            var root = new AssetNodeDto { Id = device.Name, Name = device.Name, IsView = true, Type = "BACnet Device" };
+
+            foreach (var rootNode in tree.Roots)
+            {
+                var dto = ConvertNodeToDto(rootNode, device.Id, device.DeviceId.Value, lookup, new List<PathSegmentDto>());
+                root.Children.Add(dto);
+            }
+
+            return root;
+        }
+
+        private AssetNodeDto ConvertNodeToDto(DezikoNode node, string techDeviceId, uint deviceInstanceId, Dictionary<BacnetObjectId, BacnetObjectInfo> objectLookup, List<PathSegmentDto> currentPath)
+        {
+            string uniqueId = $"{techDeviceId}_{node.ObjectId}";
+            var dto = new AssetNodeDto
+            {
+                Id = uniqueId,
+                Name = node.FriendlyName,
+                Description = node.Description,
+                IsView = node.IsView,
+                Type = node.IsView ? "Folder" : node.ObjectId.type.ToString()
+            };
+
+            var newPath = new List<PathSegmentDto>(currentPath);
+            newPath.Add(new PathSegmentDto { Id = uniqueId, Name = node.FriendlyName });
+            foreach (var child in node.Children)
+            {
+                if (child.IsView)
+                {
+                    dto.Children.Add(ConvertNodeToDto(child, techDeviceId, deviceInstanceId, objectLookup, newPath));
+                }
+                else
+                {
+                    var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(child.ObjectName)}";
+                    var telemetryKey = $"{keyPrefix}_value"; 
+
+                    bool isWritable = false;
+                    List<string>? enumValues = null;
+                    if (objectLookup.TryGetValue(child.ObjectId, out var info))
+                    {
+                        isWritable = info.Commandable;
+
+                        bool isMultiState = child.ObjectId.type is
+                            BacnetObjectTypes.OBJECT_MULTI_STATE_INPUT or
+                            BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT or
+                            BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE;
+
+                        bool isBinary = child.ObjectId.type is
+                            BacnetObjectTypes.OBJECT_BINARY_INPUT or
+                            BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
+                            BacnetObjectTypes.OBJECT_BINARY_VALUE;
+
+                        if (isMultiState && info.StateText?.Count > 0)
+                            enumValues = info.StateText;
+                        else if (isBinary && info.StateText?.Count >= 2)
+                            enumValues = info.StateText;
+                    }
+
+                    var pDto = new AssetPointDto
+                    {
+                        Id = $"{techDeviceId}_{child.ObjectId}",
+                        Name = child.FriendlyName,
+                        FullName = child.ObjectName,
+                        Description = child.Description,
+                        Units = child.Units,
+                        Type = child.ObjectId.type.ToString(),
+                        Key = telemetryKey,
+                        IsWritable = isWritable,
+                        EnumValues = enumValues,
+                        ParentId = uniqueId,
+                        ParentPath = newPath
+                    };
+                    dto.Points.Add(pDto);
+                }
+            }
+
+            return dto;
+        }
+
+        public Task<List<PropertyDto>> GetExtendedPropertiesAsync(ConnectionConfig connection, DeviceConfig device, string key)
+        {
+            return Task.Run(() =>
+            {
+                var props = new List<PropertyDto>();
+                var discovered = GetDiscoveredObjects(device.Name);
+
+                // Search by key
+                var info = discovered.FirstOrDefault(i => (i.KeyPrefix + "_value") == key);
+                if (info == null) return props;
+
+                props.Add(new PropertyDto { Name = "Object ID", Value = info.ObjectId.ToString() });
+                props.Add(new PropertyDto { Name = "Object Name", Value = info.ObjectName });
+                props.Add(new PropertyDto { Name = "Description", Value = info.Description });
+                props.Add(new PropertyDto { Name = "Profile Name", Value = info.ProfileName });
+                props.Add(new PropertyDto { Name = "Category", Value = info.Category.ToString() });
+                props.Add(new PropertyDto { Name = "Writable", Value = info.Commandable ? "Yes" : "No" });
+                props.Add(new PropertyDto { Name = "Friendly Path", Value = string.Join(" > ", info.NamingPath) });
+
+                try
+                {
+                    using var client = new BacnetClient(new BacnetIpUdpProtocolTransport(0));
+                    client.Start();
+                    var address = ResolveAddress(client, device.Address ?? connection.Address ?? "", connection.Port ?? 47808, device.DeviceId ?? 0, 1000);
+
+                    var extraPropIds = new[] {
+                        BacnetPropertyIds.PROP_ALL,
+                        BacnetPropertyIds.PROP_PRESENT_VALUE,
+                        BacnetPropertyIds.PROP_STATUS_FLAGS,
+                        BacnetPropertyIds.PROP_EVENT_STATE,
+                        BacnetPropertyIds.PROP_RELIABILITY,
+                        BacnetPropertyIds.PROP_OUT_OF_SERVICE,
+                        BacnetPropertyIds.PROP_SETPOINT,
+                        BacnetPropertyIds.PROP_PRIORITY_ARRAY,
+                        BacnetPropertyIds.PROP_RELINQUISH_DEFAULT,
+                        BacnetPropertyIds.PROP_WEEKLY_SCHEDULE,
+                        BacnetPropertyIds.PROP_EXCEPTION_SCHEDULE,
+                        (BacnetPropertyIds)4311, // Substitution Value
+                        (BacnetPropertyIds)4312  // Substitution Active
+                    };
+
+                    var liveValues = ReadObjectProperties(client, address, info.ObjectId, extraPropIds);
+                    foreach (var kv in liveValues)
+                    {
+                        if (kv.Value == null) continue;
+                        string name = kv.Key.ToString().Replace("PROP_", "").Replace("_", " ");
+                        name = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(name.ToLower());
+
+                        string valStr;
+                        if (kv.Key == BacnetPropertyIds.PROP_PRIORITY_ARRAY && kv.Value is System.Collections.Generic.IList<BacnetValue> pArray)
+                        {
+                            var parts = new List<string>();
+                            for (int i = 0; i < pArray.Count; i++)
+                            {
+                                var v = pArray[i].Value;
+                                if (v != null && v.ToString() != "Null")
+                                    parts.Add($"P{i + 1}: {v}");
+                            }
+                            valStr = parts.Count > 0 ? string.Join(", ", parts) : "No active priorities";
+                        }
+                        else
+                        {
+                            valStr = kv.Value.ToString() ?? "";
+                        }
+
+                        if (props.Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) continue;
+                        props.Add(new PropertyDto { Name = name, Value = valStr });
+                    }
+                }
+                catch { /* live read failed, return cached properties only */ }
+
+                return props;
+            });
         }
     }
 }

@@ -36,24 +36,28 @@
   ],
   "devices": [
     {
+      "id": "meter-main-a",
       "name": "Main Meter Building A",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
       "deviceId": 1
     },
     {
+      "id": "meter-sub-f2",
       "name": "Sub Meter Floor 2",
       "deviceType": "janitza",
       "connectionId": "modbus-building-b",
       "deviceId": 1
     },
     {
+      "id": "meter-sub-f3",
       "name": "Sub Meter Floor 3",
       "deviceType": "janitza",
       "connectionId": "modbus-building-b",
       "deviceId": 2
     },
     {
+      "id": "meter-main",
       "name": "Main Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
@@ -65,6 +69,7 @@
       "assetType": "Meter"
     },
     {
+      "id": "meter-sub",
       "name": "Sub Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
@@ -77,6 +82,7 @@
       "assetType": "Meter"
     },
     {
+      "id": "meter-floor",
       "name": "Floor Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-building-a",
@@ -90,12 +96,14 @@
       "assetType": "Meter Level"
     },
     {
+      "id": "ctrl-zone-1",
       "name": "Glueck Controller Zone 1",
       "deviceType": "glueck",
       "connectionId": "modbus-building-a",
       "deviceId": 3
     },
     {
+      "id": "asp01",
       "name": "ASP01",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",
@@ -106,6 +114,7 @@
       }
     },
     {
+      "id": "ahu-test-bacnet",
       "name": "Test BACnet AHU",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",

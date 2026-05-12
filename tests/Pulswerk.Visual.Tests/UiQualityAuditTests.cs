@@ -206,7 +206,7 @@ public class UiQualityAuditTests : BrowserTestBase
     [Test]
     public async Task ModalsAreAdequateSize()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
 
         var modals = UiSpec.All.Where(s => s.IsModal && s.TriggerSelector != null).ToArray();
@@ -246,7 +246,7 @@ public class UiQualityAuditTests : BrowserTestBase
             catch { /* trigger may not work in test context */ }
 
             // Reload for next modal
-            await Page.GotoAsync(Url("/Dashboards"));
+            await Page.GotoAsync(Url("/plswk/Dashboards"));
             await WaitForDashboard();
         }
 
@@ -343,7 +343,7 @@ public class UiQualityAuditTests : BrowserTestBase
     [Test]
     public async Task LogConsoleUsesMonospace()
     {
-        await Page.GotoAsync(Url("/Logs"));
+        await Page.GotoAsync(Url("/plswk/Logs"));
         await WaitForDashboard();
 
         var font = await Page.EvaluateAsync<string>(@"() => {

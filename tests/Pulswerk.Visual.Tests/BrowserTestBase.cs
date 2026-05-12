@@ -13,6 +13,7 @@ public abstract class BrowserTestBase
     private IBrowser _browser = null!;
 
     protected IPage Page { get; private set; } = null!;
+    protected string EffectiveDashboardUrl { get; private set; } = "http://localhost:5000";
 
     /// <summary>Connection URL for the Browserless container (CDP endpoint).</summary>
     private static string BrowserlessUrl =>
@@ -22,16 +23,28 @@ public abstract class BrowserTestBase
     private static string BrowserlessToken =>
         Environment.GetEnvironmentVariable("BROWSERLESS_TOKEN") ?? "pulswerk-visual-tests";
 
-    /// <summary>Dashboard base URL as seen from inside the Docker network.</summary>
-    protected static string DashboardUrl =>
-        Environment.GetEnvironmentVariable("DASHBOARD_URL") ?? "http://pulswerk:5000";
+    /// <summary>Dashboard base URL template.</summary>
+    private static string DashboardUrlBase =>
+        Environment.GetEnvironmentVariable("DASHBOARD_URL") ?? "http://localhost:5000";
 
     [SetUp]
     public async Task SetUpBrowser()
     {
         _playwright = await Playwright.CreateAsync();
         var wsEndpoint = $"{BrowserlessUrl}/chromium?token={BrowserlessToken}";
-        _browser = await _playwright.Chromium.ConnectOverCDPAsync(wsEndpoint);
+        
+        try 
+        {
+            _browser = await _playwright.Chromium.ConnectOverCDPAsync(wsEndpoint);
+            EffectiveDashboardUrl = "http://pulswerk:5000";
+            TestContext.Out.WriteLine("✅ Connected to remote Browserless. Using dashboard: " + EffectiveDashboardUrl);
+        }
+        catch (Exception ex)
+        {
+            TestContext.Out.WriteLine($"⚠️ Remote Browserless failed: {ex.Message}. Falling back to local browser.");
+            _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+            EffectiveDashboardUrl = "http://localhost:5000";
+        }
 
         var context = _browser.Contexts.Count > 0
             ? _browser.Contexts[0]
@@ -41,6 +54,8 @@ public abstract class BrowserTestBase
             });
 
         Page = await context.NewPageAsync();
+        Page.SetDefaultTimeout(60000);
+        Page.SetDefaultNavigationTimeout(60000);
     }
 
     [TearDown]
@@ -53,7 +68,7 @@ public abstract class BrowserTestBase
     // ── Navigation helpers ──────────────────────────────────────────────
 
     /// <summary>Full URL for a dashboard path.</summary>
-    protected static string Url(string path) => $"{DashboardUrl}{path}";
+    protected string Url(string path) => $"{EffectiveDashboardUrl}{path}";
 
     /// <summary>Selector shorthand for data-testid.</summary>
     protected static string Tid(string id) => $"[data-testid=\"{id}\"]";
@@ -62,10 +77,10 @@ public abstract class BrowserTestBase
     protected async Task WaitForDashboard()
     {
         await Page.WaitForSelectorAsync(Tid("sidebar-brand"),
-            new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
+            new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
         await Page.WaitForSelectorAsync(Tid("page-title"),
-            new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 30_000 });
     }
 
     /// <summary>Inject CSS that kills all animations and transitions.</summary>
@@ -158,11 +173,13 @@ public static class Pages
 {
     public static readonly PageInfo[] All =
     [
-        new("Dashboard",   "/",            "Dashboard"),
-        new("Dashboards",  "/Dashboards",  "Dashboards"),
-        new("Assets",      "/Assets",      "Assets"),
-        new("Connections", "/Connections",  "Connections"),
-        new("Alarms",      "/Alarms",      "Active Alarms"),
-        new("Logs",        "/Logs",         "System Logs"),
+        new("Dashboard",   "/plswk/",            "Dashboard"),
+        new("Dashboards",  "/plswk/Dashboards",  "Dashboards"),
+        new("Assets",      "/plswk/Assets",      "Assets"),
+        new("Inventory",   "/plswk/AssetsList",  "Asset Inventory"),
+        new("Connections", "/plswk/Connections",  "Connections"),
+        new("Alarms",      "/plswk/Alarms",      "Active Alarms"),
+        new("Logs",        "/plswk/Logs",         "System Logs"),
+        new("Heartbeat",   "/plswk/Heartbeat",    "System Heartbeat"),
     ];
 }

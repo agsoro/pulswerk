@@ -40,6 +40,7 @@ public static partial class UiSpec
 
         // Assets (/Assets) — AssetsSpecs.cs
         AssetTree, AssetDetailPanel, AssetEmptySelection,
+        InventoryTable,
 
         // Connections (/Connections) — ConnectionsSpecs.cs
         ConnectionsLayout,

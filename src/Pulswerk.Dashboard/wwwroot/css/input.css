@@ -218,6 +218,37 @@
     }
     .props-table td:first-child { @apply w-[30%] text-slate-400 font-medium; }
     .props-table td:last-child { @apply text-white font-mono; }
+
+    /* Inventory & Latest Value Tables */
+    .lv-table {
+        @apply w-full border-collapse text-left;
+    }
+    .lv-table th {
+        @apply py-3 px-4 text-[0.65rem] uppercase tracking-widest text-slate-500 border-b border-white/5;
+    }
+    .lv-table td {
+        @apply py-3 px-4 text-sm text-slate-300 border-b border-white/[0.03];
+    }
+    .lv-value {
+        @apply font-black text-white;
+    }
+    .lv-units {
+        @apply ml-1 text-[0.65rem] text-slate-500 font-medium;
+    }
+
+    /* Schedule Modal */
+    .sched-day-row {
+        @apply flex gap-4 p-3 border-b border-white/5 last:border-0 hover:bg-white/[0.01];
+    }
+    .sched-entry-view {
+        @apply bg-slate-900/60 border border-white/5 rounded-lg px-3 py-1.5 flex items-center gap-3 text-xs shadow-inner;
+    }
+    .sched-entry-edit {
+        @apply bg-slate-900 border border-sky-400/30 rounded-lg px-2 py-1 flex items-center gap-1 shadow-[0_0_10px_rgba(56,189,248,0.1)];
+    }
+    .sched-add-btn {
+        @apply text-[0.65rem] font-bold text-slate-500 hover:text-sky-400 border border-dashed border-white/10 rounded-lg px-3 py-1.5 transition-all hover:border-sky-400/30 hover:bg-sky-400/5;
+    }
 }
 
 /* Custom non-Tailwind rules */

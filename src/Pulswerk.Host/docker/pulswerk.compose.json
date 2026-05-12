@@ -41,7 +41,7 @@
       "id": "bacnet-deziko",
       "type": "bacnet-ip",
       "localAddress": "0.0.0.0",
-      "localPort": 47808,
+      "localPort": 47809, // different from simulator
       "localDeviceId": 1234,
       "name": "Deziko BACnet"
     }
@@ -49,6 +49,7 @@
   // ── Devices ──────────────────────────────────────────────────────────────
   "devices": [
     {
+      "id": "meter-main-a",
       "name": "Main Meter Building A",
       "deviceType": "janitza",
       "connectionId": "modbus-test",
@@ -61,6 +62,7 @@
       "assetType": "Meter"
     },
     {
+      "id": "meter-sub-f2",
       "name": "Sub Meter Floor 2",
       "deviceType": "janitza",
       "connectionId": "modbus-test",
@@ -74,6 +76,7 @@
       "assetType": "Meter"
     },
     {
+      "id": "meter-sub-f3",
       "name": "Sub Meter Floor 3",
       "deviceType": "janitza",
       "connectionId": "modbus-test2",
@@ -87,6 +90,7 @@
       "assetType": "Meter"
     },
     {
+      "id": "meter-hvac",
       "name": "HVAC Meter",
       "deviceType": "janitza",
       "connectionId": "modbus-test2",
@@ -100,10 +104,12 @@
       "assetType": "Meter"
     },
     {
+      "id": "ahu-test-bacnet",
       "name": "Test BACnet AHU",
       "deviceType": "deziko",
       "connectionId": "bacnet-deziko",
       "deviceId": 10,
+      "address": "bacnet-sim",
       "assetType": "BACnet Zone"
     }
   ],

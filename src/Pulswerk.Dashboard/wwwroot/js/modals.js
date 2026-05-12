@@ -67,7 +67,7 @@ function renderChart(data) {
             zoom: { enabled: false },
             animations: { enabled: false }
         },
-        colors: ['#00d1d1'],
+        colors: ['#38bdf8'],
         fill: {
             type: 'gradient',
             gradient: {
@@ -167,7 +167,7 @@ function step(n) {
 function updateBoolLabel() {
     const input = document.getElementById('boolInput');
     document.getElementById('boolLabel').textContent = input.checked ? 'ON' : 'OFF';
-    document.getElementById('boolLabel').className = 'bool-toggle-label ' + (input.checked ? 'text-cyan-400' : 'text-slate-500');
+    document.getElementById('boolLabel').className = 'bool-toggle-label ' + (input.checked ? 'text-sky-400' : 'text-slate-500');
 }
 
 async function submitEdit(e) {
@@ -300,4 +300,185 @@ function renderModalBreadcrumb(id, path) {
             container.appendChild(sep);
         }
     });
+}
+
+// --- Schedule Modal ---
+let currentScheduleData = [];
+let isEditingSchedule = false;
+let currentScheduleKey = null;
+
+async function openScheduleView(key, name, pathEnc) {
+    const modal = document.getElementById('scheduleModal');
+    const grid = document.getElementById('scheduleGrid');
+    const loading = document.getElementById('scheduleLoading');
+    const view = document.getElementById('scheduleView');
+    
+    currentScheduleKey = key;
+    isEditingSchedule = false;
+    toggleScheduleEdit(false);
+
+    let path = [];
+    try { path = JSON.parse(decodeURIComponent(pathEnc)); } catch(e) {}
+    document.getElementById('schedulePath').textContent = path.map(p => p.name).join(' › ');
+    document.getElementById('scheduleMeta').textContent = key;
+    
+    modal.style.display = 'flex';
+    loading.classList.remove('hidden');
+    view.classList.add('hidden');
+    grid.innerHTML = '';
+    
+    try {
+        const response = await fetch(`?handler=Properties&key=${key}`);
+        const props = await response.json();
+        const schedProp = props.find(p => p.name === 'Weekly Schedule');
+        
+        loading.classList.add('hidden');
+        view.classList.remove('hidden');
+        
+        currentScheduleData = [0,1,2,3,4,5,6].map(i => ({ dayIndex: i, entries: [] }));
+        
+        if (schedProp && schedProp.value && schedProp.value !== 'Empty Schedule' && schedProp.value !== 'None') {
+            const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+            const days = schedProp.value.split(' | ');
+            days.forEach(dayStr => {
+                const parts = dayStr.split(': ');
+                if (parts.length < 2) return;
+                const dayIdx = dayNames.indexOf(parts[0]);
+                if (dayIdx === -1) return;
+                
+                const timesStr = parts[1];
+                currentScheduleData[dayIdx].entries = timesStr.split(', ').map(t => {
+                    const [time, val] = t.split('➔');
+                    return { time, value: parseFloat(val) };
+                });
+            });
+        }
+        
+        renderSchedule();
+        
+    } catch (error) {
+        console.error("Schedule load error:", error);
+        grid.innerHTML = '<div class="text-center p-8 text-red-400">Failed to load schedule from device.</div>';
+    }
+}
+
+function closeSchedule() {
+    document.getElementById('scheduleModal').style.display = 'none';
+}
+
+function renderSchedule() {
+    const grid = document.getElementById('scheduleGrid');
+    grid.innerHTML = '';
+    
+    currentScheduleData.forEach(day => {
+        const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        const dayRow = document.createElement('div');
+        dayRow.className = 'sched-day-row';
+        
+        let entriesHtml = day.entries.map((e, idx) => {
+            if (isEditingSchedule) {
+                return `
+                    <div class="sched-entry-edit">
+                        <input type="time" class="bg-transparent text-slate-300 text-[0.7rem] border-none focus:ring-0 w-[4.5rem] p-0" 
+                               value="${e.time}" onchange="updateScheduleEntry(${day.dayIndex}, ${idx}, 'time', this.value)">
+                        <input type="number" step="0.1" class="bg-transparent text-sky-400 font-bold text-[0.7rem] border-none focus:ring-0 w-10 p-0 text-center" 
+                               value="${e.value}" onchange="updateScheduleEntry(${day.dayIndex}, ${idx}, 'value', this.value)">
+                        <button class="text-red-400 hover:text-red-300 px-1 text-sm leading-none" onclick="removeScheduleEntry(${day.dayIndex}, ${idx})">&times;</button>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="sched-entry-view">
+                        <span class="text-slate-400"><i class="far fa-clock mr-1 opacity-70"></i>${e.time}</span>
+                        <span class="font-bold text-sky-400 border-l border-white/10 pl-2">${e.value}</span>
+                    </div>
+                `;
+            }
+        }).join('');
+        
+        if (isEditingSchedule) {
+            entriesHtml += `
+                <button class="sched-add-btn" onclick="addScheduleEntry(${day.dayIndex})">
+                    <i class="fas fa-plus mr-1"></i> Add
+                </button>
+            `;
+        }
+
+        dayRow.innerHTML = `
+            <div class="w-14 font-bold text-slate-300 pt-1.5 border-r border-slate-700 pr-2 shrink-0">${dayNames[day.dayIndex]}</div>
+            <div class="flex-1 flex flex-wrap gap-2 items-center">
+                ${entriesHtml || (isEditingSchedule ? '' : '<span class="text-slate-600 text-xs italic">No switching points</span>')}
+            </div>
+        `;
+        grid.appendChild(dayRow);
+    });
+}
+
+function toggleScheduleEdit(edit) {
+    isEditingSchedule = edit;
+    const btnEdit = document.getElementById('btnEditSchedule');
+    const btnActions = document.getElementById('editScheduleActions');
+    if (btnEdit) btnEdit.classList.toggle('hidden', edit);
+    if (btnActions) btnActions.classList.toggle('hidden', !edit);
+    renderSchedule();
+}
+
+function updateScheduleEntry(dayIdx, entryIdx, field, value) {
+    if (field === 'value') value = parseFloat(value);
+    currentScheduleData[dayIdx].entries[entryIdx][field] = value;
+}
+
+function addScheduleEntry(dayIdx) {
+    const lastEntry = currentScheduleData[dayIdx].entries[currentScheduleData[dayIdx].entries.length - 1];
+    const newTime = lastEntry ? lastEntry.time : "08:00";
+    const newVal = lastEntry ? lastEntry.value : 21.0;
+    currentScheduleData[dayIdx].entries.push({ time: newTime, value: newVal });
+    renderSchedule();
+}
+
+function removeScheduleEntry(dayIdx, entryIdx) {
+    currentScheduleData[dayIdx].entries.splice(entryIdx, 1);
+    renderSchedule();
+}
+
+async function saveSchedule() {
+    const btnActions = document.getElementById('editScheduleActions');
+    if (!btnActions) return;
+    const btn = btnActions.querySelector('button:last-child');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
+    btn.className = "px-3 py-1 bg-sky-800 text-white text-xs rounded opacity-70 cursor-not-allowed";
+
+    try {
+        currentScheduleData.forEach(day => {
+            day.entries.sort((a, b) => a.time.localeCompare(b.time));
+        });
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const response = await fetch('?handler=WriteComplex', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({
+                key: currentScheduleKey,
+                value: JSON.stringify(currentScheduleData)
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            toggleScheduleEdit(false);
+        } else {
+            alert("Failed to save schedule. Check device connection.");
+        }
+    } catch (error) {
+        console.error("Save error:", error);
+        alert("An error occurred while saving.");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
 }

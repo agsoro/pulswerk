@@ -26,9 +26,9 @@ public class E2eTests : BrowserTestBase
     [Test]
     public async Task SidebarHas6NavigationLinks()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
-        await Expect(Page.Locator($"{Tid("nav-links")} a")).ToHaveCountAsync(6);
+        await Expect(Page.Locator($"{Tid("nav-links")} a")).ToHaveCountAsync(8);
     }
 
     [Test]
@@ -36,26 +36,28 @@ public class E2eTests : BrowserTestBase
     {
         var navMap = new Dictionary<string, string>
         {
-            ["/"] = "nav-dashboard",
-            ["/Dashboards"] = "nav-dashboards",
-            ["/Assets"] = "nav-assets",
-            ["/Connections"] = "nav-connections",
-            ["/Alarms"] = "nav-alarms",
-            ["/Logs"] = "nav-logs",
+            ["/plswk/"] = "nav-dashboard",
+            ["/plswk/Dashboards"] = "nav-dashboards",
+            ["/plswk/Assets"] = "nav-assets",
+            ["/plswk/AssetsList"] = "nav-assetslist",
+            ["/plswk/Connections"] = "nav-connections",
+            ["/plswk/Alarms"] = "nav-alarms",
+            ["/plswk/Logs"] = "nav-logs",
+            ["/plswk/Heartbeat"] = "nav-heartbeat",
         };
 
         foreach (var (path, navId) in navMap)
         {
             await Page.GotoAsync(Url(path));
             await WaitForDashboard();
-            await Expect(Page.Locator(Tid(navId))).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("active"));
+            await Expect(Page.Locator(Tid(navId))).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("text-sky-400"));
         }
     }
 
     [Test]
     public async Task AlarmBoxLinksNavigateToAlarmsPage()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await Page.ClickAsync("#box-critical");
         await Page.WaitForURLAsync("**/Alarms**");
@@ -68,27 +70,26 @@ public class E2eTests : BrowserTestBase
     [Test]
     public async Task DarkBackgroundIsApplied()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         var bg = await Page.EvaluateAsync<string>(
             "getComputedStyle(document.body).backgroundColor");
-        Assert.That(bg, Is.EqualTo("rgb(15, 23, 42)"));
+        Assert.That(bg, Is.EqualTo("rgb(15, 23, 42)")); // slate-900
     }
 
     [Test]
     public async Task InterFontIsLoaded()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
-        var font = await Page.EvaluateAsync<string>(
-            "getComputedStyle(document.body).fontFamily");
-        Assert.That(font, Does.Contain("Inter"));
+        var font = await Page.EvaluateAsync<string>("getComputedStyle(document.body).fontFamily");
+        Assert.That(font, Does.Contain("Inter").IgnoreCase);
     }
 
     [Test]
     public async Task GlassmorphismBlurIsApplied()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
 
         var glass = Page.Locator(".glass");
@@ -105,13 +106,13 @@ public class E2eTests : BrowserTestBase
     // ── Dashboard Structure ─────────────────────────────────────────────
 
     [Test]
-    public async Task AlarmBoxesExistWith5SeverityLevels()
+    public async Task AlarmBoxesExistWith6SeverityLevels()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
-        await Expect(Page.Locator($"{Tid("alarm-boxes")} .alarm-box")).ToHaveCountAsync(5);
+        await Expect(Page.Locator($"{Tid("alarm-boxes")} .alarm-box")).ToHaveCountAsync(6);
 
-        foreach (var id in new[] { "critical", "major", "minor", "warning", "total" })
+        foreach (var id in new[] { "critical", "major", "minor", "warning", "maintenance", "total" })
         {
             await Expect(Page.Locator($"#box-{id}")).ToBeVisibleAsync();
         }
@@ -120,7 +121,7 @@ public class E2eTests : BrowserTestBase
     [Test]
     public async Task FavoritesSectionExists()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await Expect(Page.Locator(Tid("favorites-list"))).ToBeAttachedAsync();
     }
@@ -130,7 +131,7 @@ public class E2eTests : BrowserTestBase
     [Test]
     public async Task ImagesHaveAltTextOrAreDecorative()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         var images = Page.Locator("img");
         var count = await images.CountAsync();
@@ -147,7 +148,7 @@ public class E2eTests : BrowserTestBase
     [Test]
     public async Task SidebarLinksAreNotInvisible()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         var color = await Page.Locator(Tid("nav-dashboard"))
             .EvaluateAsync<string>("el => getComputedStyle(el).color");

@@ -28,6 +28,12 @@ namespace Pulswerk.Core
         /// </summary>
         IReadOnlyDictionary<string, string> GetTelemetryUnits()
             => new Dictionary<string, string>();
+
+        /// <summary>Returns the hierarchical tree of assets/points for this device.</summary>
+        AssetNodeDto GetAssetHierarchy(DeviceConfig device);
+
+        /// <summary>Performs a live read of all technical properties for a specific point.</summary>
+        Task<List<PropertyDto>> GetExtendedPropertiesAsync(ConnectionConfig connection, DeviceConfig device, string key);
     }
 
     /// <summary>
@@ -44,6 +50,13 @@ namespace Pulswerk.Core
         /// </summary>
         void Write(ConnectionConfig connection, DeviceConfig device,
                    string key, double value);
+
+        /// <summary>
+        /// Writes complex/structured data to the field device.
+        /// Used for schedules, calendars, and other non-numeric properties.
+        /// </summary>
+        void WriteComplex(ConnectionConfig connection, DeviceConfig device,
+                          string key, object value);
 
         /// <summary>Returns true if the specific key is writable on this device.</summary>
         bool IsWritable(string key);

@@ -20,30 +20,23 @@ namespace Pulswerk.Drivers.Modbus
 {
     using Telemetry = Dictionary<string, object>;
 
-    class JanitzaDriver : IDeviceDriver
+    class JanitzaDriver : BaseModbusDriver
     {
         const ushort REG_TOTAL_ACTIVE_POWER_W = 19020;
         const ushort REG_IMPORT_ENERGY_WH = 19060;
         const ushort REG_EXPORT_ENERGY_WH = 19062;
 
-        public string DriverName => "Janitza";
-        public bool IsBusy => false;
+        public override string DriverName => "Janitza";
 
-        public IEnumerable<string> GetTelemetryKeys() => new[] {
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyImportKwh,
             TelemetryKeys.EnergyExportKwh
         };
 
-        public IReadOnlyDictionary<string, string> GetTelemetryUnits() =>
-            new Dictionary<string, string>
-            {
-                [TelemetryKeys.PowerKw] = "kW",
-                [TelemetryKeys.EnergyImportKwh] = "kWh",
-                [TelemetryKeys.EnergyExportKwh] = "kWh",
-            };
 
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+
+        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));

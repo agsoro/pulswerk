@@ -27,6 +27,7 @@ namespace Pulswerk.Dashboard.Pages
         public int AlarmMajor { get; private set; }
         public int AlarmMinor { get; private set; }
         public int AlarmWarning { get; private set; }
+        public int AlarmMaintenance { get; private set; }
         public int AlarmTotal { get; private set; }
 
         public void OnGet()
@@ -51,10 +52,11 @@ namespace Pulswerk.Dashboard.Pages
                     case "CRITICAL": AlarmCritical++; break;
                     case "MAJOR": AlarmMajor++; break;
                     case "MINOR": AlarmMinor++; break;
+                    case "MAINTENANCE": AlarmMaintenance++; break;
                     default: AlarmWarning++; break;
                 }
             }
-            AlarmTotal = AlarmCritical + AlarmMajor + AlarmMinor + AlarmWarning;
+            AlarmTotal = AlarmCritical + AlarmMajor + AlarmMinor + AlarmWarning + AlarmMaintenance;
         }
 
         // ── Favorites handlers (Tree, History, Properties, Write) ────────────
@@ -73,9 +75,9 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(data);
         }
 
-        public JsonResult OnGetProperties(string key)
+        public async Task<JsonResult> OnGetPropertiesAsync(string key)
         {
-            var data = _data.GetPointProperties(key);
+            var data = await _data.GetPropertiesAsync(key);
             return new JsonResult(data);
         }
 

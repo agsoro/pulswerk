@@ -142,7 +142,7 @@ namespace Pulswerk.Dashboard
                         Status = isOffline ? "offline" : "online",
                         StatusColor = isOffline ? "#ef4444" : "#10b981",
                         LastSeen = lastPolled == default ? "Never" : lastPolled.ToString("yyyy-MM-dd HH:mm:ss UTC"),
-                        Connection = connCfg?.Host ?? "unknown",
+                        Connection = connCfg?.Address ?? "unknown",
                         Port = connCfg?.Port ?? 0
                     };
                 }).ToList();

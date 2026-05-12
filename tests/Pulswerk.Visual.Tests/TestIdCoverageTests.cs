@@ -97,7 +97,7 @@ public class TestIdCoverageTests : BrowserTestBase
     public async Task ModalTestIdsArePresentInDom()
     {
         // Check on Dashboard overview which includes _AssetModals
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
 
         foreach (var id in ModalTestIds)
@@ -113,7 +113,7 @@ public class TestIdCoverageTests : BrowserTestBase
     [Test]
     public async Task DashboardEditModeTestIdsExist()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
 
         foreach (var id in DashEditTestIds)

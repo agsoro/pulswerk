@@ -79,7 +79,7 @@ namespace Pulswerk.Dashboard.Pages
                     Id = conn.Id,
                     Name = conn.EffectiveName,
                     Type = tbType,
-                    Address = conn.Type == "bacnet-ip" ? conn.LocalAddress : conn.Address,
+                    Address = (conn.Type == "bacnet-ip" ? conn.LocalAddress : conn.Address) ?? "",
                     Port = (conn.Type == "bacnet-ip" ? conn.LocalPort : conn.Port) ?? 0,
                     Status = (connDevices.Count == 0 || !isOffline) ? "online" : "offline",
                     LastSeen = lastPolled == default

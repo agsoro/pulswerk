@@ -17,22 +17,22 @@ namespace Pulswerk.Drivers.Modbus
 {
     using Telemetry = Dictionary<string, object>;
 
-    class SmaDatamanagerDriver : IDeviceDriver
+    class SmaDatamanagerDriver : BaseModbusDriver
     {
         const ushort REG_LIMIT_PCT = 31243;
         const ushort REG_POWER_W = 30775;
         const ushort REG_ENERGY_WH = 30513;
 
-        public string DriverName => "SMA_DataManager";
-        public bool IsBusy => false;
+        public override string DriverName => "SMA_DataManager";
+        // public bool IsBusy => false;
 
-        public IEnumerable<string> GetTelemetryKeys() => new[] {
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
             TelemetryKeys.PowerLimitPct,
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyExportKwh
         };
 
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));

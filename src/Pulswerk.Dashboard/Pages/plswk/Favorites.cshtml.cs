@@ -36,9 +36,9 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(data);
         }
 
-        public JsonResult OnGetProperties(string key)
+        public async Task<JsonResult> OnGetPropertiesAsync(string key)
         {
-            var data = _dataService.GetPointProperties(key);
+            var data = await _dataService.GetPropertiesAsync(key);
             return new JsonResult(data);
         }
 

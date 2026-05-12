@@ -185,6 +185,8 @@ public class AlignmentAuditTests : BrowserTestBase
     public async Task SpecElementsContainedInViewport(ComponentSpec spec)
     {
         var path = spec.PagePath ?? "/";
+        if (!path.StartsWith("/plswk/")) path = "/plswk" + (path == "/" ? "/" : path);
+        
         await Page.SetViewportSizeAsync(1920, 1080);
         await Page.GotoAsync(Url(path));
         await WaitForDashboard();
@@ -229,7 +231,7 @@ public class AlignmentAuditTests : BrowserTestBase
     [Test]
     public async Task AlarmBoxesEqualSpacing()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
 
         // Verify CSS grid gap consistency — use computed style instead of
@@ -260,7 +262,7 @@ public class AlignmentAuditTests : BrowserTestBase
         }
 
         var boxCount = gapInfo.GetProperty("boxCount").GetInt32();
-        Assert.That(boxCount, Is.EqualTo(5), "Expected 5 alarm boxes (Critical, Major, Minor, Warning, Total)");
+        Assert.That(boxCount, Is.EqualTo(6), "Expected 6 alarm boxes (Critical, Major, Minor, Warning, Maintenance, Total)");
 
         // Verify all boxes have non-zero dimensions
         var rects = gapInfo.GetProperty("rects").EnumerateArray().ToArray();
@@ -274,18 +276,17 @@ public class AlignmentAuditTests : BrowserTestBase
 
         TestContext.Out.WriteLine(
             $"📐 Alarm boxes: {boxCount} boxes, " +
-            $"column-gap={gapInfo.GetProperty("columnGap")}, " +
             $"row-gap={gapInfo.GetProperty("rowGap")}");
     }
 
     [Test]
     public async Task NavLinksEqualSpacing()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
 
         var gaps = await Page.EvaluateAsync<float[]>(@"() => {
-            const links = [...document.querySelectorAll('.nav-links a')];
+            const links = [...document.querySelectorAll('[data-testid=""nav-links""] a')];
             if (links.length < 2) return [];
             const gaps = [];
             for (let i = 1; i < links.length; i++) {

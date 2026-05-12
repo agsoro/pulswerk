@@ -16,12 +16,12 @@ namespace Pulswerk.Drivers.Modbus
 {
     using Telemetry = Dictionary<string, object>;
 
-    class SunSpecDriver : IDeviceDriver
+    class SunSpecDriver : BaseModbusDriver
     {
-        public string DriverName => "SunSpec";
-        public bool IsBusy => false;
+        public override string DriverName => "SunSpec";
+        // public bool IsBusy => false;
 
-        public IEnumerable<string> GetTelemetryKeys() => new[] {
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyImportKwh,
             TelemetryKeys.EnergyExportKwh,
@@ -35,7 +35,7 @@ namespace Pulswerk.Drivers.Modbus
         private record ModelInfo(ushort Address, ushort Length);
         private record SunSpecState(ushort BaseAddr, Dictionary<ushort, ModelInfo> Models);
 
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));

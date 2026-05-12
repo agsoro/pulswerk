@@ -44,7 +44,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("type")] string Type,   // "modbus-tcp" | "bacnet-ip"
 
-        /// <summary>Remote address (for Modbus Gateway).</summary>
+        /// <summary>Remote address (for Modbus Gateway). For BACnet, prefer address on device level.</summary>
         [property: JsonPropertyName("address")] string? Address = null,
         
         /// <summary>Remote port (for Modbus Gateway).</summary>
@@ -78,6 +78,7 @@ namespace Pulswerk.Core
     //    "deziko"   → BacnetReader   (Deziko BACnet; hierarchy on by default)
 
     public record DeviceConfig(
+        [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("deviceType")] string DeviceType,
         [property: JsonPropertyName("connectionId")] string ConnectionId,
@@ -86,10 +87,10 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("address")] string? Address = null,
 
         /// <summary>Device identifier (Slave ID for Modbus, Device Instance for BACnet).</summary>
-        [property: JsonPropertyName("deviceId")] uint? DeviceId,
+        [property: JsonPropertyName("deviceId")] uint? DeviceId = null,
 
         // Modbus manual hierarchy path
-        [property: JsonPropertyName("path")] List<string>? Path,
+        [property: JsonPropertyName("path")] List<string>? Path = null,
 
         // BACnet / general config (all optional; code defaults apply when omitted)
         [property: JsonPropertyName("whoIsTimeoutMs")] int WhoIsTimeoutMs = 2000,
@@ -118,10 +119,11 @@ namespace Pulswerk.Core
     )
     {
         public string AccessToken =>
-            "device_" + Name.ToLowerInvariant()
-                            .Replace(' ', '_')
-                            .Replace('/', '_')
-                            .Replace('\\', '_');
+            "device_" + Id.ToLowerInvariant()
+                          .Replace(' ', '_')
+                          .Replace('-', '_')
+                          .Replace('/', '_')
+                          .Replace('\\', '_');
 
         /// <summary>True when hierarchy provisioning is active (AssetType set).</summary>
         public bool HierarchyEnabled => AssetType != null;
@@ -196,7 +198,7 @@ namespace Pulswerk.Core
     {
         // ── Built-in defaults (match Deziko common object types) ────────
         public static readonly List<string> DefaultObjectTypes = new()
-            { "AI", "AO", "AV", "BI", "BO", "BV", "MI", "MO", "MV" };
+            { "AI", "AO", "AV", "BI", "BO", "BV", "MI", "MO", "MV", "SV" };
         public static readonly InstanceRange DefaultInstanceRange = new(0, 9999);
         public const string DefaultNamePattern = ".";
 

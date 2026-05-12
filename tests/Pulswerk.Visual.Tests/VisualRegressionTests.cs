@@ -37,7 +37,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task SidebarCollapsed()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -47,7 +47,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task SidebarExpandedOnHover()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -60,7 +60,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task AlarmPriorityBoxes()
     {
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -72,7 +72,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task DashboardCreateModal()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -85,7 +85,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task DashboardEditModeToolbar()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -105,7 +105,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task AddWidgetModal()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -132,7 +132,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task TimewindowDropdown()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -152,7 +152,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task AlarmAcknowledgeModal()
     {
-        await Page.GotoAsync(Url("/Alarms"));
+        await Page.GotoAsync(Url("/plswk/Alarms"));
         await WaitForDashboard();
         await DisableAnimations();
 
@@ -164,6 +164,47 @@ public class VisualRegressionTests : BrowserTestBase
         }
 
         await AssertScreenshot("modal-alarm-ack", fullPage: true);
+    }
+
+    [Test]
+    public async Task ScheduleModalViewMode()
+    {
+        await Page.GotoAsync(Url("/plswk/Assets"));
+        await WaitForDashboard();
+        await DisableAnimations();
+
+        var scheduleBtn = Page.Locator("button:has(.fa-clock)").First;
+        if (await scheduleBtn.CountAsync() > 0)
+        {
+            await scheduleBtn.ClickAsync();
+            await Page.WaitForSelectorAsync("#scheduleModal", new() { State = WaitForSelectorState.Visible });
+            await Page.WaitForSelectorAsync(".sched-day-row", new() { State = WaitForSelectorState.Visible });
+            await Page.WaitForTimeoutAsync(300);
+        }
+
+        await AssertElementScreenshot("#scheduleModal .modal-content", "modal-schedule-view");
+    }
+
+    [Test]
+    public async Task ScheduleModalEditMode()
+    {
+        await Page.GotoAsync(Url("/plswk/Assets"));
+        await WaitForDashboard();
+        await DisableAnimations();
+
+        var scheduleBtn = Page.Locator("button:has(.fa-clock)").First;
+        if (await scheduleBtn.CountAsync() > 0)
+        {
+            await scheduleBtn.ClickAsync();
+            await Page.WaitForSelectorAsync("#scheduleModal", new() { State = WaitForSelectorState.Visible });
+            await Page.WaitForSelectorAsync(".sched-day-row", new() { State = WaitForSelectorState.Visible });
+            
+            await Page.ClickAsync("#btnEditSchedule");
+            await Page.WaitForSelectorAsync("#editScheduleActions", new() { State = WaitForSelectorState.Visible });
+            await Page.WaitForTimeoutAsync(300);
+        }
+
+        await AssertElementScreenshot("#scheduleModal .modal-content", "modal-schedule-edit");
     }
 
     // ── Spec-driven element screenshots ─────────────────────────────────
@@ -237,7 +278,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task TimewindowPresetsPopulated()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
 
         // Navigate to a dashboard to trigger initDashboards()
@@ -280,7 +321,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task DashboardCardsPopulated()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
         await Page.WaitForTimeoutAsync(500); // wait for loadList()
 
@@ -298,7 +339,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task AssetTreePopulated()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
         await Page.WaitForTimeoutAsync(500); // wait for tree fetch
 
@@ -313,7 +354,7 @@ public class VisualRegressionTests : BrowserTestBase
     [Test]
     public async Task AlarmListPopulated()
     {
-        await Page.GotoAsync(Url("/Alarms"));
+        await Page.GotoAsync(Url("/plswk/Alarms"));
         await WaitForDashboard();
 
         var items = Page.Locator(".alarm-item");
@@ -343,7 +384,7 @@ public class VisualRegressionTests : BrowserTestBase
         [ValueSource(nameof(Viewports))] (string Name, int Width, int Height) vp)
     {
         await Page.SetViewportSizeAsync(vp.Width, vp.Height);
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await DisableAnimations();
 

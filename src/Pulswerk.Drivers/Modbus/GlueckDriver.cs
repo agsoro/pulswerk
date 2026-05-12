@@ -20,7 +20,7 @@ namespace Pulswerk.Drivers.Modbus
 {
     using Telemetry = Dictionary<string, object>;
 
-    class GlueckDriver : IDeviceDriver, IDeviceWriter
+    class GlueckDriver : BaseModbusDriver, IDeviceWriter
     {
         const ushort REG_UTILITY_LIMIT_IN = 1901;
         const ushort REG_FEEDBACK_LIMIT_IN = 1902;
@@ -32,19 +32,21 @@ namespace Pulswerk.Drivers.Modbus
         private uint _watchdogCounter = 0;
         private DateTime _lastWatchdogWrite = DateTime.MinValue;
 
-        public string DriverName => "Glueck";
-        public bool IsBusy => false;
+        public override string DriverName => "Glueck";
+        // public bool IsBusy => false;
 
-        public IEnumerable<string> GetTelemetryKeys() => new[] {
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
             TelemetryKeys.UtilityLimitPct,
             TelemetryKeys.PowerLimitPct,
             TelemetryKeys.PowerKw
         };
 
+
+
         // =====================================================================
         //  IDeviceDriver.Read
         // =====================================================================
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -97,6 +99,11 @@ namespace Pulswerk.Drivers.Modbus
                 ModbusConnection.WriteUInt16(master, slaveId, REG_LIMIT_POWER_OUT, (ushort)value);
                 return 0;
             });
+        }
+
+        public void WriteComplex(ConnectionConfig connection, DeviceConfig device, string key, object value)
+        {
+            throw new NotSupportedException("Complex writes are not supported for Glueck Modbus devices.");
         }
 
         public bool IsWritable(string key) => key == TelemetryKeys.PowerLimitPct;

@@ -18,7 +18,7 @@
                     <div class="font-bold text-[0.95rem] text-slate-50">@conn.Name</div>
                     <span class="text-[0.65rem] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-white/5 text-slate-400 whitespace-nowrap">@conn.Type</span>
                 </div>
-                <div class="text-[0.78rem] text-slate-400 font-mono">@conn.Host : @conn.Port</div>
+                <div class="text-[0.78rem] text-slate-400 font-mono">@conn.Address : @conn.Port</div>
                 <div class="flex justify-between items-center mt-0.5">
                     <span class="text-xs font-semibold flex items-center @(conn.Status == "online" ? "text-emerald-500" : "text-red-500")">
                         <span class="w-[7px] h-[7px] rounded-full mr-1.5 inline-block @(conn.Status == "online" ? "bg-emerald-500" : "bg-red-500")"></span>
@@ -46,7 +46,7 @@
                 <div class="px-6 py-5 border-b border-slate-700 flex justify-between items-center shrink-0 bg-black/15">
                     <div>
                         <div class="text-lg font-bold text-slate-50">@conn.Name</div>
-                        <div class="text-[0.78rem] text-slate-400 font-mono mt-0.5">@conn.Host : @conn.Port &nbsp;·&nbsp; @conn.Type &nbsp;·&nbsp; @conn.Id</div>
+                        <div class="text-[0.78rem] text-slate-400 font-mono mt-0.5">@conn.Address : @conn.Port &nbsp;·&nbsp; @conn.Type &nbsp;·&nbsp; @conn.Id</div>
                     </div>
                     <div class="flex gap-6 items-center">
                         <div class="text-right">

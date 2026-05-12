@@ -57,6 +57,11 @@ namespace Pulswerk.Core
         [JsonPropertyName("description")] public string Description { get; set; } = "";
         [JsonPropertyName("children")] public List<AssetNodeDto> Children { get; set; } = new();
         [JsonPropertyName("points")] public List<AssetPointDto> Points { get; set; } = new();
+
+        /// <summary>Stable, URL-safe node ID for a path segment used in the tree and ParentPath links.</summary>
+        public static string PathSegmentId(string segment)
+            => "path_" + System.Text.RegularExpressions.Regex.Replace(
+                segment.ToLowerInvariant(), @"[^a-z0-9]+", "_").Trim('_');
     }
 
     public class PathSegmentDto
@@ -75,6 +80,7 @@ namespace Pulswerk.Core
         [JsonPropertyName("type")] public string Type { get; set; } = "";
         [JsonPropertyName("key")] public string Key { get; set; } = "";
         [JsonPropertyName("description")] public string Description { get; set; } = "";
+        [JsonPropertyName("lastUpdate")] public string LastUpdate { get; set; } = "";
         [JsonPropertyName("isWritable")] public bool IsWritable { get; set; }
         [JsonPropertyName("parentId")] public string ParentId { get; set; } = "";
         [JsonPropertyName("parentPath")] public List<PathSegmentDto> ParentPath { get; set; } = new();
@@ -107,6 +113,9 @@ namespace Pulswerk.Core
         [JsonPropertyName("value")] public string Value { get; set; } = "";
         [JsonPropertyName("parentId")] public string ParentId { get; set; } = "";
         [JsonPropertyName("parentPath")] public List<PathSegmentDto> ParentPath { get; set; } = new();
+        [JsonPropertyName("device")] public string Device { get; set; } = "";
+        [JsonPropertyName("connection")] public string Connection { get; set; } = "";
+        [JsonPropertyName("lastUpdate")] public string LastUpdate { get; set; } = "";
         [JsonPropertyName("isWritable")] public bool IsWritable { get; set; }
         [JsonPropertyName("enumValues")] public List<string>? EnumValues { get; set; }
     }

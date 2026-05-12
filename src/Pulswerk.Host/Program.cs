@@ -15,6 +15,7 @@ using Pulswerk.Dashboard;
 using Pulswerk.Drivers;
 using Pulswerk.Drivers.BACnet;
 using Pulswerk.Storage;
+using System.IO.BACnet;
 
 namespace Pulswerk.Host
 {
@@ -38,24 +39,52 @@ namespace Pulswerk.Host
             string configPath = Path.Combine(AppContext.BaseDirectory, "pulswerk.json");
             if (!File.Exists(configPath))
             {
-                Console.Error.WriteLine($"Config file not found: {configPath}");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Error.WriteLine($"\n[FATAL] Config file not found: {configPath}");
+                Console.Error.WriteLine("The application cannot start without settings. Please check your deployment.");
+                Console.ResetColor();
                 return;
             }
 
-            var cfg = JsonSerializer.Deserialize<AppConfig>(
-                          await File.ReadAllTextAsync(configPath),
-                          new JsonSerializerOptions { ReadCommentHandling = JsonCommentHandling.Skip })
-                      ?? throw new Exception("Failed to parse pulswerk.json");
+            AppConfig cfg;
+            try
+            {
+                string json = await File.ReadAllTextAsync(configPath);
+                var options = new JsonSerializerOptions 
+                { 
+                    ReadCommentHandling = JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true
+                };
+                
+                cfg = JsonSerializer.Deserialize<AppConfig>(json, options)
+                      ?? throw new Exception("Deserialization returned null.");
+
+                // Perform logical validation (connections, devices, IDs, etc.)
+                ConfigValidator.Validate(cfg);
+            }
+            catch (JsonException ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Error.WriteLine("\n[FATAL] Syntax error in pulswerk.json:");
+                Console.Error.WriteLine($"  Line {ex.LineNumber}, Position {ex.BytePositionInLine}: {ex.Message}");
+                Console.Error.WriteLine("\nApplication will now exit.");
+                Console.ResetColor();
+                return;
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Error.WriteLine("\n[FATAL] Invalid configuration:");
+                Console.Error.WriteLine(ex.Message);
+                Console.Error.WriteLine("\nApplication will now exit.");
+                Console.ResetColor();
+                return;
+            }
 
             UnitMapper.Initialize(cfg.UnitTranslations);
 
             var connections = cfg.Connections.ToDictionary(c => c.Id);
 
-            // Validate all devices reference a known connection
-            foreach (var d in cfg.Devices)
-                if (!connections.ContainsKey(d.ConnectionId))
-                    throw new Exception(
-                        $"Device '{d.Name}' references unknown connectionId '{d.ConnectionId}'.");
 
             // ── Initialize logging ────────────────────────────────────────────
             _logger = new ConsoleLogger(new LogBuffer(cfg.Monitoring?.LogBufferSize ?? 5000));
@@ -95,13 +124,14 @@ namespace Pulswerk.Host
 
             _logger!.Info("Connections (" + cfg.Connections.Count + "):");
             foreach (var c in cfg.Connections)
-                Console.WriteLine($"  [{c.Id,-22}] {c.Type,-12} {c.Host}:{c.Port}");
+                Console.WriteLine($"  [{c.Id,-22}] {c.Type,-12} {c.Address}:{c.Port}");
 
             _logger.Info($"Devices ({cfg.Devices.Count}):");
             foreach (var d in cfg.Devices)
             {
                 var conn = connections[d.ConnectionId];
-                _logger.Info($"  [{d.DeviceType,-15}] {d.Name,-38} → {conn.Host}:{conn.Port}");
+                var addr = d.Address ?? conn.Address;
+                _logger.Info($"  [{d.DeviceType,-15}] {d.Name,-38} → {addr}:{conn.Port}");
             }
 
             // ── Ctrl+C ────────────────────────────────────────────────────────
@@ -191,8 +221,8 @@ namespace Pulswerk.Host
                 _logger!.Info($"  [BACnet] Initialising connection '{conn.Id}' (port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
                 try
                 {
-                    var transport = new BacnetIpUdpProtocolTransport(bindPort, useExclusivePort: true, local_endpoint: bindAddr);
-                    var client = new BacnetClient(transport, conn.LocalDeviceId ?? 1234);
+                    var transport = new BacnetIpUdpProtocolTransport(bindPort, true, false, 1472, bindAddr);
+                    var client = new BacnetClient(transport, (int)(conn.LocalDeviceId ?? 1234));
                     client.Start();
                     BacnetDriver.SetClientForConnection(conn.Id, client);
                 }
@@ -242,7 +272,7 @@ namespace Pulswerk.Host
                 var capturedConn = connections[device.ConnectionId];
                 int defaultIntervalSeconds = (device.DeviceType == "bacnet" || device.DeviceType == "deziko") 
                                                ? 120 
-                                               : cfg.Polling.IntervalSeconds;
+                                               : (cfg.Polling?.IntervalSeconds ?? 60);
 
                 int intervalMs = (capturedDevice.PollIntervalSeconds ?? defaultIntervalSeconds) * 1000;
 
@@ -366,11 +396,11 @@ namespace Pulswerk.Host
                             tsStore.Insert(p.Key, new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(), p.Value.val);
                     }
 
-                    // For non-BACnet readers, also scope keys by device name
+                    // For non-BACnet readers, also scope keys by technology and device name
                     if (reader is not BacnetDriver)
                     {
                         var scoped = telemetry.ToDictionary(
-                            kv => $"{device.Name}_{kv.Key}",
+                            kv => $"{device.Id}_{kv.Key}",
                             kv => kv.Value);
                         var persistedScoped = _dataService?.UpdateTelemetry(scoped);
                         if (persistedScoped != null)

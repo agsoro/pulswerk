@@ -337,16 +337,73 @@ client.OnReadPropertyMultipleRequest += (sender, adr, invokeId, props, _) =>
 client.OnWritePropertyRequest += (sender, adr, invokeId, objectId, value, _) =>
 {
     var propId = (BacnetPropertyIds)value.property.propertyIdentifier;
+    uint arrayIndex = value.property.propertyArrayIndex;
     string key = $"{(int)objectId.type}:{objectId.instance}";
+
     if (storage.TryGetValue(key, out var props))
     {
-        props[propId] = value.value.ToList();
+        if (arrayIndex != uint.MaxValue)
+        {
+            if (!props.TryGetValue(propId, out var list))
+            {
+                list = new List<BacnetValue>();
+                props[propId] = list;
+            }
+
+            int idx = (int)arrayIndex - 1;
+            while (list.Count <= idx) list.Add(new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_NULL, null));
+            
+            // For array index writes, the entire valueList is the sequence for that index
+            list[idx] = new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_CONTEXT_SPECIFIC_DECODED, value.value.ToList());
+        }
+        else
+        {
+            props[propId] = value.value.ToList();
+        }
+
         sender.SimpleAckResponse(adr, BacnetConfirmedServices.SERVICE_CONFIRMED_WRITE_PROPERTY, invokeId);
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] WRITE {objectId} {propId} = {value.value.FirstOrDefault().Value}");
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] WRITE {objectId} {propId}{(arrayIndex != uint.MaxValue ? $"[{arrayIndex}]" : "")} (count={value.value.Count})");
         NotifyCov(objectId);
         return;
     }
     sender.ErrorResponse(adr, BacnetConfirmedServices.SERVICE_CONFIRMED_WRITE_PROPERTY, invokeId, BacnetErrorClasses.ERROR_CLASS_OBJECT, BacnetErrorCodes.ERROR_CODE_UNKNOWN_OBJECT);
+};
+
+client.OnWritePropertyMultipleRequest += (sender, adr, invokeId, objectId, values, _) =>
+{
+    string key = $"{(int)objectId.type}:{objectId.instance}";
+    if (storage.TryGetValue(key, out var props))
+    {
+        foreach (var value in values)
+        {
+            var propId = (BacnetPropertyIds)value.property.propertyIdentifier;
+            uint arrayIndex = value.property.propertyArrayIndex;
+
+            if (arrayIndex != uint.MaxValue)
+            {
+                if (!props.TryGetValue(propId, out var list))
+                {
+                    list = new List<BacnetValue>();
+                    props[propId] = list;
+                }
+                int idx = (int)arrayIndex - 1;
+                while (list.Count <= idx) list.Add(new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_NULL, null));
+                
+                // For array index writes, the entire valueList is the sequence for that index
+                // We wrap it into a single BacnetValue to stay consistent with the storage structure
+                list[idx] = new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_CONTEXT_SPECIFIC_DECODED, value.value.ToList());
+            }
+            else
+            {
+                props[propId] = value.value.ToList();
+            }
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] WRITE-M {objectId} {propId}{(arrayIndex != uint.MaxValue ? $"[{arrayIndex}]" : "")} (count={value.value.Count})");
+        }
+        sender.SimpleAckResponse(adr, BacnetConfirmedServices.SERVICE_CONFIRMED_WRITE_PROP_MULTIPLE, invokeId);
+        NotifyCov(objectId);
+        return;
+    }
+    sender.ErrorResponse(adr, BacnetConfirmedServices.SERVICE_CONFIRMED_WRITE_PROP_MULTIPLE, invokeId, BacnetErrorClasses.ERROR_CLASS_OBJECT, BacnetErrorCodes.ERROR_CODE_UNKNOWN_OBJECT);
 };
 
 client.OnSubscribeCOV += (sender, adr, invokeId, processId, objectId, cancel, confirmed, lifetime, _) =>

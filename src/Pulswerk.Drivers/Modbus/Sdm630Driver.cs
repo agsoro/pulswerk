@@ -17,22 +17,22 @@ namespace Pulswerk.Drivers.Modbus
 {
     using Telemetry = Dictionary<string, object>;
 
-    class Sdm630Driver : IDeviceDriver
+    class Sdm630Driver : BaseModbusDriver
     {
         const ushort REG_POWER_W = 52;
         const ushort REG_IMPORT_KWH = 72;
         const ushort REG_EXPORT_KWH = 74;
 
-        public string DriverName => "SDM630";
-        public bool IsBusy => false;
+        public override string DriverName => "SDM630";
+        // public bool IsBusy => false;
 
-        public IEnumerable<string> GetTelemetryKeys() => new[] {
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyImportKwh,
             TelemetryKeys.EnergyExportKwh
         };
 
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));

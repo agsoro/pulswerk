@@ -29,7 +29,7 @@ public class MultiModeTests : BrowserTestBase
     private async Task<string?> CreateTestDashboard(string name = "Test Dashboard")
     {
         // Navigate to Dashboards and create via the UI
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
 
         // Get CSRF token
@@ -42,7 +42,7 @@ public class MultiModeTests : BrowserTestBase
         // Create via API
         var result = await Page.EvaluateAsync<JsonElement>($@"
             async () => {{
-                const r = await fetch('/Dashboards?handler=Create', {{
+                const r = await fetch('/plswk/Dashboards?handler=Create', {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json',
@@ -82,7 +82,7 @@ public class MultiModeTests : BrowserTestBase
         else
         {
             // Fallback: try existing dashboards
-            await Page.GotoAsync(Url("/Dashboards"));
+            await Page.GotoAsync(Url("/plswk/Dashboards"));
             await WaitForDashboard();
         }
 
@@ -139,7 +139,7 @@ public class MultiModeTests : BrowserTestBase
             await NavigateToDashboard(dashId);
         else
         {
-            await Page.GotoAsync(Url("/Dashboards"));
+            await Page.GotoAsync(Url("/plswk/Dashboards"));
             await WaitForDashboard();
         }
 
@@ -214,7 +214,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task EditModalNumericMode()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
 
         await Page.EvaluateAsync(@"() => {
@@ -256,7 +256,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task EditModalEnumMode()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
 
         var enumValues = Uri.EscapeDataString("[\"State A\",\"State B\",\"State C\"]");
@@ -292,7 +292,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task EditModalBooleanMode()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
 
         await Page.EvaluateAsync(@"() => {
@@ -334,7 +334,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task DashboardListMode()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
 
         var listMode = Page.Locator("[data-testid='dash-list-mode']");
@@ -408,7 +408,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task CreateDashboardModalLayout()
     {
-        await Page.GotoAsync(Url("/Dashboards"));
+        await Page.GotoAsync(Url("/plswk/Dashboards"));
         await WaitForDashboard();
 
         // Open the create modal
@@ -445,7 +445,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task AlarmFilterChipsModes()
     {
-        await Page.GotoAsync(Url("/Alarms"));
+        await Page.GotoAsync(Url("/plswk/Alarms"));
         await WaitForDashboard();
 
         var filterBar = Page.Locator("[data-testid='alarm-filters']");
@@ -495,7 +495,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task AssetTreeExpandCollapse()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
 
         var toggles = Page.Locator(".tree-toggle, .tree-chevron, [data-expandable]");
@@ -529,7 +529,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task HistoryModalDaySelectorOptions()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
 
         await Page.EvaluateAsync(@"() => {
@@ -878,7 +878,7 @@ public class MultiModeTests : BrowserTestBase
     [Test]
     public async Task EditModalCrossModeConsistency()
     {
-        await Page.GotoAsync(Url("/Assets"));
+        await Page.GotoAsync(Url("/plswk/Assets"));
         await WaitForDashboard();
 
         var measurements = new Dictionary<string, (double w, double h)>();

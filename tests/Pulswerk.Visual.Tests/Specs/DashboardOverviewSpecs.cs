@@ -10,18 +10,18 @@ public static partial class UiSpec
         Name = "Alarm Priority Boxes",
         Source = "Index.cshtml",
         PagePath = "/",
-        Purpose = "Five color-coded clickable cards showing alarm counts by severity. " +
+        Purpose = "Six color-coded clickable cards showing alarm counts by severity. " +
                   "Provides at-a-glance operational status. Each box uses severity-specific " +
-                  "gradient backgrounds: Critical=red, Major=amber, Minor=blue, Warning=slate, Total=dark.",
+                  "gradient backgrounds: Critical=red, Major=amber, Minor=blue, Warning=slate, Maintenance=purple, Total=dark.",
         RequiredTestIds = ["alarm-boxes"],
-        RequiredSelectors = ["#box-critical", "#box-major", "#box-minor", "#box-warning", "#box-total"],
+        RequiredSelectors = ["#box-critical", "#box-major", "#box-minor", "#box-warning", "#box-maintenance", "#box-total"],
         VisualRules =
         [
             new("CSS Grid layout", "display", "grid"),
         ],
         Behavior = "Each box links to /Alarms?severity=X. Hover: translateY(-3px) + box-shadow. " +
                    "Count text is 2.25rem weight 800. Label is 0.7rem uppercase.",
-        ChildCount = new("alarm-boxes", ".alarm-box", 5, "Critical, Major, Minor, Warning, Total"),
+        ChildCount = new("alarm-boxes", ".alarm-box", 6, "Critical, Major, Minor, Warning, Maintenance, Total"),
     };
 
     public static readonly ComponentSpec FavoritesSection = new()

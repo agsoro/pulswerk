@@ -70,21 +70,7 @@ namespace Pulswerk.Drivers.BACnet
             return base.ResolveObjectIdFromKey(key, state);
         }
 
-        // ── Structured View hierarchy walking ────────────────────────────────
 
-        /// <inheritdoc />
-        protected override void OnPostDiscovery(
-            BacnetClient client, BacnetAddress address,
-            DiscoveryState state, DeviceConfig device, DeviceConfig cfg)
-        {
-            if (cfg.HierarchyEnabled)
-            {
-                Console.WriteLine($"  [Deziko] Walking Structured Views on {device.Name}…");
-                state.Tree = BacnetHierarchy.Walk(client, address, device.DeviceId!.Value);
-                Console.WriteLine($"  [Deziko] Hierarchy walk complete — " +
-                                  $"{state.Tree.Roots.Count} root(s).");
-            }
-        }
 
         /// <inheritdoc />
         protected override bool ShouldDelayAlarm(DeviceConfig device, DiscoveryState state)

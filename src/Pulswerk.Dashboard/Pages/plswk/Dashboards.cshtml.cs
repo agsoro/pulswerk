@@ -117,9 +117,9 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(data);
         }
 
-        public JsonResult OnGetProperties(string key)
+        public async Task<JsonResult> OnGetPropertiesAsync(string key)
         {
-            var data = _data.GetPointProperties(key);
+            var data = await _data.GetPropertiesAsync(key);
             return new JsonResult(data);
         }
 

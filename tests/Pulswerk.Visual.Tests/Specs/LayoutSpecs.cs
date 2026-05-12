@@ -9,7 +9,7 @@ public static partial class UiSpec
         Id = "sidebar",
         Name = "Sidebar Navigation",
         Source = "_Layout.cshtml",
-        Purpose = "Collapsible icon-rail sidebar providing primary navigation to all 6 pages. " +
+        Purpose = "Collapsible icon-rail sidebar providing primary navigation to all 8 pages. " +
                   "Collapsed by default (72px), expands to 200px on hover revealing text labels. " +
                   "Uses accent-primary highlight for the active page link.",
         RequiredTestIds = ["sidebar", "sidebar-brand", "nav-links", "sidebar-footer"],
@@ -27,7 +27,7 @@ public static partial class UiSpec
         Behavior = "Collapsed: shows icons only (24px), text labels hidden via opacity:0. " +
                    "Hover: expands with cubic-bezier(0.4,0,0.2,1), adds 10px box-shadow. " +
                    "Active link: accent-primary bg tint + accent text. Footer shows version on hover.",
-        ChildCount = new("nav-links", "a", 6, "Dashboard, Dashboards, Assets, Connections, Alarms, Logs"),
+        ChildCount = new("nav-links", "a", 8, "Dashboard, Dashboards, Assets, Inventory, Connections, Alarms, Logs, Heartbeat"),
     };
 
     public static readonly ComponentSpec PageHeader = new()

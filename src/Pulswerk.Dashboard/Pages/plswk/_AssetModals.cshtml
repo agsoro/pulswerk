@@ -10,7 +10,7 @@
                 <div class="flex gap-4 items-center">
                     <div class="text-xs text-slate-400 font-mono" id="chartMeta"></div>
                     <div class="flex items-baseline gap-1.5">
-                        <div id="chartLiveValue" class="font-bold text-cyan-500 bg-cyan-500/10 px-2 py-0.5 rounded text-sm">---</div>
+                        <div id="chartLiveValue" class="font-bold text-sky-400 bg-sky-400/10 px-2 py-0.5 rounded text-sm">---</div>
                         <div class="edit-unit font-semibold text-slate-400 text-sm" id="chartUnit"></div>
                     </div>
                 </div>
@@ -120,6 +120,51 @@
                 </thead>
                 <tbody id="propsBody"></tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Schedule Modal -->
+<div class="modal-overlay" id="scheduleModal" data-testid="schedule-modal">
+    <div class="modal-content animate-fade-in w-[600px] max-w-[95vw]">
+        <div class="modal-header">
+            <div>
+                <div class="modal-path" id="schedulePath"></div>
+                <h2 data-i18n="weekly_schedule">Weekly Schedule</h2>
+                <div class="text-xs text-slate-400 font-mono" id="scheduleMeta"></div>
+            </div>
+            <button class="close-modal" onclick="closeSchedule()">&times;</button>
+        </div>
+
+        <div id="scheduleLoading" class="p-12 flex flex-col items-center justify-center text-sky-400 gap-3">
+            <i class="fas fa-spinner fa-spin text-4xl"></i>
+            <span data-i18n="loading">Loading Schedule...</span>
+        </div>
+
+        <div id="scheduleView" class="hidden p-4">
+            <div class="flex justify-between items-center mb-4">
+                <span class="text-xs text-slate-500 uppercase tracking-wider font-bold" data-i18n="schedule_configuration">Schedule Configuration</span>
+                <button class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded transition-colors" id="btnEditSchedule" onclick="toggleScheduleEdit(true)">
+                    <i class="fas fa-edit mr-1"></i> <span data-i18n="edit">Edit</span>
+                </button>
+                <div id="editScheduleActions" class="hidden flex gap-2">
+                    <button class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded transition-colors" onclick="toggleScheduleEdit(false)">
+                        <span data-i18n="cancel">Cancel</span>
+                    </button>
+                    <button class="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-xs rounded transition-colors" onclick="saveSchedule()">
+                        <i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3" id="scheduleGrid">
+                <!-- Day rows injected here -->
+            </div>
+            
+            <div id="scheduleInfoBox" class="mt-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-200 text-xs flex gap-3">
+                <i class="fas fa-info-circle text-lg mt-0.5"></i>
+                <p>This view allows you to see the device's internal schedule. Click "Edit" to modify switching times. Changes are sent directly to the BACnet device.</p>
+            </div>
         </div>
     </div>
 </div>

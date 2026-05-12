@@ -18,22 +18,22 @@ namespace Pulswerk.Drivers.Modbus
 {
     using Telemetry = Dictionary<string, object>;
 
-    class AbbDriver : IDeviceDriver
+    class AbbDriver : BaseModbusDriver
     {
         const ushort REG_POWER_KW = 23316;
         const ushort REG_ENERGY_IMPORT_KWH = 20480;
         const ushort REG_ENERGY_EXPORT_KWH = 20484;
 
-        public string DriverName => "ABB";
-        public bool IsBusy => false;
+        public override string DriverName => "ABB";
+        // public bool IsBusy => false;
 
-        public IEnumerable<string> GetTelemetryKeys() => new[] {
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyImportKwh,
             TelemetryKeys.EnergyExportKwh
         };
 
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));

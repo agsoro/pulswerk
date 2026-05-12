@@ -97,7 +97,7 @@ public class UxAuditTests : BrowserTestBase
     public async Task AuditResponsive(string name, int width, int height)
     {
         await Page.SetViewportSizeAsync(width, height);
-        await Page.GotoAsync(Url("/"));
+        await Page.GotoAsync(Url("/plswk/"));
         await WaitForDashboard();
         await DisableAnimations();
 

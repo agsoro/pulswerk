@@ -4,28 +4,7 @@
     ViewData["Title"] = "Active Alarms";
 }
 
-@section Styles {
-    <style type="text/tailwindcss">
-        @@layer components {
-            .filter-chip {
-                @@apply inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[0.78rem] font-semibold
-                       bg-white/5 border border-slate-700 text-slate-400 no-underline transition-all duration-200
-                       hover:bg-sky-400/10 hover:border-sky-400 hover:text-sky-400;
-            }
-            .filter-chip.active { @@apply bg-sky-400/10 border-sky-400 text-sky-400; }
-            .chip-critical.active { @@apply border-red-500 text-red-500 bg-red-500/10; }
-            .chip-major.active    { @@apply border-amber-500 text-amber-500 bg-amber-500/10; }
-            .chip-minor.active    { @@apply border-sky-400 text-sky-400 bg-sky-400/10; }
-            .chip-warning.active  { @@apply border-slate-500 text-slate-400 bg-slate-500/10; }
-            .chip-acked           { @@apply border-emerald-400/30 text-emerald-400; }
-            .chip-acked.active    { @@apply border-emerald-400 text-emerald-400 bg-emerald-400/10; }
-            .ack-status-msg { @@apply text-sm px-3.5 py-2.5 rounded-lg hidden; }
-            .ack-status-msg.sending { @@apply block bg-indigo-500/10 text-indigo-400 border border-indigo-500/25; }
-            .ack-status-msg.success { @@apply block bg-green-500/10 text-green-500 border border-green-500/20; }
-            .ack-status-msg.error   { @@apply block bg-red-500/10 text-red-500 border border-red-500/20; }
-        }
-    </style>
-}
+
 
 <div class="flex gap-2 flex-wrap mb-5 animate-fade-in" data-testid="alarm-filters">
     <a href="/plswk/Alarms" class="filter-chip @(string.IsNullOrEmpty(Model.Severity) ? "active" : "")">
