@@ -10,7 +10,7 @@ namespace Pulswerk.Core
     /// </summary>
     public static class ConfigValidator
     {
-        public static void Validate(AppConfig cfg, IReadOnlyCollection<string>? knownDeviceTypes = null)
+        public static void Validate(AppConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg), "Configuration cannot be null.");
 
@@ -74,9 +74,6 @@ namespace Pulswerk.Core
 
                     if (dev.DeviceId == null)
                         errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
-
-                    if (knownDeviceTypes != null && !knownDeviceTypes.Contains(dev.DeviceType, StringComparer.OrdinalIgnoreCase))
-                        errors.Add($"Device '{dev.Id}' has unsupported type '{dev.DeviceType}'. Known: {string.Join(", ", knownDeviceTypes.OrderBy(k => k))}.");
                 }
             }
 

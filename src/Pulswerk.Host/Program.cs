@@ -60,7 +60,7 @@ namespace Pulswerk.Host
                       ?? throw new Exception("Deserialization returned null.");
 
                 // Perform logical validation (connections, devices, IDs, etc.)
-                ConfigValidator.Validate(cfg, DeviceDriverFactory.KnownTypes);
+                ConfigValidator.Validate(cfg);
             }
             catch (JsonException ex)
             {

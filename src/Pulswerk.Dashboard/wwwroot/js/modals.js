@@ -393,18 +393,12 @@ function formatScheduleValue(val) {
 
 function renderScheduleValueInput(dayIndex, entryIndex, value) {
     if (scheduleValueType === 'boolean') {
-        const checked = value ? 'checked' : '';
-        const label = value ? 'ON' : 'OFF';
-        const labelColor = value ? 'color:#38bdf8' : 'color:#64748b';
-        return `
-            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-                <span class="bool-toggle" style="width:32px;height:16px;position:relative;display:inline-block">
-                    <input type="checkbox" ${checked} style="width:0;height:0;opacity:0"
-                           onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', this.checked ? 1 : 0)">
-                    <span class="bool-toggle-slider" style="border-radius:16px"></span>
-                </span>
-                <span style="font-size:0.65rem;font-weight:700;${labelColor}">${label}</span>
-            </label>`;
+        const opts = (scheduleStates || ['Off', 'On']).map((s, i) => 
+            `<option value="${i}" ${i === value ? 'selected' : ''}>${s}</option>`
+        ).join('');
+        const col = value ? '#38bdf8' : '#94a3b8';
+        return `<select style="background:#1e293b;color:${col};font-weight:700;font-size:0.7rem;border:1px solid #475569;border-radius:4px;padding:2px 4px;outline:none"
+                        onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseInt(this.value))">${opts}</select>`;
     }
     
     if (scheduleValueType === 'enumerated' && scheduleStates) {

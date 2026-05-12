@@ -2224,7 +2224,7 @@ namespace Pulswerk.Drivers.BACnet
                     catch { }
                 }
 
-                Console.WriteLine($"  [BACnet] Writing schedule for {oid} with value tag: {valueTag}");
+                Console.WriteLine($"  [BACnet] Writing schedule for {oid} — detected value tag: {valueTag}, entries per day: {days.Sum(d => d.Entries?.Count ?? 0)}");
 
                 // BACnet Weekly_Schedule is an array of 7 DailySchedule (SEQUENCE OF TimeValue)
                 // arrayIndex 1 = Monday, ..., 7 = Sunday
@@ -2261,14 +2261,22 @@ namespace Pulswerk.Drivers.BACnet
                         }
                     }
 
-                    // Use WritePropertyMultipleRequest to specify array index
+                    // Write each day using WritePropertyMultipleRequest with array index
                     uint arrayIndex = (uint)(i + 1);
                     var propRef = new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_WEEKLY_SCHEDULE, arrayIndex);
-                    var propValue = new BacnetPropertyValue { property = propRef, value = dayValues, priority = 0 };
+                    var propValue = new BacnetPropertyValue { property = propRef, value = dayValues };
 
-                    if (!client.WritePropertyMultipleRequest(address, oid, new[] { propValue }))
+                    try
                     {
-                        Console.Error.WriteLine($"  [BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
+                        if (!client.WritePropertyMultipleRequest(address, oid, new[] { propValue }))
+                        {
+                            Console.Error.WriteLine($"  [BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
+                        }
+                    }
+                    catch (Exception dayEx)
+                    {
+                        Console.Error.WriteLine($"  [BACnet] Schedule write error day {arrayIndex}: {dayEx.Message}");
+                        throw;
                     }
                 }
             }
