@@ -29,6 +29,7 @@ namespace Pulswerk.Host
         static DashboardDataService? _dataService;
         static Dictionary<string, IDeviceDriver> _drivers = new();
         static Dictionary<string, int> _failCounts = new();
+        static Dictionary<string, DateTime> _lastAttempt = new();
         const int FAIL_THRESHOLD = 10;
         static LogBuffer? _logBuffer => _logger?.Buffer;
 
@@ -38,15 +39,16 @@ namespace Pulswerk.Host
             Console.WriteLine($"=== Pulswerk v{version?.Major}.{version?.Minor}.{version?.Build} ===\n");
 
             // ── Load config ───────────────────────────────────────────────────
-            string configPath = Path.Combine(AppContext.BaseDirectory, "pulswerk.json");
-            if (!File.Exists(configPath))
+            string configPath = ResolveConfigPath();
+            if (configPath == null)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.Error.WriteLine($"\n[FATAL] Config file not found: {configPath}");
+                Console.Error.WriteLine("\n[FATAL] pulswerk.json not found.");
                 Console.Error.WriteLine("The application cannot start without settings. Please check your deployment.");
                 Console.ResetColor();
                 return;
             }
+            Console.WriteLine($"Config: {configPath}");
 
             AppConfig cfg;
             try
@@ -371,6 +373,9 @@ namespace Pulswerk.Host
                     if (attributes.Count > 0)
                         _dataService?.UpdateAttributes(attributes);
 
+                    // COV device is alive – update last-seen
+                    lastPolledAt[device.Name] = DateTime.UtcNow;
+
                     if (attributes.Count > 0 || telemetry.Count > 0)
                         _logger!.Info(
                             $"[{DateTime.Now:HH:mm:ss}] [{reader.DriverName,-10}] {device.Name,-38} " +
@@ -380,10 +385,12 @@ namespace Pulswerk.Host
 
                 // ── Polling mode (non-COV BACnet / Modbus) ────────────────────
                 var now = DateTime.UtcNow;
-                if (now - lastPolledAt[device.Name] < TimeSpan.FromMilliseconds(deviceIntervalMs))
+                // Rate-limit polls by interval, but use lastPolledAt for tracking
+                // actual data delivery (updated below only on success)
+                _lastAttempt.TryGetValue(device.Name, out var lastAttempt);
+                if (now - lastAttempt < TimeSpan.FromMilliseconds(deviceIntervalMs))
                     return Task.CompletedTask;
-
-                lastPolledAt[device.Name] = now;
+                _lastAttempt[device.Name] = now;
 
                 if (reader is BacnetDriver br)
                 {
@@ -428,6 +435,9 @@ namespace Pulswerk.Host
                 if (attributes.Count > 0)
                     _dataService?.UpdateAttributes(attributes);
 
+                // ── Mark device as recently seen (successful poll, no exception) ──
+                lastPolledAt[device.Name] = DateTime.UtcNow;
+
                 // ── Clear Communication Loss Alarm on recovery ────────────────
                 _failCounts[device.Name] = 0;
                 if (offlineDevices.Remove(device.Name))
@@ -459,6 +469,23 @@ namespace Pulswerk.Host
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Finds pulswerk.json:
+        ///   1. Next to the binary (production / Docker mount)
+        ///   2. Walking up from bin dir (local dev — place pulswerk.json in project root)
+        /// </summary>
+        static string? ResolveConfigPath()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null)
+            {
+                var path = Path.Combine(dir.FullName, "pulswerk.json");
+                if (File.Exists(path)) return path;
+                dir = dir.Parent;
+            }
+            return null;
         }
     }
 }

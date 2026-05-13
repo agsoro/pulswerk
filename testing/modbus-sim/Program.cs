@@ -16,9 +16,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using NModbus;
 
-const ushort REG_POWER_W   = 19020;
-const ushort REG_IMPORT_WH = 19060;
-const ushort REG_EXPORT_WH = 19062;
+const ushort REG_POWER_W   = 19026;
+const ushort REG_IMPORT_WH = 19062;
+const ushort REG_EXPORT_WH = 19076;
 
 const double POWER_MIN_W    = 2_000;
 const double POWER_MAX_W    = 8_000;

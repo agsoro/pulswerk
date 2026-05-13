@@ -465,6 +465,15 @@ namespace Pulswerk.Drivers.BACnet
                 }
 
             }
+            catch (Exception ex) when (IsTransportError(ex))
+            {
+                // UDP socket died (network hiccup, interface restart, etc.).
+                // Purge the cached client so the next poll creates a fresh one.
+                Console.Error.WriteLine(
+                    $"  [BACnet] Transport error on {device.Name}: {ex.GetType().Name} – {ex.Message}. Resetting client.");
+                InvalidateClient(conn);
+                throw;  // re-throw so PollAndPublishAsync tracks the failure count
+            }
             finally
             {
                 if (!_clientsByConnection.Values.Contains(client))
@@ -1362,6 +1371,36 @@ namespace Pulswerk.Drivers.BACnet
             return client;
         }
 
+        /// <summary>Dispose and remove a cached BACnet client for a connection,
+        /// forcing the next poll to create a fresh UDP socket.</summary>
+        protected void InvalidateClient(ConnectionConfig conn)
+        {
+            if (_clientsByConnection.TryRemove(conn.Id, out var client))
+            {
+                // Also remove from endpoint cache
+                var bindAddr = conn.LocalAddress ?? "0.0.0.0";
+                var bindPort = conn.LocalPort ?? 0;
+                if (bindPort > 0)
+                    _clientsByEndpoint.TryRemove((bindAddr, bindPort), out _);
+
+                try { client.Dispose(); } catch { /* best-effort */ }
+                Console.WriteLine($"  [BACnet] Client for connection '{conn.Id}' invalidated and disposed.");
+            }
+        }
+
+        /// <summary>Checks whether an exception indicates a transport-level failure
+        /// (dead UDP socket, network unreachable, I/O error).</summary>
+        static bool IsTransportError(Exception ex)
+        {
+            if (ex is System.Net.Sockets.SocketException) return true;
+            if (ex is System.IO.IOException) return true;
+            if (ex is ObjectDisposedException) return true;
+            // BACnet library wraps some transport failures as generic Exception
+            // with socket-related inner exceptions
+            if (ex.InnerException is System.Net.Sockets.SocketException) return true;
+            return false;
+        }
+
         DiscoveryState GetOrCreateState(string deviceName)
         {
             lock (_stateLock)
@@ -2228,7 +2267,21 @@ namespace Pulswerk.Drivers.BACnet
         // =====================================================================
         //  IDeviceWriter – write a value to a BACnet object's PROP_PRESENT_VALUE
         // =====================================================================
-        public bool IsWritable(string key) => true;
+        public bool IsWritable(string key)
+        {
+            if (key.Contains("schedule")) return true;
+
+            lock (_stateLock)
+            {
+                foreach (var state in _stateByDevice.Values)
+                {
+                    var obj = state.CachedObjects.FirstOrDefault(o =>
+                        (o.KeyPrefix + "_value") == key);
+                    if (obj != null) return obj.Commandable;
+                }
+            }
+            return false;
+        }
 
         public void Write(ConnectionConfig conn, DeviceConfig device, string key, double value)
         {

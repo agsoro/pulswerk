@@ -42,7 +42,7 @@ services:
     container_name: bacnet-sim
     restart: unless-stopped
     ports:
-      - "47808:47808/udp"  # expose for external BACnet tools / debugging
+      - "47809:47808/udp"  # host 47809 → container 47808 (avoids clash with pulswerk)
 
   # ── Pulswerk overrides for test environment ─────────────────────────────────
   pulswerk:
@@ -56,8 +56,8 @@ services:
       bacnet-sim:
         condition: service_started
     volumes:
-      # Mount the test-ready config into /app/pulswerk.json
-      - ./src/Pulswerk.Host/docker/pulswerk.compose.json:/app/pulswerk.json:ro
+      # Override production config with testing config (Docker DNS for simulators)
+      - ./pulswerk.testing.json:/app/pulswerk.json:ro
     # All services share the default compose bridge network.
     # "influxdb", "modbus-sim", and "bacnet-sim" resolve via Docker DNS.
 

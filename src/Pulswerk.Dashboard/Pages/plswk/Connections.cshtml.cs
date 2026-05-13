@@ -47,6 +47,11 @@ namespace Pulswerk.Dashboard.Pages
                     bool offline = _data.OfflineDevices.Contains(d.Name);
                     _data.LastPolledAtMap.TryGetValue(d.Name, out var polledAt);
 
+                    // If the device is not explicitly offline but hasn't delivered
+                    // data in over 5 minutes, mark it as "stale" (amber).
+                    bool stale = !offline && polledAt != default &&
+                                 (System.DateTime.UtcNow - polledAt).TotalMinutes > 5;
+
                     string protocol = d.DeviceType.ToLowerInvariant() switch
                     {
                         "janitza" => "Modbus",
@@ -67,12 +72,18 @@ namespace Pulswerk.Dashboard.Pages
                         Protocol = protocol,
                         Address = address,
                         AssetType = d.AssetType,
-                        Status = offline ? "offline" : "online",
+                        Status = offline ? "offline" : stale ? "stale" : "online",
                         LastSeen = polledAt == default
                                        ? "Never"
                                        : polledAt.ToString("HH:mm:ss")
                     };
                 }).ToList();
+
+                // Connection status: if ALL devices offline → offline;
+                //   if ANY device stale → stale; otherwise → online
+                string connStatus = isOffline && connDevices.Count > 0
+                    ? "offline"
+                    : deviceRows.Any(d => d.Status == "stale") ? "stale" : "online";
 
                 Connections.Add(new ConnectionDetailDto
                 {
@@ -81,7 +92,7 @@ namespace Pulswerk.Dashboard.Pages
                     Type = tbType,
                     Address = (conn.Type == "bacnet-ip" ? conn.LocalAddress : conn.Address) ?? "",
                     Port = (conn.Type == "bacnet-ip" ? conn.LocalPort : conn.Port) ?? 0,
-                    Status = (connDevices.Count == 0 || !isOffline) ? "online" : "offline",
+                    Status = connStatus,
                     LastSeen = lastPolled == default
                                     ? "Never"
                                     : lastPolled.ToString("yyyy-MM-dd HH:mm:ss UTC"),

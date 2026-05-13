@@ -474,18 +474,82 @@ namespace Pulswerk.Dashboard
             // Fallback to InfluxDB internal stats if volume mount isn't yielding results
             if (dbSizeBytes == 0 || dbSizeBytes < 1000) dbSizeBytes = dbStats.DiskSizeBytes;
 
+            // ── Device health breakdown ─────────────────────────────────
+            var now = DateTime.UtcNow;
+            int staleCount = 0;
+            int offlineCount = OfflineDevices.Count;
+            DateTime oldestSeen = now;
+            var connSummaries = new List<ConnectionHealthDto>();
+
+            foreach (var conn in Config.Connections)
+            {
+                var connDevices = Config.Devices.Where(d => d.ConnectionId == conn.Id).ToList();
+                int connOnline = 0, connStale = 0, connOffline = 0;
+
+                foreach (var d in connDevices)
+                {
+                    if (OfflineDevices.Contains(d.Name))
+                    {
+                        connOffline++;
+                        continue;
+                    }
+
+                    if (LastPolledAtMap.TryGetValue(d.Name, out var polledAt) && polledAt != default)
+                    {
+                        if ((now - polledAt).TotalMinutes > 5)
+                        {
+                            connStale++;
+                            staleCount++;
+                        }
+                        else
+                        {
+                            connOnline++;
+                        }
+                        if (polledAt < oldestSeen) oldestSeen = polledAt;
+                    }
+                    else
+                    {
+                        connStale++;
+                        staleCount++;
+                    }
+                }
+
+                connSummaries.Add(new ConnectionHealthDto
+                {
+                    Id = conn.Id,
+                    Name = conn.EffectiveName,
+                    Type = conn.Type,
+                    Online = connOnline,
+                    Stale = connStale,
+                    Offline = connOffline,
+                    Total = connDevices.Count
+                });
+            }
+
+            // ── Memory stats ─────────────────────────────────────────────
+            var process = System.Diagnostics.Process.GetCurrentProcess();
+            long workingSetMb = process.WorkingSet64 / (1024 * 1024);
+            long gcHeapMb = GC.GetTotalMemory(false) / (1024 * 1024);
+
             return new HeartbeatStatsDto
             {
                 UptimeSeconds = (long)Uptime.Elapsed.TotalSeconds,
                 Version = Version,
                 IsScanning = Drivers.Values.Any(d => d.IsBusy),
                 TotalDevices = Config.Devices.Count,
-                OnlineDevices = Config.Devices.Count - OfflineDevices.Count,
+                OnlineDevices = Config.Devices.Count - OfflineDevices.Count - staleCount,
+                StaleDevices = staleCount,
+                OfflineDevices = offlineCount,
                 TotalTelemetryKeys = dbStats.KeyCount,
                 TotalDataPoints = dbStats.PointCount,
                 UpdatesPerMinute = GetUpdatesPerMinute(),
                 TotalUpdates = _totalUpdates,
-                DatabaseSizeBytes = dbSizeBytes
+                DatabaseSizeBytes = dbSizeBytes,
+                WorkingSetMb = workingSetMb,
+                GcHeapMb = gcHeapMb,
+                OldestDeviceSeenUtc = oldestSeen == now ? null : oldestSeen.ToString("yyyy-MM-dd HH:mm:ss"),
+                TcpConnections = Pulswerk.Drivers.Modbus.ModbusConnection.ActiveConnectionCount,
+                Connections = connSummaries
             };
         }
 
@@ -498,10 +562,28 @@ namespace Pulswerk.Dashboard
         [JsonPropertyName("isScanning")] public bool IsScanning { get; set; }
         [JsonPropertyName("totalDevices")] public int TotalDevices { get; set; }
         [JsonPropertyName("onlineDevices")] public int OnlineDevices { get; set; }
+        [JsonPropertyName("staleDevices")] public int StaleDevices { get; set; }
+        [JsonPropertyName("offlineDevices")] public int OfflineDevices { get; set; }
         [JsonPropertyName("totalTelemetryKeys")] public long TotalTelemetryKeys { get; set; }
         [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
         [JsonPropertyName("updatesPerMinute")] public double UpdatesPerMinute { get; set; }
         [JsonPropertyName("totalUpdates")] public long TotalUpdates { get; set; }
         [JsonPropertyName("databaseSizeBytes")] public long DatabaseSizeBytes { get; set; }
+        [JsonPropertyName("workingSetMb")] public long WorkingSetMb { get; set; }
+        [JsonPropertyName("gcHeapMb")] public long GcHeapMb { get; set; }
+        [JsonPropertyName("oldestDeviceSeenUtc")] public string? OldestDeviceSeenUtc { get; set; }
+        [JsonPropertyName("tcpConnections")] public int TcpConnections { get; set; }
+        [JsonPropertyName("connections")] public List<ConnectionHealthDto> Connections { get; set; } = new();
+    }
+
+    public class ConnectionHealthDto
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = "";
+        [JsonPropertyName("name")] public string Name { get; set; } = "";
+        [JsonPropertyName("type")] public string Type { get; set; } = "";
+        [JsonPropertyName("online")] public int Online { get; set; }
+        [JsonPropertyName("stale")] public int Stale { get; set; }
+        [JsonPropertyName("offline")] public int Offline { get; set; }
+        [JsonPropertyName("total")] public int Total { get; set; }
     }
 }

@@ -35,8 +35,8 @@ Thumbs.db
 desktop.ini
 
 # Runtime configs (contain credentials – never commit)
-connector/connector.json
-connector/docker/connector.compose.json
+# Production config is per-deployment; copy pulswerk.example.json to pulswerk.json
+/pulswerk.json
 
 # Logs
 *.log

@@ -20,18 +20,29 @@ async function openHistory(key, name, units, pathEnc) {
     document.getElementById('historyModal').style.display = 'flex';
     
     // Try to pre-fill live value from any element on the page matching this key
-    const valEl = document.querySelector(`[data-key="${key}"]`);
-    document.getElementById('chartLiveValue').textContent = valEl ? valEl.textContent : '---';
+    const valEl = document.querySelector(`.point-value[data-key="${key}"]`)
+              || document.querySelector(`.sv-card-val[data-key="${key}"]`)
+              || document.querySelector(`[data-key="${key}"]`);
+    document.getElementById('chartLiveValue').textContent = valEl ? valEl.textContent.trim() : '---';
     
     await reloadHistory();
 }
 
 function closeHistory() {
     document.getElementById('historyModal').style.display = 'none';
+    currentHistoryKey = null;
     if (historyChart) {
         historyChart.destroy();
         historyChart = null;
     }
+    const container = document.getElementById('historyChart');
+    if (container) container.innerHTML = '';
+    document.getElementById('chartTitle').textContent = '';
+    document.getElementById('chartUnit').textContent = '';
+    document.getElementById('chartMeta').textContent = '';
+    document.getElementById('chartLiveValue').textContent = '---';
+    const pathEl = document.getElementById('chartPath');
+    if (pathEl) pathEl.innerHTML = '';
 }
 
 async function reloadHistory() {
@@ -124,8 +135,10 @@ function openEdit(key, name, fullName, units, pathEnc, type, enumValuesEnc) {
     status.textContent = '';
     status.className = 'status-msg';
     
-    const valEl = document.querySelector(`.point-value[data-key="${key}"]`);
-    const currentVal = valEl ? valEl.textContent : '---';
+    const valEl = document.querySelector(`.point-value[data-key="${key}"]`)
+              || document.querySelector(`.sv-card-val[data-key="${key}"]`)
+              || document.querySelector(`[data-key="${key}"]`);
+    const currentVal = valEl ? valEl.textContent.trim() : '---';
     document.getElementById('currentVal').textContent = currentVal;
 
     if (enums && Object.keys(enums).length > 0) {
@@ -154,9 +167,20 @@ function openEdit(key, name, fullName, units, pathEnc, type, enumValuesEnc) {
 
 function closeEdit() {
     document.getElementById('editModal').style.display = 'none';
+    currentEditKey = null;
     const btn = document.getElementById('saveBtn');
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
+    document.getElementById('editTitle').textContent = '';
+    document.getElementById('editMeta').textContent = '';
+    document.getElementById('editUnitLabel').textContent = '';
+    document.getElementById('currentVal').textContent = '---';
+    document.getElementById('editValue').value = 0;
+    const status = document.getElementById('editStatus');
+    status.textContent = '';
+    status.className = 'status-msg';
+    const pathEl = document.getElementById('editPath');
+    if (pathEl) pathEl.innerHTML = '';
 }
 
 function step(n) {
@@ -280,6 +304,14 @@ async function openProperties(key, name, pathEnc) {
 
 function closeProperties() {
     document.getElementById('propsModal').style.display = 'none';
+    currentPropsKey = null;
+    document.getElementById('propsTitle').textContent = '';
+    document.getElementById('propsMeta').textContent = '';
+    document.getElementById('propsBody').innerHTML = '';
+    document.getElementById('propsTable').classList.add('hidden');
+    document.getElementById('propsEmpty').classList.add('hidden');
+    const pathEl = document.getElementById('propsPath');
+    if (pathEl) pathEl.innerHTML = '';
 }
 
 // --- Utils ---
@@ -382,6 +414,17 @@ async function openScheduleView(key, name, pathEnc) {
 
 function closeSchedule() {
     document.getElementById('scheduleModal').style.display = 'none';
+    currentScheduleKey = null;
+    currentScheduleData = [];
+    isEditingSchedule = false;
+    scheduleValueType = 'real';
+    scheduleStates = null;
+    document.getElementById('scheduleGrid').innerHTML = '';
+    const pathEl = document.getElementById('schedulePath');
+    if (pathEl) pathEl.textContent = '';
+    document.getElementById('scheduleMeta').textContent = '';
+    const status = document.getElementById('scheduleStatus');
+    if (status) { status.textContent = ''; status.className = 'status-msg'; }
 }
 
 function formatScheduleValue(val) {

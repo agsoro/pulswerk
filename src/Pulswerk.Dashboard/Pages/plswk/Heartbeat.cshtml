@@ -90,13 +90,32 @@
                 <span class="text-white font-medium" data-i18n="production">Production</span>
             </div>
             <div class="flex justify-between">
-                <span class="text-slate-400" data-i18n="devices">Devices (Online/Total)</span>
-                <span class="text-white font-medium">@Model.Stats.OnlineDevices / @Model.Stats.TotalDevices</span>
+                <span class="text-slate-400">Devices</span>
+                <span class="text-white font-medium">
+                    <span class="text-emerald-400">@Model.Stats.OnlineDevices</span>
+                    @if (Model.Stats.StaleDevices > 0) {<span class="text-amber-400">/ @Model.Stats.StaleDevices stale</span>}
+                    @if (Model.Stats.OfflineDevices > 0) {<span class="text-red-400">/ @Model.Stats.OfflineDevices off</span>}
+                    <span class="text-slate-500">/ @Model.Stats.TotalDevices</span>
+                </span>
             </div>
             <div class="flex justify-between">
                 <span class="text-slate-400" data-i18n="telemetry_keys">Telemetry Keys</span>
                 <span class="text-white font-medium">@Model.Stats.TotalTelemetryKeys.ToString("N0")</span>
             </div>
+            <div class="flex justify-between border-t border-white/5 pt-4">
+                <span class="text-slate-400">Memory (RSS / GC)</span>
+                <span class="text-white font-medium" id="memStats">@Model.Stats.WorkingSetMb MB / @Model.Stats.GcHeapMb MB</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-slate-400">TCP Connections (pooled)</span>
+                <span class="text-white font-medium" id="tcpConns">@Model.Stats.TcpConnections</span>
+            </div>
+            @if (Model.Stats.OldestDeviceSeenUtc != null) {
+            <div class="flex justify-between">
+                <span class="text-slate-400">Oldest Device Seen</span>
+                <span class="text-white font-medium text-[0.78rem] font-mono" id="oldestSeen">@Model.Stats.OldestDeviceSeenUtc UTC</span>
+            </div>
+            }
             <div class="flex justify-between border-t border-white/5 pt-4">
                 <span class="text-slate-400" data-i18n="total_updates_processed">Total updates processed</span>
                 <span class="text-white font-medium" id="totalUpdates">@Model.Stats.TotalUpdates.ToString("N0")</span>
@@ -104,7 +123,7 @@
         </div>
     </div>
 
-    <!-- Live Update Graph Placeholder -->
+    <!-- Live Update Graph -->
     <div class="lg:col-span-2 bg-slate-800/50 border border-white/10 rounded-2xl shadow-xl p-6">
         <div class="flex items-center justify-between mb-6">
             <h3 class="text-lg font-bold text-white flex items-center gap-2" data-i18n="update_throughput">
@@ -112,10 +131,11 @@
             </h3>
             <div class="text-[0.7rem] font-bold text-slate-500 uppercase tracking-widest bg-white/5 px-2 py-1 rounded" data-i18n="live_window">Live (60s window)</div>
         </div>
-        <div class="h-80 border border-white/5 rounded-xl p-2" id="throughputChart">
+        <div class="h-[480px] border border-white/5 rounded-xl p-2" id="throughputChart">
         </div>
     </div>
 </div>
+
 
 @functions {
     string FormatUptime(long seconds) {
@@ -210,6 +230,19 @@
                 
                 document.getElementById('totalUpdates').textContent = data.totalUpdates.toLocaleString();
                 
+                // Memory
+                const mem = document.getElementById('memStats');
+                if (mem) mem.textContent = `${data.workingSetMb} MB / ${data.gcHeapMb} MB`;
+
+                const tcpEl = document.getElementById('tcpConns');
+                if (tcpEl) tcpEl.textContent = data.tcpConnections;
+
+                // Oldest device seen
+                const oldest = document.getElementById('oldestSeen');
+                if (oldest && data.oldestDeviceSeenUtc) oldest.textContent = data.oldestDeviceSeenUtc + ' UTC';
+
+
+
                 // Format uptime
                 const s = data.uptimeSeconds;
                 const d = Math.floor(s / 86400);

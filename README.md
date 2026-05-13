@@ -39,15 +39,26 @@ Designed for resilience and scalability, Pulswerk enables seamless integration o
 
 ## 🛠 Deployment & Setup
 
-### Quick Start (Docker)
-Launch the entire stack (InfluxDB, Pulswerk, and simulators) in seconds:
+### Configuration Files
+
+All configuration lives at the **project root**:
+
+| File | In Git | Purpose |
+|------|--------|---------|
+| `pulswerk.json` | ❌ `.gitignore` | **Production** config — your real device IPs, credentials. Copy from `pulswerk.example.json`. |
+| `pulswerk.testing.json` | ✅ | **Testing** config — Docker DNS names for simulators (`modbus-sim`, `influxdb`, etc.) |
+| `pulswerk.example.json` | ✅ | **Template** — documented example to create your own `pulswerk.json`. |
+
+### Production (Docker)
+Requires `pulswerk.json` to exist at the project root — will fail to start otherwise:
 
 ```powershell
+cp pulswerk.example.json pulswerk.json   # edit with real device addresses
 docker compose up --build -d
 ```
 
-### Full Testing Stack
-To include the visual regression testing engine and specialized simulators:
+### Testing Stack
+Includes BACnet/Modbus simulators. Automatically uses `pulswerk.testing.json`:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
@@ -57,15 +68,15 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
 - **InfluxDB**: [http://localhost:8086](http://localhost:8086)
 
 ### Local Development
-Ensure you have the .NET 8 SDK installed:
+Ensure you have the .NET 8 SDK installed. Place a `pulswerk.json` at the project root:
 
 ```powershell
 dotnet build Pulswerk.sln
-dotnet test Pulswerk.sln
+dotnet run --project src/Pulswerk.Host
 ```
 
 ## ⚙️ Configuration
-System behavior is defined in `pulswerk.json`. A fully documented template is available at `src/Pulswerk.Host/pulswerk.example.json`.
+System behavior is defined in `pulswerk.json`. A fully documented template is available at `pulswerk.example.json` in the project root.
 
 ## 📜 License
 Pulswerk is released under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for the full text.

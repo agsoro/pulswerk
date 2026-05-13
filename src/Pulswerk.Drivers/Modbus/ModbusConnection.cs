@@ -1,5 +1,6 @@
 // ModbusConnection.cs – Shared Modbus TCP transport layer
 using System;
+using System.Collections.Concurrent;
 using System.Net.Sockets;
 using NModbus;
 using Pulswerk.Core;
@@ -8,19 +9,76 @@ namespace Pulswerk.Drivers.Modbus
 {
     /// <summary>
     /// Provides connection-scoped access to a Modbus TCP master.
-    /// Opens a short-lived TCP connection per call. For high-frequency polling
-    /// consider pooling or long-lived connections in a future iteration.
+    /// Uses a persistent connection pool (one TCP socket per connection ID)
+    /// to avoid TCP port exhaustion from TIME_WAIT accumulation.
+    /// Auto-reconnects on socket failure.
     /// </summary>
     public static class ModbusConnection
     {
+        private static readonly ConcurrentDictionary<string, (TcpClient Tcp, IModbusMaster Master)> _pool = new();
+        private static readonly ConcurrentDictionary<string, object> _connLocks = new();
+        private static readonly object _lock = new();
+
         public static T WithMaster<T>(ConnectionConfig conn, Func<IModbusMaster, T> action)
         {
-            using var tcp = new TcpClient();
-            tcp.Connect(conn.Address ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address."), 
-                        conn.Port ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port."));
-            using var master = new ModbusFactory().CreateMaster(tcp);
-            return action(master);
+            // Per-connection lock — NModbus masters are NOT thread-safe;
+            // concurrent reads on the same TCP stream corrupt the framing.
+            var connLock = _connLocks.GetOrAdd(conn.Id, _ => new object());
+            lock (connLock)
+            {
+                var master = GetOrCreateMaster(conn);
+                try
+                {
+                    return action(master);
+                }
+                catch (Exception ex) when (ex is SocketException or System.IO.IOException or ObjectDisposedException or InvalidOperationException)
+                {
+                    // Connection died — purge from pool and retry once with a fresh connection
+                    PurgeConnection(conn.Id);
+                    master = GetOrCreateMaster(conn);
+                    return action(master);
+                }
+            }
         }
+
+        private static IModbusMaster GetOrCreateMaster(ConnectionConfig conn)
+        {
+            string key = conn.Id;
+            if (_pool.TryGetValue(key, out var entry) && entry.Tcp.Connected)
+                return entry.Master;
+
+            lock (_lock)
+            {
+                // Double-check after acquiring lock
+                if (_pool.TryGetValue(key, out entry) && entry.Tcp.Connected)
+                    return entry.Master;
+
+                // Dispose old if present
+                PurgeConnection(key);
+
+                var tcp = new TcpClient();
+                tcp.Connect(
+                    conn.Address ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address."),
+                    conn.Port ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port."));
+                var master = new ModbusFactory().CreateMaster(tcp);
+
+                _pool[key] = (tcp, master);
+                return master;
+            }
+        }
+
+        /// <summary>Dispose and remove a pooled connection.</summary>
+        public static void PurgeConnection(string connId)
+        {
+            if (_pool.TryRemove(connId, out var entry))
+            {
+                try { entry.Master?.Dispose(); } catch { }
+                try { entry.Tcp?.Dispose(); } catch { }
+            }
+        }
+
+        /// <summary>Returns the number of active pooled connections.</summary>
+        public static int ActiveConnectionCount => _pool.Count;
 
         /// <summary>Reads two 16-bit registers and converts them to a big-endian float32.</summary>
         public static float ReadFloat32(IModbusMaster master, byte slaveId, ushort address, bool input = false)
