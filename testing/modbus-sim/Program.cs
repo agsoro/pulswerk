@@ -1,13 +1,17 @@
-// Program.cs – Modbus TCP simulator (Janitza UMG-604 style)
+// Program.cs – Modbus TCP simulator (Janitza + Glück)
 //
-// Register map (0-based, float32 big-endian = 2 × uint16 registers):
-//   19020  power_w     → connector divides by 1000 → power_kw
-//   19060  import_wh   → connector divides by 1000 → import_kwh
-//   19062  export_wh   → always 0 (no export on test meter)
+// Janitza (slaves 1–4) register map (float32 big-endian = 2 × uint16):
+//   19026  power_w     → connector divides by 1000 → power_kw
+//   19062  import_wh   → connector divides by 1000 → import_kwh
+//   19076  export_wh   → always 0 (no export on test meter)
 //
-// Slave ID : 1
-// Behaviour: power oscillates on a 5-min sine wave (2–8 kW);
-//            import_kwh accumulates monotonically from a random start.
+// Glück (slave 5) register map:
+//   Input  1901       uint16         utility_limit_pct
+//   Input  1902–1903  uint32 swapped feedback_limit_pct
+//   Input  1904–1905  int32  swapped generation_power (W)
+//
+// Behaviour: Janitza power oscillates on a 5-min sine wave (2–8 kW);
+//            Glück generation oscillates on a 3-min sine (10–50 kW).
 
 using System;
 using System.Net;
@@ -53,9 +57,15 @@ network.AddSlave(slave3);
 var slave4 = factory.CreateSlave(4);
 network.AddSlave(slave4);
 
+// Slave 5 – Glück Controller        (10–50 kW PV generation, 3-min sine)
+var slave5 = factory.CreateSlave(5);
+network.AddSlave(slave5);
+// Initialize power limit to 100% — only changes when the connector writes
+slave5.DataStore.HoldingRegisters.WritePoints(401, new ushort[] { 100 });
+
 var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-Console.WriteLine($"=== Modbus TCP Simulator v{version?.Major}.{version?.Minor}.{version?.Build} (Janitza UMG-604) ===");
-Console.WriteLine($"Listening on 0.0.0.0:502  slaves=1,2,3,4");
+Console.WriteLine($"=== Modbus TCP Simulator v{version?.Major}.{version?.Minor}.{version?.Build} (Janitza + Glück) ===");
+Console.WriteLine($"Listening on 0.0.0.0:502  slaves=1,2,3,4,5");
 Console.WriteLine($"Slave1 import = {importWh / 1000:F1} kWh");
 Console.WriteLine();
 
@@ -108,9 +118,21 @@ var updater = Task.Run(async () =>
         WriteFloat32(slave4, REG_IMPORT_WH, (float)importWh4);
         WriteFloat32(slave4, REG_EXPORT_WH, (float)(powerW4 > 9000 ? (powerW4 - 9000) : 0));  // exports when peak
 
+        // Slave 5: Glück – 10–50 kW PV generation, 3-min sine
+        double phase5 = elapsed % 180.0 / 180.0;
+        int genPowerW = (int)(10_000 + 40_000 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * phase5)));
+        ushort utilLimit = 100;  // utility always allows 100%
+        // feedback mirrors the holding register limit (written by connector)
+        var fbRegs = slave5.DataStore.HoldingRegisters.ReadPoints(401, 1);
+        uint feedbackLimit = fbRegs[0];
+        WriteInputUInt16(slave5, 1901, utilLimit);
+        WriteInputUInt32Swapped(slave5, 1902, feedbackLimit);
+        WriteInputInt32Swapped(slave5, 1904, genPowerW);
+
         Console.WriteLine($"[{now:HH:mm:ss}] " +
             $"S1={powerW1/1000:F2}kW  S2={powerW2/1000:F2}kW  " +
-            $"S3={powerW3/1000:F2}kW  S4={powerW4/1000:F2}kW");
+            $"S3={powerW3/1000:F2}kW  S4={powerW4/1000:F2}kW  " +
+            $"G={genPowerW/1000:F1}kW lim={feedbackLimit}%");
 
         await Task.Delay(5_000, cts.Token).ConfigureAwait(false);
     }
@@ -135,4 +157,25 @@ static void WriteFloat32(IModbusSlave slave, ushort address, float value)
     ushort lo = (ushort)(b[2] << 8 | b[3]);
     slave.DataStore.HoldingRegisters.WritePoints(address,     new ushort[] { hi });
     slave.DataStore.HoldingRegisters.WritePoints((ushort)(address + 1), new ushort[] { lo });
+}
+
+/// <summary>Write a uint16 to an input register.</summary>
+static void WriteInputUInt16(IModbusSlave slave, ushort address, ushort value)
+{
+    slave.DataStore.InputRegisters.WritePoints(address, new ushort[] { value });
+}
+
+/// <summary>Write a uint32 as two input registers (word-swapped = lo,hi).</summary>
+static void WriteInputUInt32Swapped(IModbusSlave slave, ushort address, uint value)
+{
+    ushort hi = (ushort)(value >> 16);
+    ushort lo = (ushort)(value & 0xFFFF);
+    // Swapped: low word first, high word second
+    slave.DataStore.InputRegisters.WritePoints(address, new ushort[] { lo, hi });
+}
+
+/// <summary>Write an int32 as two input registers (word-swapped = lo,hi).</summary>
+static void WriteInputInt32Swapped(IModbusSlave slave, ushort address, int value)
+{
+    WriteInputUInt32Swapped(slave, address, (uint)value);
 }

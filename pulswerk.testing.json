@@ -104,6 +104,20 @@
       "assetType": "Meter"
     },
     {
+      "id": "glueck-pv",
+      "name": "Glück Controller",
+      "deviceType": "glueck",
+      "connectionId": "modbus-test",
+      "deviceId": 5,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "PV",
+        "Glück Controller"
+      ],
+      "assetType": "Controller"
+    },
+    {
       "id": "ahu-test-bacnet",
       "name": "Test BACnet AHU",
       "deviceType": "deziko",

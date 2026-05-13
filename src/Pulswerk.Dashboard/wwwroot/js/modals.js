@@ -150,11 +150,14 @@ function openEdit(key, name, fullName, units, pathEnc, type, enumValuesEnc) {
             opt.textContent = label;
             sel.appendChild(opt);
         }
-        sel.value = currentVal;
+        // Match by label text (state text), not by value index
+        const matchOpt = Array.from(sel.options).find(o => o.textContent === currentVal);
+        if (matchOpt) sel.value = matchOpt.value;
+        else sel.value = currentVal; // fallback to numeric match
         document.getElementById('enumGroup').style.display = 'block';
-    } else if (type && (type.toLowerCase().includes('binary') || type.toLowerCase().includes('bool'))) {
+    } else if (type && PulswerkValue.isBinary(type)) {
         const input = document.getElementById('boolInput');
-        input.checked = currentVal.toLowerCase() === 'on' || currentVal === '1' || currentVal.toLowerCase() === 'true';
+        input.checked = PulswerkValue.parseDisplay(currentVal, type) !== 0;
         updateBoolLabel();
         document.getElementById('boolGroup').style.display = 'block';
     } else {
@@ -205,9 +208,9 @@ async function submitEdit(e) {
     
     let value = 0;
     if (document.getElementById('stepperGroup').style.display !== 'none') {
-        value = document.getElementById('editValue').value;
+        value = parseFloat(document.getElementById('editValue').value) || 0;
     } else if (document.getElementById('enumGroup').style.display !== 'none') {
-        value = document.getElementById('enumSelect').value;
+        value = parseInt(document.getElementById('enumSelect').value, 10) || 0;
     } else {
         value = document.getElementById('boolInput').checked ? 1 : 0;
     }
@@ -221,7 +224,7 @@ async function submitEdit(e) {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
-            body: JSON.stringify({ key: currentEditKey, value: parseFloat(value) || 0 })
+            body: JSON.stringify({ key: currentEditKey, value: value })
         });
         
         if (response.ok) {

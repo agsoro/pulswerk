@@ -224,6 +224,7 @@ namespace Pulswerk.Drivers.BACnet
         protected readonly Dictionary<string, DiscoveryState> _stateByDevice = new();
         protected readonly object _stateLock = new();
 
+
         // ── BACnet Alarm Acknowledgment Registry ─────────────────────────────
         // Key: "{connectionId}:{objType}:{objInstance}"  (matches details["bacnetAckKey"] stored in TB alarm)
         // Stores the live client/address context needed to send AlarmAcknowledgement to the field device.
@@ -421,11 +422,11 @@ namespace Pulswerk.Drivers.BACnet
 
                     foreach (var propId in telPropIds)
                     {
+                        string key = $"{obj.KeyPrefix}_{PropSuffix(propId)}";
                         if (values.TryGetValue(propId, out var raw))
-                        {
-                            string key = $"{obj.KeyPrefix}_{PropSuffix(propId)}";
                             result.Telemetry[key] = FormatValue(obj, propId, raw);
-                        }
+                        else if (propId == BacnetPropertyIds.PROP_PRESENT_VALUE)
+                            result.Telemetry[key] = FormatValue(obj, propId, null);
                     }
 
                     // Attributes (only on first poll after discovery)
@@ -875,7 +876,7 @@ namespace Pulswerk.Drivers.BACnet
                 if (includeDescRx != null && !includeDescRx.IsMatch(description)) continue;
 
                 allUnits.TryGetValue(oid, out string? units);
-                bool commandable = allCommandable.Contains(oid);
+                bool commandable = allCommandable.Contains(oid) && IsCommandableType(oid.type);
                 allStateText.TryGetValue(oid, out List<string>? stateText);
 
                 // Fallback for binary state text if not in batch
@@ -943,8 +944,15 @@ namespace Pulswerk.Drivers.BACnet
                     else if (propId == BacnetPropertyIds.PROP_STATE_TEXT)
                     {
                         var list = new List<string>();
-                        foreach (var v in pv.value) list.Add(v.Value?.ToString() ?? "");
-                        allStateText[oid] = list;
+                        foreach (var v in pv.value)
+                        {
+                            // Skip error responses that sneak into state text lists
+                            if (v.Tag == BacnetApplicationTags.BACNET_APPLICATION_TAG_ERROR) continue;
+                            var s = v.Value?.ToString() ?? "";
+                            if (s.Contains("ERROR_")) continue;
+                            list.Add(s);
+                        }
+                        if (list.Count > 0) allStateText[oid] = list;
                     }
                     else if (extraProps != null && extraProps.Contains(propId))
                     {
@@ -1041,11 +1049,8 @@ namespace Pulswerk.Drivers.BACnet
             BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT or
             BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE;
 
-        static bool IsBinary(BacnetObjectTypes t) => t is
-            BacnetObjectTypes.OBJECT_BINARY_INPUT or
-            BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
-            BacnetObjectTypes.OBJECT_BINARY_VALUE or
-            BacnetObjectTypes.OBJECT_CALENDAR;
+        static bool IsBinary(BacnetObjectTypes t) =>
+            BacnetValueConverter.IsBinary(t);
 
         public static string ReadStringProp(BacnetClient client, BacnetAddress address, BacnetObjectId oid, BacnetPropertyIds propId)
         {
@@ -1145,17 +1150,15 @@ namespace Pulswerk.Drivers.BACnet
         /// <summary>
         /// Returns true for BACnet object types that always have a priority array
         /// and are therefore operator-writable (commandable). Matches the 
-        /// Deziko convention: AO, AV, BO, BV, MO, MV are setpoints/outputs;
+        /// Only OUTPUT object types and Schedules are considered operator-writable.
+        /// VALUE types (AV, BV, MV) are excluded — while technically commandable in
+        /// BACnet, most are internal calculated values, not operator setpoints.
         /// AI, BI, MI are sensor inputs and are never commandable.
         /// </summary>
         static bool IsCommandableType(BacnetObjectTypes t) => t is
             BacnetObjectTypes.OBJECT_ANALOG_OUTPUT or
-            BacnetObjectTypes.OBJECT_ANALOG_VALUE or
             BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
-            BacnetObjectTypes.OBJECT_BINARY_VALUE or
             BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT or
-            BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE or
-            BacnetObjectTypes.OBJECT_INTEGER_VALUE or
             BacnetObjectTypes.OBJECT_SCHEDULE;
 
 
@@ -1213,12 +1216,22 @@ namespace Pulswerk.Drivers.BACnet
                         var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
                         if (pv.value?.Count > 0)
                         {
+                            // Skip if any value in the list is a BACnet error
+                            bool hasError = false;
+                            foreach (var bv in pv.value)
+                            {
+                                if (bv.Tag == BacnetApplicationTags.BACNET_APPLICATION_TAG_ERROR)
+                                { hasError = true; break; }
+                                var s = bv.Value?.ToString();
+                                if (s != null && s.Contains("ERROR_"))
+                                { hasError = true; break; }
+                            }
+
+                            if (hasError) continue;
+
                             // For complex properties (Schedule/Calendar), keep the full list.
                             // For simple properties, take the first value.
                             object? val = (pv.value.Count == 1) ? pv.value[0].Value : pv.value;
-
-                            // Check if the value is actually a Bacnet error string or object
-                            if (val != null && val.ToString()!.Contains("ERROR_")) continue;
                             result[propId] = val;
                         }
                     }
@@ -1233,6 +1246,12 @@ namespace Pulswerk.Drivers.BACnet
                     if (client.ReadPropertyRequest(address, oid, propId, out IList<BacnetValue> vals)
                         && vals.Count > 0)
                     {
+                        // Skip error responses (same filter as RPM path)
+                        bool hasError = vals.Any(v =>
+                            v.Tag == BacnetApplicationTags.BACNET_APPLICATION_TAG_ERROR ||
+                            (v.Value?.ToString()?.Contains("ERROR_") == true));
+                        if (hasError) continue;
+
                         result[propId] = (vals.Count == 1) ? vals[0].Value : vals;
                     }
                 }
@@ -1708,90 +1727,22 @@ namespace Pulswerk.Drivers.BACnet
             return Task.CompletedTask;
         }
 
-        static bool TryToDouble(object? v, out double result)
-        {
-            if (v is null) { result = 0; return false; }
-            if (v is BacnetBitString bs)
-            {
-                result = 0;
-                for (int i = 0; i < bs.bits_used; i++)
-                    if (bs.GetBit((byte)i)) result += Math.Pow(2, i);
-                return true;
-            }
-            if (v.GetType().IsEnum)
-            {
-                result = Convert.ToDouble(v);
-                return true;
-            }
-            try { result = Math.Round(Convert.ToDouble(v), 6); return true; }
-            catch { result = 0; return false; }
-        }
+        // ── Value conversion – delegates to BacnetValueConverter ────────────
+        //    All telemetry paths (RPM, COV, COV-fallback) use these wrappers
+        //    so there is exactly one conversion implementation.
+
+        static bool TryToDouble(object? v, out double result) =>
+            BacnetValueConverter.TryToDouble(v, out result);
 
         static object FormatValue(BacnetObjectInfo obj, BacnetPropertyIds propId, object? raw)
         {
-            if (raw == null) return "";
+            var result = BacnetValueConverter.FormatValue(obj, propId, raw);
 
-            // Handle units specifically via UnitMapper
-            if (propId == BacnetPropertyIds.PROP_UNITS)
-                return UnitMapper.Format(raw);
+            // Log suppressed errors for diagnostics (keep in driver, not in converter)
+            if (raw != null && raw.ToString() is string s && s.Contains("ERROR_"))
+                Console.Error.WriteLine($"  [BACnet] FormatValue suppressed error for {obj.ObjectName} ({obj.ObjectId}): {s}");
 
-            // Special handling for Schedules
-            if (propId == BacnetPropertyIds.PROP_WEEKLY_SCHEDULE || propId == BacnetPropertyIds.PROP_EXCEPTION_SCHEDULE)
-                return FormatBacnetSchedule(raw);
-
-            if (obj.StateText != null && obj.StateText.Count > 0 && TryToDouble(raw, out double d))
-            {
-                int val = (int)d;
-                int idx = IsBinary(obj.ObjectId.type) ? val : val - 1;
-
-                if (idx >= 0 && idx < obj.StateText.Count)
-                    return obj.StateText[idx];
-            }
-
-            if (TryToDouble(raw, out double d2))
-                return Math.Round(d2, 4);
-
-            return raw.ToString() ?? "";
-        }
-
-        private static string FormatBacnetSchedule(object? raw)
-        {
-            if (raw == null) return "None";
-            if (raw is not System.Collections.IEnumerable list) return raw.ToString() ?? "";
-
-            var days = new List<string>();
-            string[] dayNames = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-            int dayIdx = 0;
-
-            foreach (var day in list)
-            {
-                var times = new List<string>();
-                object? dayVal = day;
-                if (day is BacnetValue bv) dayVal = bv.Value;
-
-                if (dayVal is System.Collections.IEnumerable timeList)
-                {
-                    var enumValues = timeList.Cast<BacnetValue>().ToList();
-                    for (int i = 0; i < enumValues.Count - 1; i += 2)
-                    {
-                        var tVal = enumValues[i].Value;
-                        var vVal = enumValues[i + 1].Value;
-
-                        string timeStr = tVal is DateTime dt ? dt.ToString("HH:mm") : tVal?.ToString() ?? "??:??";
-                        string valueStr = vVal?.ToString() ?? "?";
-
-                        times.Add($"{timeStr}➔{valueStr}");
-                    }
-                }
-
-                if (times.Count > 0 && dayIdx < 7)
-                {
-                    days.Add($"{dayNames[dayIdx]}: {string.Join(", ", times)}");
-                }
-                dayIdx++;
-            }
-
-            return days.Count > 0 ? string.Join(" | ", days) : "Empty Schedule";
+            return result;
         }
 
         // ── Per-device mutable discovery state ───────────────────────────────
@@ -1958,10 +1909,18 @@ namespace Pulswerk.Drivers.BACnet
                         var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
                         if (pv.value?.Count > 0)
                         {
-                            var raw = pv.value[0].Value;
-                            tel[$"{objInfo.KeyPrefix}_{PropSuffix(propId)}"] = FormatValue(objInfo, propId, raw);
 
-                            if (TryToDouble(raw, out double d))
+                            // Skip error responses in COV notifications
+                            bool hasError = pv.value.Any(v =>
+                                v.Tag == BacnetApplicationTags.BACNET_APPLICATION_TAG_ERROR ||
+                                (v.Value?.ToString()?.Contains("ERROR_") == true));
+
+                            // FormatValue handles null/error → typed default
+                            var raw = hasError ? null : pv.value[0].Value;
+                            var formatted = FormatValue(objInfo, propId, raw);
+                            tel[$"{objInfo.KeyPrefix}_{PropSuffix(propId)}"] = formatted;
+
+                            if (TryToDouble(raw ?? formatted, out double d))
                             {
                                 lock (_stateLock)
                                     state.CovValues[monitoredObjId] = new CovSnapshot(d, DateTime.UtcNow);
@@ -2092,9 +2051,17 @@ namespace Pulswerk.Drivers.BACnet
                             var seed = ReadObjectProperties(
                                 state.CovClient, state.CovAddress!, obj.ObjectId,
                                 new[] { BacnetPropertyIds.PROP_PRESENT_VALUE });
-                            if (seed.TryGetValue(BacnetPropertyIds.PROP_PRESENT_VALUE, out var raw)
-                                && TryToDouble(raw, out double d))
-                                state.CovValues[obj.ObjectId] = new CovSnapshot(d, now);
+                            if (seed.TryGetValue(BacnetPropertyIds.PROP_PRESENT_VALUE, out var raw))
+                            {
+                                if (TryToDouble(raw, out double d))
+                                    state.CovValues[obj.ObjectId] = new CovSnapshot(d, now);
+
+                                // Also publish seed as telemetry so LatestValues is populated
+                                // immediately - prevents "---" for objects that haven't changed.
+                                var formatted = FormatValue(obj, BacnetPropertyIds.PROP_PRESENT_VALUE, raw);
+                                var seedTel = new Telemetry { [$"{obj.KeyPrefix}_value"] = formatted };
+                                state.GetConflator(state.PublishTelemetry!).Add(seedTel);
+                            }
                         }
                     }
                     else
@@ -2167,9 +2134,13 @@ namespace Pulswerk.Drivers.BACnet
                     var vals = ReadObjectProperties(
                         state.CovClient, state.CovAddress!, obj.ObjectId, telPropIds);
                     foreach (var p in telPropIds)
+                    {
+                        string key = $"{obj.KeyPrefix}_{PropSuffix(p)}";
                         if (vals.TryGetValue(p, out var raw))
-                            result.Telemetry[$"{obj.KeyPrefix}_{PropSuffix(p)}"] =
-                                FormatValue(obj, p, raw);
+                            result.Telemetry[key] = FormatValue(obj, p, raw);
+                        else if (p == BacnetPropertyIds.PROP_PRESENT_VALUE)
+                            result.Telemetry[key] = FormatValue(obj, p, null);
+                    }
                 }
             }
 
@@ -2273,14 +2244,48 @@ namespace Pulswerk.Drivers.BACnet
 
             lock (_stateLock)
             {
-                foreach (var state in _stateByDevice.Values)
+                foreach (var kvp in _stateByDevice)
                 {
-                    var obj = state.CachedObjects.FirstOrDefault(o =>
-                        (o.KeyPrefix + "_value") == key);
-                    if (obj != null) return obj.Commandable;
+                    foreach (var obj in kvp.Value.CachedObjects)
+                    {
+                        string fullKey = obj.KeyPrefix + "_value";
+                        // Match full key OR driver-scoped key (device prefix stripped)
+                        if (fullKey == key || fullKey.EndsWith("_" + key) || key == fullKey)
+                        {
+                            return obj.Commandable;
+                        }
+                    }
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// Finds the cached <see cref="BacnetObjectInfo"/> for a given telemetry key.
+        /// Returns null if not found. Used by DashboardDataService to resolve
+        /// display values through the converter after a write.
+        /// </summary>
+        public BacnetObjectInfo? FindCachedObject(string key)
+        {
+            lock (_stateLock)
+            {
+                foreach (var state in _stateByDevice.Values)
+                {
+                    var obj = state.CachedObjects.FirstOrDefault(
+                        o => (o.KeyPrefix + "_value") == key);
+                    if (obj != null) return obj;
+
+                    // Try with device prefix stripped
+                    if (state.CachedObjects.Count > 0)
+                    {
+                        string prefix = state.CachedObjects[0].TechDeviceId + "_";
+                        obj = state.CachedObjects.FirstOrDefault(
+                            o => (o.KeyPrefix + "_value") == (prefix + key));
+                        if (obj != null) return obj;
+                    }
+                }
+            }
+            return null;
         }
 
         public void Write(ConnectionConfig conn, DeviceConfig device, string key, double value)
@@ -2310,18 +2315,14 @@ namespace Pulswerk.Drivers.BACnet
                     $"Object '{key}' ({objectId}) is not commandable (no PROP_PRIORITY_ARRAY). " +
                     "Write rejected to protect the device logic.");
 
-            using var client = OpenClient(conn);
+            var client = OpenClient(conn);
             var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808, device.DeviceId ?? 0, 2000);
 
-            // Choose the right application tag:
-            //   Binary objects expect an ENUMERATED (0/1); all others expect REAL
-            BacnetValue bv = objectId.Value.type is
-                BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
-                BacnetObjectTypes.OBJECT_BINARY_VALUE
-                ? new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_ENUMERATED,
-                                  (uint)(value != 0 ? 1 : 0))
-                : new BacnetValue(BacnetApplicationTags.BACNET_APPLICATION_TAG_REAL,
-                                  (float)value);
+            // Convert UI value → internal numeric (reverse state-text lookup if needed)
+            double internalVal = BacnetValueConverter.FromDisplayValue(obj, value);
+
+            // Delegate tag selection to the converter (binary → ENUMERATED, analog → REAL)
+            BacnetValue bv = BacnetValueConverter.ToWriteValue(objectId.Value.type, internalVal);
 
             bool ok = client.WritePropertyRequest(
                 address, objectId.Value,
@@ -2339,7 +2340,7 @@ namespace Pulswerk.Drivers.BACnet
             var objectId = ResolveObjectIdFromKey(key, state);
             if (objectId == null) throw new ArgumentException($"Cannot resolve object from key '{key}'.");
 
-            using var client = OpenClient(conn);
+            var client = OpenClient(conn);
             var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808, device.DeviceId ?? 0, 2000);
 
             string json;
@@ -3036,8 +3037,8 @@ namespace Pulswerk.Drivers.BACnet
                         if (kv.Key == BacnetPropertyIds.PROP_WEEKLY_SCHEDULE
                             || kv.Key == BacnetPropertyIds.PROP_EXCEPTION_SCHEDULE)
                         {
-                            // Schedule properties need structured day-level formatting
-                            valStr = FormatBacnetSchedule(kv.Value);
+                            valStr = System.Text.Json.JsonSerializer.Serialize(
+                                BacnetValueConverter.FormatSchedule(kv.Value));
                         }
                         else if (kv.Key == BacnetPropertyIds.PROP_PRIORITY_ARRAY && kv.Value is System.Collections.Generic.IList<BacnetValue> pArray)
                         {

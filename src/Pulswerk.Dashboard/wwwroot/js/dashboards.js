@@ -263,9 +263,7 @@ async function updateLatestValues(w,cfg){
         const val=data?.[key]||'---';
         const meta=keyMeta[key]||{};
         const color=COLORS[i%COLORS.length];
-        const numVal=parseFloat(val);
-        const isNum=!isNaN(numVal);
-        const displayVal=isNum?formatNumber(numVal,2):val;
+        const displayVal=PulswerkValue.formatDisplay(val, meta.type);
         updateHistoryLiveValue(key, displayVal);
         return `<tr>
             <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:0.5rem"></span>${esc(friendlyName(key))}</td>
@@ -324,7 +322,8 @@ async function updateSingleValue(w,cfg){
     const el=document.getElementById('svv_'+w.id);
     if(el){
         const val=data?.[key]||'---';
-        const display=formatNumber(val,1);
+        const meta = allKeys.find(k => k.key === key) || {};
+        const display=PulswerkValue.formatDisplay(val, meta.type);
         if(el.textContent!==display) el.textContent=display;
         updateHistoryLiveValue(key, display);
     }

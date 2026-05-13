@@ -197,7 +197,7 @@
             
             const valueDisplay = isSchedule 
                 ? `<span class="text-slate-500 text-[0.7rem] font-bold tracking-tight uppercase"><i class="fas fa-calendar-alt mr-1.5 opacity-40"></i>Schedule</span>`
-                : `<span class="text-sm font-bold text-sky-400 tabular-nums point-value" data-key="${p.key}">${formatNumber(p.value, 2)}</span>`;
+                : `<span class="text-sm font-bold text-sky-400 tabular-nums point-value" data-key="${p.key}" data-type="${p.type || ''}">${PulswerkValue.formatDisplay(p.value, p.type)}</span>`;
 
             return `
                 <tr class="hover:bg-white/[0.02] transition-all group border-l-2 border-l-transparent hover:border-l-sky-500/50" style="height:${ROW_HEIGHT}px">
@@ -344,7 +344,7 @@
                 // Patch visible DOM elements directly (no re-render needed)
                 document.querySelectorAll('.point-value[data-key]').forEach(el => {
                     const lp = latestMap.get(el.dataset.key);
-                    if (lp) el.textContent = formatNumber(lp.value, 2);
+                    if (lp) el.textContent = PulswerkValue.formatDisplay(lp.value, el.dataset.type || lp.type);
                 });
                 document.querySelectorAll('.last-update[data-key]').forEach(el => {
                     const lp = latestMap.get(el.dataset.key);

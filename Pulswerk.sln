@@ -23,6 +23,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{FDDA8951
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulswerk.Visual.Tests", "tests\Pulswerk.Visual.Tests\Pulswerk.Visual.Tests.csproj", "{FD57640D-9AF3-49B7-9964-BCF6E3B1AA16}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulswerk.Drivers.Tests", "tests\Pulswerk.Drivers.Tests\Pulswerk.Drivers.Tests.csproj", "{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -65,8 +67,13 @@ Global
 		{FD57640D-9AF3-49B7-9964-BCF6E3B1AA16}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FD57640D-9AF3-49B7-9964-BCF6E3B1AA16}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FD57640D-9AF3-49B7-9964-BCF6E3B1AA16}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{FD57640D-9AF3-49B7-9964-BCF6E3B1AA16} = {FDDA8951-1236-4E6C-A103-EEA5DE622980}
+		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6} = {FDDA8951-1236-4E6C-A103-EEA5DE622980}
 	EndGlobalSection
 EndGlobal

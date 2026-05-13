@@ -89,7 +89,7 @@
                 <div class="flex items-baseline justify-between mt-auto bg-white/[0.02] rounded-lg p-3 border border-white/5">
                     ${point.type === 'OBJECT_SCHEDULE' 
                         ? `<div class="text-sky-400/50 text-[0.65rem] font-black tracking-widest uppercase"><i class="fas fa-clock mr-1 opacity-70"></i>Schedule</div>`
-                        : `<div class="text-3xl font-black text-sky-400 tabular-nums point-value" data-key="${point.key}">${formatNumber(point.value, 2)}</div>`
+                        : `<div class="text-3xl font-black text-sky-400 tabular-nums point-value" data-key="${point.key}" data-type="${point.type || ''}">${PulswerkValue.formatDisplay(point.value, point.type)}</div>`
                     }
                     <div class="text-[0.7rem] font-bold text-slate-500 uppercase tracking-tighter">${point.units || ''}</div>
                 </div>
@@ -112,9 +112,9 @@
                     if (node.points) {
                         node.points.forEach(p => {
                             const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
-                            if (el) el.textContent = formatNumber(p.value, 2);
+                            if (el) el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
                             if (currentHistoryKey === p.key && document.getElementById('historyModal').style.display === 'flex') {
-                                document.getElementById('chartLiveValue').textContent = formatNumber(p.value, 2);
+                                document.getElementById('chartLiveValue').textContent = PulswerkValue.formatDisplay(p.value, p.type);
                             }
                         });
                     }

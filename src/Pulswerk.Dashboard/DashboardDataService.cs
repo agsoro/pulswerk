@@ -8,7 +8,9 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Pulswerk.Core;
 using Pulswerk.Drivers;
+using Pulswerk.Drivers.BACnet;
 using Pulswerk.Storage;
+using BACnet = System.IO.BACnet;
 
 namespace Pulswerk.Dashboard
 {
@@ -90,6 +92,9 @@ namespace Pulswerk.Dashboard
             {
                 foreach (var kvp in values)
                 {
+                    // Skip BACnet error strings – they must never reach the UI
+                    var vs = kvp.Value?.ToString();
+                    if (vs != null && vs.Contains("ERROR_")) continue;
                     LatestValues[kvp.Key] = kvp.Value;
                     LatestTimestamps[kvp.Key] = now;
 
@@ -251,7 +256,7 @@ namespace Pulswerk.Dashboard
         private string GetLatestValue(string key)
         {
             lock (LatestValues)
-                return LatestValues.TryGetValue(key, out var v) ? v.ToString() ?? "" : "---";
+                return LatestValues.TryGetValue(key, out var v) ? v?.ToString() ?? "0" : "---";
         }
 
         private string FormatLastUpdate(string key)
@@ -283,26 +288,39 @@ namespace Pulswerk.Dashboard
         public Task<bool> WriteValueAsync(string key, double value)
         {
             var device = IdentifyDeviceFromKey(key);
-            if (device == null) return Task.FromResult(false);
+            if (device == null) { Console.Error.WriteLine($"  [Dashboard] Write rejected: no device found for key '{key}'"); return Task.FromResult(false); }
 
             // Extract the technical point key from the scoped key {DeviceId}_{PointKey}
             string driverKey = key.Substring(device.Id.Length + 1);
 
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
-            if (conn == null) return Task.FromResult(false);
+            if (conn == null) { Console.Error.WriteLine($"  [Dashboard] Write rejected: no connection for device '{device.Name}'"); return Task.FromResult(false); }
 
             var writer = (Drivers.TryGetValue(device.Name, out var drv) ? drv : null) as IDeviceWriter;
-            if (writer == null || !writer.IsWritable(driverKey)) return Task.FromResult(false);
+            if (writer == null) { Console.Error.WriteLine($"  [Dashboard] Write rejected: driver for '{device.Name}' is not an IDeviceWriter"); return Task.FromResult(false); }
+            if (!writer.IsWritable(driverKey)) { Console.Error.WriteLine($"  [Dashboard] Write rejected: key '{driverKey}' (full: '{key}') is not writable"); return Task.FromResult(false); }
 
             try
             {
                 writer.Write(conn, device, driverKey, value);
                 Console.WriteLine($"  [Dashboard] Manual write success: {key} = {value}");
 
-                // --- Force immediate update in dashboard cache and storage ---
-                lock (LatestValues) 
-                { 
-                    LatestValues[key] = value; 
+                // Immediately update LatestValues with the correctly formatted
+                // display value (state text resolved) via the converter.
+                object displayVal = value;
+                if (drv is Pulswerk.Drivers.BACnet.BacnetDriver bacDrv)
+                {
+                    var cachedObj = bacDrv.FindCachedObject(key);
+                    if (cachedObj != null)
+                    {
+                        double internalVal = BacnetValueConverter.FromDisplayValue(cachedObj, value);
+                        displayVal = BacnetValueConverter.FormatValue(
+                            cachedObj, BACnet.BacnetPropertyIds.PROP_PRESENT_VALUE, internalVal);
+                    }
+                }
+                lock (LatestValues)
+                {
+                    LatestValues[key] = displayVal;
                     LatestTimestamps[key] = DateTime.UtcNow;
                 }
 
