@@ -66,7 +66,7 @@ namespace Pulswerk.Storage
                 _state.DayBase[key] = dayBase;
                 _state.MonthBase[key] = monthBase;
                 _state.YearBase[key] = monthBase; // Seed year with month base if not provided
-                System.Console.WriteLine($"[CalcEngine] Seeded '{key}': H={hourBase}, D={dayBase}, M={monthBase}");
+                Pulswerk.Core.Log.Debug($"[CalcEngine] Seeded '{key}': H={hourBase}, D={dayBase}, M={monthBase}");
 
                 var now = DateTime.UtcNow;
                 _state.LastHour[key] = now.Hour;

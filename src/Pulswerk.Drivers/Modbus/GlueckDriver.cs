@@ -69,7 +69,7 @@ namespace Pulswerk.Drivers.Modbus
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[Glueck] Watchdog write failed: {ex.Message}");
+                        Pulswerk.Core.Log.Error($"[Glueck] Watchdog write failed: {ex.Message}");
                     }
                 }
 

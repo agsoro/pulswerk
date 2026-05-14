@@ -75,7 +75,7 @@ namespace Pulswerk.Drivers
             if (result == unit && !string.IsNullOrEmpty(unit) && _loggedUnmapped.Add(unit))
             {
                 // Log unmapped units once to help expand the table
-                System.Console.WriteLine($"[UnitMapper] No mapping for unit: '{unit}' (normalized: '{normalized}')");
+                Pulswerk.Core.Log.Debug($"[UnitMapper] No mapping for unit: '{unit}' (normalized: '{normalized}')");
             }
 
             return result;

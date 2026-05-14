@@ -31,7 +31,7 @@ namespace Pulswerk.Storage
             pragma.ExecuteNonQuery();
 
             InitSchema();
-            Console.WriteLine($"  [AlarmStore] Initialized at {dbPath}");
+            Log.Info($"[AlarmStore] Initialized at {dbPath}");
         }
 
         private void InitSchema()
@@ -137,7 +137,7 @@ namespace Pulswerk.Storage
                     insertCmd.Parameters.AddWithValue("@bak", (object?)bacnetAckKey ?? DBNull.Value);
                     insertCmd.ExecuteNonQuery();
 
-                    Console.WriteLine($"  [Alarm] Raised: [{severity}] {type} on {originType}/{originator}");
+                    Log.Warning($"[Alarm] Raised: [{severity}] {type} on {originType}/{originator}");
                     return GetById(id)!;
                 }
             }
@@ -199,7 +199,7 @@ namespace Pulswerk.Storage
                 cmd.Parameters.AddWithValue("@ot", originType);
                 cmd.Parameters.AddWithValue("@now", now);
                 int n = cmd.ExecuteNonQuery();
-                if (n > 0) Console.WriteLine($"  [Alarm] Cleared: {type} on {originType}/{originator}");
+                if (n > 0) Log.Info($"[Alarm] Cleared: {type} on {originType}/{originator}");
                 return n > 0;
             }
         }
@@ -275,7 +275,7 @@ namespace Pulswerk.Storage
                 cmd.CommandText = "DELETE FROM alarms WHERE status = 'CLEARED' AND cleared_at < @cutoff";
                 cmd.Parameters.AddWithValue("@cutoff", cutoff);
                 int n = cmd.ExecuteNonQuery();
-                if (n > 0) Console.WriteLine($"  [AlarmStore] Purged {n} cleared alarms older than {olderThanDays}d.");
+                if (n > 0) Log.Info($"[AlarmStore] Purged {n} cleared alarms older than {olderThanDays}d.");
                 return n;
             }
         }

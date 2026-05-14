@@ -127,7 +127,7 @@ namespace Pulswerk.Drivers.BACnet
                                                PropDezikoSubordinateList);
             }
 
-            Console.WriteLine($"  [Hierarchy] Top-level Structured Views: {topLevelIds.Count}");
+            Pulswerk.Core.Log.Info($"[Hierarchy] Top-level Structured Views: {topLevelIds.Count}");
 
             foreach (var svId in topLevelIds)
             {
@@ -181,14 +181,14 @@ namespace Pulswerk.Drivers.BACnet
             // Read PROP_SUBORDINATE_LIST
             var subordinates = ReadSubordinateList(client, address, viewId);
             string indent = new string(' ', depth * 2 + 4);
-            Console.WriteLine($"{indent}[{objectName}]  ({subordinates.Count} children)");
+            Pulswerk.Core.Log.Debug($"{indent}[{objectName}]  ({subordinates.Count} children)");
 
             int childIdx = 0;
             foreach (var childId in subordinates)
             {
                 childIdx++;
                 if (subordinates.Count > 20 && childIdx % 10 == 0)
-                    Console.WriteLine($"{indent}  ... processing child {childIdx}/{subordinates.Count}");
+                    Pulswerk.Core.Log.Debug($"{indent}  ... processing child {childIdx}/{subordinates.Count}");
                 try
                 {
                     if (childId.type == BacnetObjectTypes.OBJECT_STRUCTURED_VIEW)
@@ -289,7 +289,7 @@ namespace Pulswerk.Drivers.BACnet
                     && vals.Count > 0)
                 {
                     var formatted = UnitMapper.Format(vals[0].Value);
-                    System.Console.WriteLine($"[Hierarchy] Units for {oid}: '{vals[0].Value}' -> '{formatted}'");
+                    Pulswerk.Core.Log.Debug($"[Hierarchy] Units for {oid}: '{vals[0].Value}' -> '{formatted}'");
                     return formatted;
                 }
             }
@@ -352,7 +352,7 @@ namespace Pulswerk.Drivers.BACnet
             // 3. Large lists: reliable index read
             for (uint i = 1; i <= count; i++)
             {
-                if (i % 50 == 0) Console.WriteLine($"  [Hierarchy] ... reading list index {i}/{count}");
+                if (i % 50 == 0) Pulswerk.Core.Log.Debug($"[Hierarchy] ... reading list index {i}/{count}");
                 try
                 {
                     if (client.ReadPropertyRequest(address, targetObj,
@@ -422,7 +422,7 @@ namespace Pulswerk.Drivers.BACnet
             // 3. Reliable index-based read
             for (uint i = 1; i <= count; i++)
             {
-                if (count > 50 && i % 50 == 0) Console.WriteLine($"  [Hierarchy] ... reading subordinate {i}/{count}");
+                if (count > 50 && i % 50 == 0) Pulswerk.Core.Log.Debug($"[Hierarchy] ... reading subordinate {i}/{count}");
                 try
                 {
                     if (client.ReadPropertyRequest(address, viewId,

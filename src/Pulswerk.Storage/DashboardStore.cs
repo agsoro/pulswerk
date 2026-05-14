@@ -32,7 +32,7 @@ namespace Pulswerk.Storage
             if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
             _filePath = Path.Combine(dataDir, "dashboards.json");
             Load();
-            Console.WriteLine($"  [DashboardStore] Loaded {_dashboards.Count} dashboard(s) from {_filePath}");
+            Log.Info($"[DashboardStore] Loaded {_dashboards.Count} dashboard(s) from {_filePath}");
         }
 
         // ── Read ─────────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ namespace Pulswerk.Storage
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [DashboardStore] Failed to load {_filePath}: {ex.Message}");
+                Log.Error($"[DashboardStore] Failed to load {_filePath}: {ex.Message}");
                 _dashboards = new List<DashboardDefinition>();
             }
         }
@@ -128,7 +128,7 @@ namespace Pulswerk.Storage
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [DashboardStore] Failed to save {_filePath}: {ex.Message}");
+                Log.Error($"[DashboardStore] Failed to save {_filePath}: {ex.Message}");
             }
         }
 

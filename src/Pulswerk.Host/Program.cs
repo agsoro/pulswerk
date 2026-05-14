@@ -39,7 +39,7 @@ namespace Pulswerk.Host
             Console.WriteLine($"=== Pulswerk v{version?.Major}.{version?.Minor}.{version?.Build} ===\n");
 
             // ── Load config ───────────────────────────────────────────────────
-            string configPath = ResolveConfigPath();
+            string? configPath = ResolveConfigPath();
             if (configPath == null)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -48,7 +48,6 @@ namespace Pulswerk.Host
                 Console.ResetColor();
                 return;
             }
-            Console.WriteLine($"Config: {configPath}");
 
             AppConfig cfg;
             try
@@ -91,6 +90,9 @@ namespace Pulswerk.Host
 
             // ── Initialize logging ────────────────────────────────────────────
             _logger = new ConsoleLogger(new LogBuffer(cfg.Monitoring?.LogBufferSize ?? 5000));
+            Log.Init(_logger);
+
+            Log.Info($"Config: {configPath}");
 
             // ── Initialize data stores ────────────────────────────────────────
             var influx = cfg.InfluxDb ?? new InfluxConfig();
@@ -110,8 +112,8 @@ namespace Pulswerk.Host
             string alarmDbPath = Path.Combine(AppContext.BaseDirectory, "alarms.db");
             var alarmStore = new AlarmStore(alarmDbPath);
 
-            _logger!.Info($"InfluxDB: {influxUrl} org={influxOrg} bucket={influxBucket}");
-            _logger!.Info($"AlarmDB:  {alarmDbPath}");
+            Log.Info($"InfluxDB: {influxUrl} org={influxOrg} bucket={influxBucket}");
+            Log.Info($"AlarmDB:  {alarmDbPath}");
 
             // ── Trackers ──────────────────────────────────────────────────────
             var offlineDevices = new HashSet<string>();
@@ -123,18 +125,18 @@ namespace Pulswerk.Host
                 _drivers[d.Name] = DeviceDriverFactory.Create(d.DeviceType);
 
             // ── Print summary ─────────────────────────────────────────────────
-            _logger!.Info($"Monitoring Config: Enabled={cfg.Monitoring?.Enabled}, Port={cfg.Monitoring?.Port}");
+            Log.Info($"Monitoring Config: Enabled={cfg.Monitoring?.Enabled}, Port={cfg.Monitoring?.Port}");
 
-            _logger!.Info("Connections (" + cfg.Connections.Count + "):");
+            Log.Info("Connections (" + cfg.Connections.Count + "):");
             foreach (var c in cfg.Connections)
-                Console.WriteLine($"  [{c.Id,-22}] {c.Type,-12} {c.Address}:{c.Port}");
+                Log.Info($"  [{c.Id,-22}] {c.Type,-12} {c.Address}:{c.Port}");
 
-            _logger.Info($"Devices ({cfg.Devices.Count}):");
+            Log.Info($"Devices ({cfg.Devices.Count}):");
             foreach (var d in cfg.Devices)
             {
                 var conn = connections[d.ConnectionId];
                 var addr = d.Address ?? conn.Address;
-                _logger.Info($"  [{d.DeviceType,-15}] {d.Name,-38} → {addr}:{conn.Port}");
+                Log.Info($"  [{d.DeviceType,-15}] {d.Name,-38} → {addr}:{conn.Port}");
             }
 
             // ── Ctrl+C ────────────────────────────────────────────────────────
@@ -145,7 +147,7 @@ namespace Pulswerk.Host
             MonitoringServer? monitoringServer = null;
             if (cfg.Monitoring?.Enabled == true)
             {
-                _logger!.Info($"Starting monitoring dashboard on port {cfg.Monitoring.Port}...");
+                Log.Info($"Starting monitoring dashboard on port {cfg.Monitoring.Port}...");
                 var dataService = new DashboardDataService(
                     _logBuffer!, cfg, tsStore, alarmStore, offlineDevices, lastPolledAt, _drivers);
                 _dataService = dataService;
@@ -160,7 +162,7 @@ namespace Pulswerk.Host
                 {
                     try { await monServer.RunAsync(cts.Token); }
                     catch (OperationCanceledException) { }
-                    catch (Exception ex) { _logger!.Error($"  [Monitoring] ERROR: {ex.Message}"); }
+                    catch (Exception ex) { Log.Error($"[Monitoring] {ex.Message}"); }
                 }, cts.Token);
             }
 
@@ -180,8 +182,8 @@ namespace Pulswerk.Host
 
                 _ = Task.Run(async () =>
                 {
-                    _logger!.Info(
-                        $"  [Hierarchy] Background job started for '{capturedDevice.Name}'.");
+                    Log.Info(
+                        $"[Hierarchy] Background job started for '{capturedDevice.Name}'.");
                     try
                     {
                         // Wait until the first ReadFull() sets HierarchyDirty
@@ -195,20 +197,20 @@ namespace Pulswerk.Host
 
                         if (tree is null || cts.Token.IsCancellationRequested) return;
 
-                        _logger!.Info(
-                            $"  [Hierarchy] Tree ready for '{capturedDevice.Name}' " +
+                        Log.Info(
+                            $"[Hierarchy] Tree ready for '{capturedDevice.Name}' " +
                             $"(roots={tree.Roots.Count}).");
 
                         // Signal to driver that hierarchy is ready for alarm routing
                         driver.MarkHierarchyReady(capturedDevice.Name);
 
-                        _logger!.Info(
-                            $"  [Hierarchy] Asset map initialized for '{capturedDevice.Name}'.");
+                        Log.Info(
+                            $"[Hierarchy] Asset map initialized for '{capturedDevice.Name}'.");
                     }
                     catch (OperationCanceledException) { /* shutting down */ }
                     catch (Exception ex)
                     {
-                        _logger!.Error($"  [Hierarchy] ERROR '{capturedDevice.Name}': {ex.GetType().Name}: {ex.Message}");
+                        Log.Error($"[Hierarchy] '{capturedDevice.Name}': {ex.GetType().Name}: {ex.Message}");
                     }
                 }, cts.Token);
             }
@@ -221,7 +223,7 @@ namespace Pulswerk.Host
                 int bindPort = conn.LocalPort ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing localPort.");
                 string bindAddr = string.IsNullOrWhiteSpace(conn.LocalAddress) ? "0.0.0.0" : conn.LocalAddress;
 
-                _logger!.Info($"  [BACnet] Initialising connection '{conn.Id}' (addr={bindAddr}, port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
+                Log.Info($"[BACnet] Initialising connection '{conn.Id}' (addr={bindAddr}, port={bindPort}, deviceId={conn.LocalDeviceId ?? 1234})…");
                 try
                 {
                     // Check if we already have a client for this port to avoid "Address already in use"
@@ -232,18 +234,18 @@ namespace Pulswerk.Host
                         var transport = new BacnetIpUdpProtocolTransport(bindPort, false, false, 1472, bindAddr);
                         client = new BacnetClient(transport, (int)(conn.LocalDeviceId ?? 1234));
                         client.Start();
-                        _logger!.Info($"  [BACnet] Started new client for '{conn.Id}' on port {bindPort}.");
+                        Log.Info($"[BACnet] Started new client for '{conn.Id}' on port {bindPort}.");
                     }
                     else
                     {
-                        _logger!.Info($"  [BACnet] Reusing existing client for '{conn.Id}' on port {bindPort}.");
+                        Log.Info($"[BACnet] Reusing existing client for '{conn.Id}' on port {bindPort}.");
                     }
 
                     BacnetDriver.RegisterClient(conn.Id, bindAddr, bindPort, client);
                 }
                 catch (Exception ex)
                 {
-                    _logger!.Error($"  [BACnet] Failed to start client for connection '{conn.Id}' on port {bindPort}: {ex.Message}");
+                    Log.Error($"[BACnet] Failed to start client for connection '{conn.Id}' on port {bindPort}: {ex.Message}");
                 }
             }
 
@@ -255,7 +257,7 @@ namespace Pulswerk.Host
                 var capturedDevice = d;
                 var capturedConn = connections[d.ConnectionId];
 
-                _logger!.Info($"  [COV] Initialising COV mode for '{d.Name}'…");
+                Log.Info($"[COV] Initialising COV mode for '{d.Name}'…");
                 var covDriver = _drivers[d.Name] as BacnetDriver
                     ?? throw new InvalidOperationException($"COV requires a BACnet driver, got '{d.DeviceType}'");
                 covDriver.InitCovMode(
@@ -279,7 +281,7 @@ namespace Pulswerk.Host
             }
 
             // ── Start polling loops (one per device) ─────────────────────────
-            _logger.Info("Starting device polling loops. Ctrl+C to stop.");
+            Log.Info("Starting device polling loops. Ctrl+C to stop.");
 
             foreach (var device in cfg.Devices)
             {
@@ -306,7 +308,7 @@ namespace Pulswerk.Host
                         }
                         catch (Exception ex)
                         {
-                            _logger.Error($"  [Loop] FATAL error for {capturedDevice.Name}: {ex.Message}");
+                            Log.Error($"[Loop] FATAL error for {capturedDevice.Name}: {ex.Message}");
                         }
 
                         try { await Task.Delay(1_000, cts.Token); }
@@ -319,7 +321,7 @@ namespace Pulswerk.Host
             try { await Task.Delay(-1, cts.Token); }
             catch (TaskCanceledException) { }
 
-            _logger.Info("Shutting down…");
+            Log.Info("Shutting down…");
 
             // ── Graceful shutdown ─────────────────────────────────────────
             foreach (var d in cfg.Devices)
@@ -377,8 +379,8 @@ namespace Pulswerk.Host
                     lastPolledAt[device.Name] = DateTime.UtcNow;
 
                     if (attributes.Count > 0 || telemetry.Count > 0)
-                        _logger!.Info(
-                            $"[{DateTime.Now:HH:mm:ss}] [{reader.DriverName,-10}] {device.Name,-38} " +
+                        Log.Info(
+                            $"[{reader.DriverName,-10}] {device.Name,-38} " +
                             $"[COV] attrs={attributes.Count} fallback-tel={telemetry.Count}");
                     return Task.CompletedTask;
                 }
@@ -443,11 +445,11 @@ namespace Pulswerk.Host
                 if (offlineDevices.Remove(device.Name))
                 {
                     alarmStore.ClearByOriginAndType(device.Name, "Communication Loss");
-                    _logger!.Info(
-                        $"[{DateTime.Now:HH:mm:ss}] [{reader.DriverName,-10}] {device.Name,-38} ✓ back online");
+                    Log.Info(
+                        $"[{reader.DriverName,-10}] {device.Name,-38} ✓ back online");
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // ── Track consecutive failures, only log/alarm after threshold ──
                 _failCounts.TryGetValue(device.Name, out int count);
@@ -455,8 +457,8 @@ namespace Pulswerk.Host
 
                 if (count == FAIL_THRESHOLD)
                 {
-                    _logger!.Warning(
-                        $"[{DateTime.Now:HH:mm:ss}] [{device.DeviceType,-10}] {device.Name,-38} offline ({count} consecutive failures)");
+                    Log.Warning(
+                        $"[{device.DeviceType,-10}] {device.Name,-38} offline ({count} consecutive failures)");
 
                     if (offlineDevices.Add(device.Name))
                     {

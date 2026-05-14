@@ -60,7 +60,7 @@ namespace Pulswerk.Drivers.Modbus
             {
                 if (_cache.TryGetValue(deviceName, out var cached)) return cached;
 
-                Console.WriteLine($"  [SunSpec] Discovering models on '{deviceName}'...");
+                Pulswerk.Core.Log.Info($"[SunSpec] Discovering models on '{deviceName}'...");
                 ushort? baseAddr = FindBaseAddress(master, slaveId);
                 if (baseAddr == null)
                     throw new Exception($"Could find SunSpec 'SunS' marker on {deviceName} at 40000, 0, or 50000.");
@@ -91,7 +91,7 @@ namespace Pulswerk.Drivers.Modbus
 
                 var state = new SunSpecState(baseAddr.Value, models);
                 _cache[deviceName] = state;
-                Console.WriteLine($"  [SunSpec] Found {models.Count} relevant models on '{deviceName}'.");
+                Pulswerk.Core.Log.Info($"[SunSpec] Found {models.Count} relevant models on '{deviceName}'.");
                 return state;
             }
         }

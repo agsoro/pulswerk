@@ -1,4 +1,4 @@
-// LogBuffer.cs – Thread-safe ring buffer + logger wrapper for the monitoring dashboard
+// LogBuffer.cs – Thread-safe ring buffer + global logger for all Pulswerk components
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -29,6 +29,7 @@ namespace Pulswerk.Core
     /// <summary>Log severity levels.</summary>
     public enum LogSeverity
     {
+        Debug,
         Info,
         Warning,
         Error
@@ -126,12 +127,20 @@ namespace Pulswerk.Core
             _buffer = buffer ?? new LogBuffer(5000);
         }
 
+        /// <summary>Log a debug message (only written to buffer + stdout, no colour).</summary>
+        public void Debug(string message, string source = "")
+        {
+            var entry = new LogEntry(DateTime.UtcNow, LogSeverity.Debug, message, source);
+            _buffer.Add(entry);
+            Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  DBG  {message}");
+        }
+
         /// <summary>Log an informational message.</summary>
         public void Info(string message, string source = "")
         {
             var entry = new LogEntry(DateTime.UtcNow, LogSeverity.Info, message, source);
             _buffer.Add(entry);
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {message}");
+            Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  INF  {message}");
         }
 
         /// <summary>Log a warning message.</summary>
@@ -140,7 +149,7 @@ namespace Pulswerk.Core
             var entry = new LogEntry(DateTime.UtcNow, LogSeverity.Warning, message, source);
             _buffer.Add(entry);
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] WARNING: {message}");
+            Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  WRN  {message}");
             Console.ResetColor();
         }
 
@@ -150,11 +159,53 @@ namespace Pulswerk.Core
             var entry = new LogEntry(DateTime.UtcNow, LogSeverity.Error, message, source);
             _buffer.Add(entry);
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.Error.WriteLine($"[{DateTime.Now:HH:mm:ss}] ERROR: {message}");
+            Console.Error.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  ERR  {message}");
             Console.ResetColor();
         }
 
         /// <summary>Access the underlying log buffer for the dashboard.</summary>
         public LogBuffer Buffer => _buffer;
+    }
+
+    /// <summary>
+    /// Global static logging facade.  Initialised once from Program.cs via
+    /// <c>Log.Init(logger)</c>, then used everywhere as <c>Log.Info(...)</c>.
+    /// Before Init() is called, messages fall through to plain Console output.
+    /// </summary>
+    public static class Log
+    {
+        private static ConsoleLogger? _instance;
+
+        /// <summary>Wire up the global logger (call once from Program.Main).</summary>
+        public static void Init(ConsoleLogger logger) => _instance = logger;
+
+        /// <summary>The underlying ConsoleLogger, or null before Init().</summary>
+        public static ConsoleLogger? Instance => _instance;
+
+        // ── Convenience methods ──────────────────────────────────────────────
+
+        public static void Debug(string message, string source = "")
+        {
+            if (_instance != null) _instance.Debug(message, source);
+            else Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  DBG  {message}");
+        }
+
+        public static void Info(string message, string source = "")
+        {
+            if (_instance != null) _instance.Info(message, source);
+            else Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  INF  {message}");
+        }
+
+        public static void Warning(string message, string source = "")
+        {
+            if (_instance != null) _instance.Warning(message, source);
+            else Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  WRN  {message}");
+        }
+
+        public static void Error(string message, string source = "")
+        {
+            if (_instance != null) _instance.Error(message, source);
+            else Console.Error.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  ERR  {message}");
+        }
     }
 }

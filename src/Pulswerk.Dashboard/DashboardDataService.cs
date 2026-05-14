@@ -54,7 +54,7 @@ namespace Pulswerk.Dashboard
             string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
             if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
 
-            Console.WriteLine($"  [Dashboard] DataService initialized with {Config.Devices.Count} devices.");
+            Log.Info($"[Dashboard] DataService initialized with {Config.Devices.Count} devices.");
 
             // Initial registration of known keys (Modbus)
             RegisterAllKnownKeys();
@@ -95,6 +95,7 @@ namespace Pulswerk.Dashboard
                     // Skip BACnet error strings – they must never reach the UI
                     var vs = kvp.Value?.ToString();
                     if (vs != null && vs.Contains("ERROR_")) continue;
+                    if (kvp.Value is null) continue;
                     LatestValues[kvp.Key] = kvp.Value;
                     LatestTimestamps[kvp.Key] = now;
 
@@ -279,7 +280,7 @@ namespace Pulswerk.Dashboard
         /// </summary>
         public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, double days)
         {
-            Console.WriteLine($"  [Dashboard] History requested: {key}, days={days}");
+            Log.Debug($"[Dashboard] History requested: {key}, days={days}");
             long endTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 5000; 
             long startTs = endTs - (long)(days * 24 * 60 * 60 * 1000.0) - 5000;
             return await TsStore.QueryAsync(key, startTs, endTs, limit: 5000);
@@ -288,22 +289,22 @@ namespace Pulswerk.Dashboard
         public Task<bool> WriteValueAsync(string key, double value)
         {
             var device = IdentifyDeviceFromKey(key);
-            if (device == null) { Console.Error.WriteLine($"  [Dashboard] Write rejected: no device found for key '{key}'"); return Task.FromResult(false); }
+            if (device == null) { Log.Error($"[Dashboard] Write rejected: no device found for key '{key}'"); return Task.FromResult(false); }
 
             // Extract the technical point key from the scoped key {DeviceId}_{PointKey}
             string driverKey = key.Substring(device.Id.Length + 1);
 
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
-            if (conn == null) { Console.Error.WriteLine($"  [Dashboard] Write rejected: no connection for device '{device.Name}'"); return Task.FromResult(false); }
+            if (conn == null) { Log.Error($"[Dashboard] Write rejected: no connection for device '{device.Name}'"); return Task.FromResult(false); }
 
             var writer = (Drivers.TryGetValue(device.Name, out var drv) ? drv : null) as IDeviceWriter;
-            if (writer == null) { Console.Error.WriteLine($"  [Dashboard] Write rejected: driver for '{device.Name}' is not an IDeviceWriter"); return Task.FromResult(false); }
-            if (!writer.IsWritable(driverKey)) { Console.Error.WriteLine($"  [Dashboard] Write rejected: key '{driverKey}' (full: '{key}') is not writable"); return Task.FromResult(false); }
+            if (writer == null) { Log.Error($"[Dashboard] Write rejected: driver for '{device.Name}' is not an IDeviceWriter"); return Task.FromResult(false); }
+            if (!writer.IsWritable(driverKey)) { Log.Error($"[Dashboard] Write rejected: key '{driverKey}' (full: '{key}') is not writable"); return Task.FromResult(false); }
 
             try
             {
                 writer.Write(conn, device, driverKey, value);
-                Console.WriteLine($"  [Dashboard] Manual write success: {key} = {value}");
+                Log.Info($"[Dashboard] Manual write success: {key} = {value}");
 
                 // Immediately update LatestValues with the correctly formatted
                 // display value (state text resolved) via the converter.
@@ -332,7 +333,7 @@ namespace Pulswerk.Dashboard
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [Dashboard] Write failed for {key}: {ex.Message}");
+                Log.Error($"[Dashboard] Write failed for {key}: {ex.Message}");
                 return Task.FromResult(false);
             }
         }
@@ -357,7 +358,7 @@ namespace Pulswerk.Dashboard
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [Dashboard] Complex write failed for {key}: {ex.Message}");
+                Log.Error($"[Dashboard] Complex write failed for {key}: {ex.Message}");
                 return Task.FromResult(false);
             }
         }

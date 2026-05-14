@@ -66,7 +66,7 @@ namespace Pulswerk.Dashboard.Pages
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [Dashboard] Failed to fetch alarms: {ex.Message}");
+                Log.Error($"[Dashboard] Failed to fetch alarms: {ex.Message}");
             }
         }
 

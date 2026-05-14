@@ -111,7 +111,7 @@ namespace Pulswerk.Drivers.BACnet
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [Conflator] Flush error: {ex.Message}");
+                Pulswerk.Core.Log.Error($"[Conflator] Flush error: {ex.Message}");
             }
             finally
             {
@@ -125,7 +125,7 @@ namespace Pulswerk.Drivers.BACnet
             _ = Task.Run(async () =>
             {
                 try { await _publisher(batch); }
-                catch (Exception ex) { Console.Error.WriteLine($"  [Conflator] Publish failed: {ex.Message}"); }
+                catch (Exception ex) { Pulswerk.Core.Log.Error($"[Conflator] Publish failed: {ex.Message}"); }
             });
         }
 
@@ -270,7 +270,7 @@ namespace Pulswerk.Drivers.BACnet
         {
             if (!_ackRegistry.TryGetValue(ackKey, out var ctx))
             {
-                Console.WriteLine($"  [BACnet-Ack] No live context for key '{ackKey}' — connector may have restarted.");
+                Pulswerk.Core.Log.Warning($"[BACnet-Ack] No live context for key '{ackKey}' — connector may have restarted.");
                 return false;
             }
 
@@ -281,14 +281,15 @@ namespace Pulswerk.Drivers.BACnet
                 bool ok = ctx.Client.AlarmAcknowledgement(
                     ctx.Address, ctx.ObjectId, ctx.EventState,
                     operatorText, evTs, ackTs, 0);
-                Console.WriteLine(ok
-                    ? $"  [BACnet-Ack] AlarmAcknowledgement sent → {ctx.Address} obj={ctx.ObjectId} state={ctx.EventState}"
-                    : $"  [BACnet-Ack] AlarmAcknowledgement FAILED → {ctx.Address} obj={ctx.ObjectId}");
+                if (ok)
+                    Pulswerk.Core.Log.Info($"[BACnet-Ack] AlarmAcknowledgement sent → {ctx.Address} obj={ctx.ObjectId} state={ctx.EventState}");
+                else
+                    Pulswerk.Core.Log.Error($"[BACnet-Ack] AlarmAcknowledgement FAILED → {ctx.Address} obj={ctx.ObjectId}");
                 return ok;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [BACnet-Ack] Exception sending AlarmAcknowledgement: {ex.Message}");
+                Pulswerk.Core.Log.Error($"[BACnet-Ack] Exception sending AlarmAcknowledgement: {ex.Message}");
                 return false;
             }
         }
@@ -338,7 +339,7 @@ namespace Pulswerk.Drivers.BACnet
                 if (needsDiscovery)
                 {
                     Interlocked.Increment(ref _busyCount);
-                    Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
+                    Pulswerk.Core.Log.Info($"[BACnet] Discovering objects on {device.Name}…");
                     var all = DiscoverObjects(client, address, device.DeviceId.Value);
                     var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value, GetExtraDiscoveryProperties());
                     var filtered = resultDict.Objects;
@@ -355,7 +356,7 @@ namespace Pulswerk.Drivers.BACnet
                     var trendLogMap = ResolveTrendLogMap(client, address, all);
                     if (trendLogMap.Count > 0)
                     {
-                        Console.WriteLine($"  [BACnet] Found {trendLogMap.Count} Trend Log association(s).");
+                        Pulswerk.Core.Log.Info($"[BACnet] Found {trendLogMap.Count} Trend Log association(s).");
                         filtered = filtered.Select(obj =>
                             trendLogMap.TryGetValue(obj.ObjectId, out var logObjId) && obj.LogObjectId == null
                                 ? obj with { LogObjectId = logObjId }
@@ -371,7 +372,7 @@ namespace Pulswerk.Drivers.BACnet
                     state.HierarchyReady = false;   // wait for background job to finish provisioning before alarms
                     _hierarchyLogged.Remove(device.Name);  // re-log hierarchy stats on next conversion
 
-                    Console.WriteLine($"  [BACnet] {device.Name}: {all.Count} objects found, " +
+                    Pulswerk.Core.Log.Info($"[BACnet] {device.Name}: {all.Count} objects found, " +
                                       $"{filtered.Count} after filter" +
                                       (trendLogMap.Count > 0 ? $", {trendLogMap.Count} trend logs linked." : "."));
 
@@ -393,7 +394,7 @@ namespace Pulswerk.Drivers.BACnet
                             }
                             catch (Exception ex)
                             {
-                                Console.Error.WriteLine($"  [BACnet] Trend log sync failed for {device.Name}: {ex.Message}");
+                                Pulswerk.Core.Log.Error($"[BACnet] Trend log sync failed for {device.Name}: {ex.Message}");
                             }
                             finally
                             {
@@ -470,8 +471,8 @@ namespace Pulswerk.Drivers.BACnet
             {
                 // UDP socket died (network hiccup, interface restart, etc.).
                 // Purge the cached client so the next poll creates a fresh one.
-                Console.Error.WriteLine(
-                    $"  [BACnet] Transport error on {device.Name}: {ex.GetType().Name} – {ex.Message}. Resetting client.");
+                Pulswerk.Core.Log.Error(
+                    $"[BACnet] Transport error on {device.Name}: {ex.GetType().Name} – {ex.Message}. Resetting client.");
                 InvalidateClient(conn);
                 throw;  // re-throw so PollAndPublishAsync tracks the failure count
             }
@@ -496,25 +497,25 @@ namespace Pulswerk.Drivers.BACnet
             // This allows standard BACnet devices to also build trees if requested.
             if (!string.IsNullOrEmpty(cfg.AssetType))
             {
-                Console.WriteLine($"  [BACnet] Walking Structured Views on {device.Name} (assetType={cfg.AssetType})…");
+                Pulswerk.Core.Log.Info($"[BACnet] Walking Structured Views on {device.Name} (assetType={cfg.AssetType})…");
                 state.Tree = BacnetHierarchy.Walk(client, address, device.DeviceId!.Value);
                 int leafCount = CountTreeLeaves(state.Tree);
-                Console.WriteLine($"  [BACnet] Hierarchy walk complete — " +
+                Pulswerk.Core.Log.Info($"[BACnet] Hierarchy walk complete — " +
                                   $"{state.Tree.Roots.Count} root(s), {leafCount} leaf node(s) " +
                                   $"(discovered={state.CachedObjects.Count}).");
 
                 if (state.Tree.Roots.Count == 0)
                 {
-                    Console.WriteLine(
-                        $"  [BACnet] WARNING: {device.Name} has {state.CachedObjects.Count} " +
+                    Pulswerk.Core.Log.Warning(
+                        $"[BACnet] {device.Name} has {state.CachedObjects.Count} " +
                         $"discovered objects but 0 Structured View roots. " +
                         $"Items will appear under flat fallback hierarchy.");
                 }
                 else if (leafCount < state.CachedObjects.Count)
                 {
                     int orphanEstimate = state.CachedObjects.Count - leafCount;
-                    Console.WriteLine(
-                        $"  [BACnet] NOTE: {device.Name} has ~{orphanEstimate} object(s) " +
+                    Pulswerk.Core.Log.Info(
+                        $"[BACnet] {device.Name} has ~{orphanEstimate} object(s) " +
                         $"not covered by the Structured View tree. " +
                         $"These will appear under 'Uncategorized'.");
                 }
@@ -569,7 +570,7 @@ namespace Pulswerk.Drivers.BACnet
 
                         if (objectIds.Count > 0)
                         {
-                            Console.WriteLine($"  [BACnet] Successfully read {objectIds.Count} objects in bulk.");
+                            Pulswerk.Core.Log.Info($"[BACnet] Successfully read {objectIds.Count} objects in bulk.");
                             return objectIds;
                         }
                     }
@@ -605,12 +606,12 @@ namespace Pulswerk.Drivers.BACnet
 
             if (count == 0)
             {
-                Console.Error.WriteLine($"  [BACnet] Could not read object list from {address}. Aborting discovery.");
+                Pulswerk.Core.Log.Error($"[BACnet] Could not read object list from {address}. Aborting discovery.");
                 return objectIds;
             }
 
             // 3. Read the list index-by-index (slow fallback)
-            Console.WriteLine($"  [BACnet] Downloading object list index-by-index ({count} items)…");
+            Pulswerk.Core.Log.Info($"[BACnet] Downloading object list index-by-index ({count} items)…");
             for (uint i = 1; i <= count; i++)
             {
                 try
@@ -625,7 +626,7 @@ namespace Pulswerk.Drivers.BACnet
                 }
                 catch { /* skip broken index */ }
 
-                if (i % 100 == 0) Console.WriteLine($"  [BACnet] ... discovered {i}/{count} objects");
+                if (i % 100 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... discovered {i}/{count} objects");
             }
 
             return objectIds;
@@ -654,7 +655,7 @@ namespace Pulswerk.Drivers.BACnet
             if (trendLogs.Count == 0)
                 return map;
 
-            Console.WriteLine($"  [BACnet] Scanning {trendLogs.Count} Trend Log objects for associations...");
+            Pulswerk.Core.Log.Info($"[BACnet] Scanning {trendLogs.Count} Trend Log objects for associations...");
 
             foreach (var tl in trendLogs)
             {
@@ -692,7 +693,7 @@ namespace Pulswerk.Drivers.BACnet
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"    [BACnet] Could not read trend log ref for {tl}: {ex.Message}");
+                    Pulswerk.Core.Log.Debug($"[BACnet] Could not read trend log ref for {tl}: {ex.Message}");
                 }
             }
 
@@ -740,7 +741,7 @@ namespace Pulswerk.Drivers.BACnet
             if (uint.TryParse(entry, out uint numericId))
                 return (BacnetObjectTypes)numericId;
 
-            Console.Error.WriteLine($"  [BACnet] Cannot resolve objectType filter entry: '{entry}'");
+            Pulswerk.Core.Log.Warning($"[BACnet] Cannot resolve objectType filter entry: '{entry}'");
             return null;
         }
 
@@ -784,7 +785,7 @@ namespace Pulswerk.Drivers.BACnet
                 .Where(oid => filter.InstanceRange == null || (oid.instance >= filter.InstanceRange.Min && oid.instance <= filter.InstanceRange.Max))
                 .ToList();
 
-            Console.WriteLine($"    [BACnet]   Fetching properties for {candidatesList.Count} potential objects in batches...");
+            Pulswerk.Core.Log.Info($"[BACnet] Fetching properties for {candidatesList.Count} potential objects in batches...");
             bool rpmSegFault = false;   // set once → skip batch RPM from then on
             for (int i = 0; i < candidatesList.Count; i += 50)
             {
@@ -814,14 +815,14 @@ namespace Pulswerk.Drivers.BACnet
                         if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
                         {
                             ProcessRpmResults(batchResults, allNames, allDescs, allUnits, allCommandable, allStateText, extraProps, extraResults);
-                            if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} objects fetched");
+                            if (i > 0 && i % 250 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... {i}/{candidatesList.Count} objects fetched");
                             continue;  // batch succeeded — next batch
                         }
                     }
                     catch (Exception ex) when (ex.Message.Contains("SEGMENTATION"))
                     {
                         rpmSegFault = true;
-                        Console.WriteLine($"    [BACnet]   Device does not support segmentation — switching to single-object reads.");
+                        Pulswerk.Core.Log.Warning($"[BACnet] Device does not support segmentation — switching to single-object reads.");
                     }
                     catch { /* other RPM failure — fall through to single-object reads */ }
                 }
@@ -858,7 +859,7 @@ namespace Pulswerk.Drivers.BACnet
                     // Ultimate fallback: individual ReadPropertyRequest calls
                     ReadSingleProps(client, address, oid, allNames, allDescs, allUnits, allCommandable, extraProps, extraResults);
                 }
-                if (i > 0 && i % 250 == 0) Console.WriteLine($"    [BACnet]     ... {i}/{candidatesList.Count} objects fetched (single-object mode)");
+                if (i > 0 && i % 250 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... {i}/{candidatesList.Count} objects fetched (single-object mode)");
             }
 
             var result = new List<BacnetObjectInfo>();
@@ -904,7 +905,7 @@ namespace Pulswerk.Drivers.BACnet
             }
 
             if (objectsWithLabels > 0)
-                Console.WriteLine($"    [BACnet]   Loaded state labels for {objectsWithLabels} objects.");
+                Pulswerk.Core.Log.Info($"[BACnet] Loaded state labels for {objectsWithLabels} objects.");
 
             return new DiscoveryResult(result, extraResults);
         }
@@ -1283,12 +1284,12 @@ namespace Pulswerk.Drivers.BACnet
                     var addrs = System.Net.Dns.GetHostAddresses(host);
                     var v4 = addrs.FirstOrDefault(
                         a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
-                    if (v4 != null) { ip = v4.ToString(); Console.WriteLine($"  [BACnet] Resolved '{host}' to {ip}"); }
+                    if (v4 != null) { ip = v4.ToString(); Pulswerk.Core.Log.Info($"[BACnet] Resolved '{host}' to {ip}"); }
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine(
-                        $"  [BACnet] DNS resolution failed for '{host}': {ex.Message}");
+                    Pulswerk.Core.Log.Error(
+                        $"[BACnet] DNS resolution failed for '{host}': {ex.Message}");
                 }
             }
 
@@ -1296,7 +1297,7 @@ namespace Pulswerk.Drivers.BACnet
             if (string.IsNullOrEmpty(ip) || !System.Net.IPAddress.TryParse(ip, out _))
             {
                 ip = "127.0.0.1";
-                Console.WriteLine($"  [BACnet] WARNING: Using loopback fallback for '{host}'");
+                Pulswerk.Core.Log.Warning($"[BACnet] Using loopback fallback for '{host}'");
             }
 
             // Build the direct address from config (works for unicast BACnet/IP)
@@ -1307,7 +1308,7 @@ namespace Pulswerk.Drivers.BACnet
             adr[5] = (byte)(port & 0xFF);
 
             var directAddress = new BacnetAddress(BacnetAddressTypes.IP, 0, adr);
-            Console.WriteLine($"  [BACnet] Attempting Who-Is for device {deviceId} via {ip}:{port}...");
+            Pulswerk.Core.Log.Info($"[BACnet] Attempting Who-Is for device {deviceId} via {ip}:{port}...");
 
             BacnetAddress? iamAddress = null;
             using var signal = new ManualResetEventSlim(false);
@@ -1318,7 +1319,7 @@ namespace Pulswerk.Drivers.BACnet
                 if (id == deviceId)
                 {
                     iamAddress = adr;
-                    Console.WriteLine($"  [BACnet] Got I-Am from {adr} (Net={adr.net}, Adr={BitConverter.ToString(adr.adr)})");
+                    Pulswerk.Core.Log.Debug($"[BACnet] Got I-Am from {adr} (Net={adr.net}, Adr={BitConverter.ToString(adr.adr)})");
                     signal.Set();
                 }
             }
@@ -1335,8 +1336,8 @@ namespace Pulswerk.Drivers.BACnet
                 client.OnIam -= OnIam;
             }
 
-            if (iamAddress != null) Console.WriteLine($"  [BACnet] Received I-Am from {iamAddress} for device {deviceId}.");
-            else Console.WriteLine($"  [BACnet] Who-Is timeout for device {deviceId}. Falling back to {directAddress}.");
+            if (iamAddress != null) Pulswerk.Core.Log.Info($"[BACnet] Received I-Am from {iamAddress} for device {deviceId}.");
+            else Pulswerk.Core.Log.Warning($"[BACnet] Who-Is timeout for device {deviceId}. Falling back to {directAddress}.");
 
             // For BACnet/IP, we MUST ensure the address has the correct port.
             // If we got an I-Am, use it. Otherwise use our manually built directAddress.
@@ -1403,7 +1404,7 @@ namespace Pulswerk.Drivers.BACnet
                     _clientsByEndpoint.TryRemove((bindAddr, bindPort), out _);
 
                 try { client.Dispose(); } catch { /* best-effort */ }
-                Console.WriteLine($"  [BACnet] Client for connection '{conn.Id}' invalidated and disposed.");
+                Pulswerk.Core.Log.Info($"[BACnet] Client for connection '{conn.Id}' invalidated and disposed.");
             }
         }
 
@@ -1623,7 +1624,7 @@ namespace Pulswerk.Drivers.BACnet
 
             if (objectsWithLogs.Count == 0) return Task.CompletedTask;
 
-            Console.WriteLine($"  [BACnet] Starting historical sync for {objectsWithLogs.Count} objects on {device.Name}…");
+            Pulswerk.Core.Log.Info($"[BACnet] Starting historical sync for {objectsWithLogs.Count} objects on {device.Name}…");
 
             int totalSynced = 0;
             int failedCount = 0;
@@ -1714,16 +1715,16 @@ namespace Pulswerk.Drivers.BACnet
                 {
                     failedCount++;
                     if (failedCount == 1)
-                        Console.WriteLine($"  [BACnet] Trend log read failed for {obj.ObjectName ?? obj.ObjectId.ToString()}: {ex.Message}");
+                        Pulswerk.Core.Log.Warning($"[BACnet] Trend log read failed for {obj.ObjectName ?? obj.ObjectId.ToString()}: {ex.Message}");
                 }
             }
 
-            Console.Write($"  [BACnet] Historical sync for {device.Name} complete.");
+            var syncMsg = $"[BACnet] Historical sync for {device.Name} complete.";
             if (totalSynced > 0)
-                Console.Write($" {totalSynced} records synced.");
+                syncMsg += $" {totalSynced} records synced.";
             if (failedCount > 0)
-                Console.Write($" {failedCount}/{objectsWithLogs.Count} trend logs unavailable.");
-            Console.WriteLine();
+                syncMsg += $" {failedCount}/{objectsWithLogs.Count} trend logs unavailable.";
+            Pulswerk.Core.Log.Info(syncMsg);
             return Task.CompletedTask;
         }
 
@@ -1740,7 +1741,7 @@ namespace Pulswerk.Drivers.BACnet
 
             // Log suppressed errors for diagnostics (keep in driver, not in converter)
             if (raw != null && raw.ToString() is string s && s.Contains("ERROR_"))
-                Console.Error.WriteLine($"  [BACnet] FormatValue suppressed error for {obj.ObjectName} ({obj.ObjectId}): {s}");
+                Pulswerk.Core.Log.Debug($"[BACnet] FormatValue suppressed error for {obj.ObjectName} ({obj.ObjectId}): {s}");
 
             return result;
         }
@@ -1827,7 +1828,7 @@ namespace Pulswerk.Drivers.BACnet
                 state.HierarchyReady = true;
             }
 
-            Console.WriteLine($"  [BACnet] Hierarchy ready for '{deviceName}'. Alarm routing now uses asset paths.");
+            Pulswerk.Core.Log.Info($"[BACnet] Hierarchy ready for '{deviceName}'. Alarm routing now uses asset paths.");
         }
 
         /// <summary>
@@ -1961,8 +1962,8 @@ namespace Pulswerk.Drivers.BACnet
                 await SyncTrendLogsAsync(state.CovClient, state.CovAddress, state, tsStore, device);
             });
 
-            Console.WriteLine(
-                $"  [COV] {device.Name}: {state.CachedObjects.Count} subscribed, " +
+            Pulswerk.Core.Log.Info(
+                $"[COV] {device.Name}: {state.CachedObjects.Count} subscribed, " +
                 $"{state.CovFallbackPoll.Count} fallback-poll.");
         }
 
@@ -1974,7 +1975,7 @@ namespace Pulswerk.Drivers.BACnet
             BacnetClient client, BacnetAddress address,
             DeviceConfig device, DeviceConfig cfg, DiscoveryState state)
         {
-            Console.WriteLine($"  [BACnet] Discovering objects on {device.Name}…");
+            Pulswerk.Core.Log.Info($"[BACnet] Discovering objects on {device.Name}…");
             var all = DiscoverObjects(client, address, device.DeviceId!.Value);
             var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId!.Value, GetExtraDiscoveryProperties());
             var filtered = resultDict.Objects;
@@ -1986,7 +1987,7 @@ namespace Pulswerk.Drivers.BACnet
             var trendLogMap = ResolveTrendLogMap(client, address, all);
             if (trendLogMap.Count > 0)
             {
-                Console.WriteLine($"  [BACnet] Found {trendLogMap.Count} Trend Log association(s).");
+                Pulswerk.Core.Log.Info($"[BACnet] Found {trendLogMap.Count} Trend Log association(s).");
                 filtered = filtered.Select(obj =>
                     trendLogMap.TryGetValue(obj.ObjectId, out var logObjId) && obj.LogObjectId == null
                         ? obj with { LogObjectId = logObjId }
@@ -2006,8 +2007,8 @@ namespace Pulswerk.Drivers.BACnet
             // Extension point for subclasses (e.g. DezikoDriver hierarchy walk)
             OnPostDiscovery(client, address, state, device, cfg);
 
-            Console.WriteLine(
-                $"  [BACnet] {device.Name}: {all.Count} found, {filtered.Count} after filter" +
+            Pulswerk.Core.Log.Info(
+                $"[BACnet] {device.Name}: {all.Count} found, {filtered.Count} after filter" +
                 (trendLogMap.Count > 0 ? $", {trendLogMap.Count} trend logs linked." : "."));
         }
 
@@ -2066,13 +2067,13 @@ namespace Pulswerk.Drivers.BACnet
                     }
                     else
                     {
-                        Console.WriteLine($"  [COV] {obj.ObjectName}: fallback-poll (NAK)");
+                        Pulswerk.Core.Log.Debug($"[COV] {obj.ObjectName}: fallback-poll (NAK)");
                         state.CovFallbackPoll.Add(obj.ObjectId);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"  [COV] {obj.ObjectName}: fallback-poll ({ex.Message})");
+                    Pulswerk.Core.Log.Debug($"[COV] {obj.ObjectName}: fallback-poll ({ex.Message})");
                     state.CovFallbackPoll.Add(obj.ObjectId);
                 }
             }
@@ -2405,7 +2406,7 @@ namespace Pulswerk.Drivers.BACnet
                     catch { }
                 }
 
-                Console.WriteLine($"  [BACnet] Writing schedule for {oid} — detected value tag: {valueTag}, entries per day: {days.Sum(d => d.Entries?.Count ?? 0)}");
+                Pulswerk.Core.Log.Info($"[BACnet] Writing schedule for {oid} — detected value tag: {valueTag}, entries per day: {days.Sum(d => d.Entries?.Count ?? 0)}");
 
                 // BACnet Weekly_Schedule is an array of 7 DailySchedule (SEQUENCE OF TimeValue)
                 // arrayIndex 1 = Monday, ..., 7 = Sunday
@@ -2451,12 +2452,12 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         if (!client.WritePropertyMultipleRequest(address, oid, new[] { propValue }))
                         {
-                            Console.Error.WriteLine($"  [BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
+                            Pulswerk.Core.Log.Error($"[BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
                         }
                     }
                     catch (Exception dayEx)
                     {
-                        Console.Error.WriteLine($"  [BACnet] Schedule write error day {arrayIndex}: {dayEx.Message}");
+                        Pulswerk.Core.Log.Error($"[BACnet] Schedule write error day {arrayIndex}: {dayEx.Message}");
                         throw;
                     }
                 }
@@ -2566,8 +2567,8 @@ namespace Pulswerk.Drivers.BACnet
                 if (shouldLog)
                 {
                     _hierarchyLogged.Add(device.Name);
-                    Console.WriteLine(
-                        $"  [Hierarchy] {device.Name}: tree conversion — " +
+                    Pulswerk.Core.Log.Info(
+                        $"[Hierarchy] {device.Name}: tree conversion — " +
                         $"leaves={stats.TotalTreeLeaves}, " +
                         $"resolved={stats.ResolvedFromCache}, " +
                         $"not-in-cache={stats.NotInCache}, " +
@@ -2588,8 +2589,8 @@ namespace Pulswerk.Drivers.BACnet
                     if (orphaned.Count > 0)
                     {
                         if (shouldLog)
-                        Console.WriteLine(
-                            $"  [Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
+                        Pulswerk.Core.Log.Info(
+                            $"[Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
                             $"not referenced by any Structured View — adding to 'Uncategorized'.");
 
                         var uncatNode = new AssetNodeDto
@@ -2619,8 +2620,8 @@ namespace Pulswerk.Drivers.BACnet
                     // object rather than listing data points in subordinate lists.
                     int withPath = dataPoints.Count(o => o.NamingPath?.Count > 0);
                     if (shouldLog)
-                        Console.WriteLine(
-                            $"  [Hierarchy] {device.Name}: Structured View tree has 0 data-point leaves — " +
+                        Pulswerk.Core.Log.Info(
+                            $"[Hierarchy] {device.Name}: Structured View tree has 0 data-point leaves — " +
                             $"building hierarchy from NamingPath ({withPath}/{dataPoints.Count} objects have paths).");
 
                     BuildHierarchyFromNamingPaths(root, dataPoints, device.Id);
@@ -2632,8 +2633,8 @@ namespace Pulswerk.Drivers.BACnet
                 if (!_hierarchyLogged.Contains(device.Name))
                 {
                     _hierarchyLogged.Add(device.Name);
-                    Console.WriteLine(
-                        $"  [Hierarchy] {device.Name}: no Structured View tree — " +
+                    Pulswerk.Core.Log.Info(
+                        $"[Hierarchy] {device.Name}: no Structured View tree — " +
                         $"building flat hierarchy for {discovered.Count} discovered object(s).");
                 }
 

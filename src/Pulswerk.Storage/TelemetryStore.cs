@@ -62,7 +62,7 @@ namespace Pulswerk.Storage
             _writeApi.EventHandler += (sender, args) =>
             {
                 if (args is WriteErrorEvent errorEvent)
-                    Console.Error.WriteLine($"  [InfluxDB] Write error: {errorEvent.Exception.Message}");
+                    Log.Error($"[InfluxDB] Write error: {errorEvent.Exception.Message}");
             };
 
             // Ensure bucket exists (best-effort on startup)
@@ -79,7 +79,7 @@ namespace Pulswerk.Storage
                 var orgObj = orgList.FirstOrDefault();
                 if (orgObj == null)
                 {
-                    Console.Error.WriteLine($"  [InfluxDB] Organization '{_org}' not found. Buckets must be created manually.");
+                    Log.Error($"[InfluxDB] Organization '{_org}' not found. Buckets must be created manually.");
                     return;
                 }
 
@@ -91,11 +91,11 @@ namespace Pulswerk.Storage
                         type: BucketRetentionRules.TypeEnum.Expire,
                         everySeconds: retentionDays > 0 ? retentionDays * 86400 : 0);
                     await bucketsApi.CreateBucketAsync(_bucket, retention, orgObj.Id);
-                    Console.WriteLine($"  [InfluxDB] Created bucket '{_bucket}' (retention: {retentionDays}d).");
+                    Log.Info($"[InfluxDB] Created bucket '{_bucket}' (retention: {retentionDays}d).");
                 }
                 else
                 {
-                    Console.WriteLine($"  [InfluxDB] Bucket '{_bucket}' exists.");
+                    Log.Info($"[InfluxDB] Bucket '{_bucket}' exists.");
                 }
 
                 // ── Downsampled bucket (15-min averages, infinite retention) ─
@@ -107,7 +107,7 @@ namespace Pulswerk.Storage
                         type: BucketRetentionRules.TypeEnum.Expire,
                         everySeconds: 0);  // infinite
                     await bucketsApi.CreateBucketAsync(dsName, dsRetention, orgObj.Id);
-                    Console.WriteLine($"  [InfluxDB] Created downsampled bucket '{dsName}' (infinite retention).");
+                    Log.Info($"[InfluxDB] Created downsampled bucket '{dsName}' (infinite retention).");
                 }
 
                 // ── Compaction task (runs daily, downsamples data older than N days) ─
@@ -115,7 +115,7 @@ namespace Pulswerk.Storage
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [InfluxDB] Failed to ensure bucket: {ex.Message}");
+                Log.Error($"[InfluxDB] Failed to ensure bucket: {ex.Message}");
             }
         }
 
@@ -130,7 +130,7 @@ namespace Pulswerk.Storage
                 var existing = await tasksApi.FindTasksAsync(name: taskName, orgId: orgId);
                 if (existing?.Count > 0)
                 {
-                    Console.WriteLine($"  [InfluxDB] Compaction task '{taskName}' exists.");
+                    Log.Info($"[InfluxDB] Compaction task '{taskName}' exists.");
                     return;
                 }
 
@@ -144,11 +144,11 @@ namespace Pulswerk.Storage
                     $"  |> to(bucket: \"{dsName}\", org: \"{_org}\")";
 
                 var task = await tasksApi.CreateTaskEveryAsync(taskName, flux, "1d", orgId);
-                Console.WriteLine($"  [InfluxDB] Created compaction task '{taskName}' (every 1d, data older than {afterDays}d → 15m avg).");
+                Log.Info($"[InfluxDB] Created compaction task '{taskName}' (every 1d, data older than {afterDays}d → 15m avg).");
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [InfluxDB] Failed to create compaction task: {ex.Message}");
+                Log.Error($"[InfluxDB] Failed to create compaction task: {ex.Message}");
             }
         }
 
@@ -328,7 +328,7 @@ namespace Pulswerk.Storage
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [InfluxDB] Query error: {ex.Message}");
+                Log.Error($"[InfluxDB] Query error: {ex.Message}");
             }
 
             return result;
@@ -370,7 +370,7 @@ namespace Pulswerk.Storage
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [InfluxDB] Query error: {ex.Message}");
+                Log.Error($"[InfluxDB] Query error: {ex.Message}");
             }
 
             return points;
@@ -438,7 +438,7 @@ namespace Pulswerk.Storage
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [InfluxDB] Stats error: {ex.Message}");
+                Log.Error($"[InfluxDB] Stats error: {ex.Message}");
             }
             return stats;
         }

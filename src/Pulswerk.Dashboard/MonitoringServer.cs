@@ -66,8 +66,8 @@ namespace Pulswerk.Dashboard
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  [Monitoring] FATAL: Failed to build WebApplication: {ex.Message}");
-                if (ex.InnerException != null) Console.Error.WriteLine($"  [Monitoring]   Inner: {ex.InnerException.Message}");
+                Log.Error($"[Monitoring] FATAL: Failed to build WebApplication: {ex.Message}");
+                if (ex.InnerException != null) Log.Error($"[Monitoring]   Inner: {ex.InnerException.Message}");
                 throw;
             }
         }
@@ -188,7 +188,7 @@ namespace Pulswerk.Dashboard
 
         public async Task RunAsync(CancellationToken cancellationToken)
         {
-            Console.WriteLine($"  [Monitoring] Dashboard starting...");
+            Log.Info($"[Monitoring] Dashboard starting...");
             await _app.RunAsync(cancellationToken);
         }
 
