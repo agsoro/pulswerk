@@ -184,6 +184,31 @@ namespace Pulswerk.Dashboard
 
                 return Results.Json(dtos, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
             });
+
+            _app.MapGet("/plswk/api/connection-health/{connId}", (HttpContext ctx, string connId) =>
+            {
+                var history = _data.GetConnectionHealth(connId);
+                var dto = history.Select(h => new
+                {
+                    t = h.Time.ToString("o"),
+                    online = h.Online,
+                    total = h.Total
+                }).ToList();
+
+                return Results.Json(dto, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            });
+
+            _app.MapGet("/plswk/api/health-history", (HttpContext ctx) =>
+            {
+                var history = _data.GetHealthHistory();
+                return Results.Json(history, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            });
+
+            _app.MapGet("/plswk/api/latest-value/{key}", (HttpContext ctx, string key) =>
+            {
+                var values = _data.GetCurrentValues(new List<string> { key });
+                return Results.Json(values, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            });
         }
 
         public async Task RunAsync(CancellationToken cancellationToken)

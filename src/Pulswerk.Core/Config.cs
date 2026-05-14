@@ -112,7 +112,7 @@ namespace Pulswerk.Core
         /// <summary>
         /// Per-device poll interval in seconds. Overrides the global polling.intervalSeconds.
         /// Controls how often non-COV / fallback-polled values are read from the device.
-        /// Defaults: 120s for BACnet (COV-optimized), 30s or global interval for others.
+        /// Defaults: 3600s (1h) for BACnet to avoid overloading controllers, global interval for others.
         /// </summary>
         [property: JsonPropertyName("pollIntervalSeconds")] int? PollIntervalSeconds = null
     )
@@ -244,7 +244,14 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("onStartup")] bool OnStartup = true,
 
         /// <summary>Re-discover after this many minutes (0 = never refresh).</summary>
-        [property: JsonPropertyName("refreshIntervalMinutes")] int RefreshIntervalMinutes = 60
+        [property: JsonPropertyName("refreshIntervalMinutes")] int RefreshIntervalMinutes = 60,
+
+        /// <summary>
+        /// Delay in milliseconds between individual BACnet ReadProperty requests
+        /// during full reads and discovery. Prevents overloading field controllers
+        /// with large object counts. Default: 50 ms. Set to 0 to disable.
+        /// </summary>
+        [property: JsonPropertyName("readDelayMs")] int ReadDelayMs = 50
     )
     {
         public static readonly BacnetDiscoveryConfig Default = new();

@@ -6,6 +6,7 @@ let currentHistoryKey = null;
 let currentEditKey = null;
 let currentPropsKey = null;
 let historyChart = null;
+let historyRefreshTimer = null;
 
 // --- History Modal ---
 async function openHistory(key, name, units, pathEnc) {
@@ -26,9 +27,11 @@ async function openHistory(key, name, units, pathEnc) {
     document.getElementById('chartLiveValue').textContent = valEl ? valEl.textContent.trim() : '---';
     
     await reloadHistory();
+    startHistoryRefresh();
 }
 
 function closeHistory() {
+    stopHistoryRefresh();
     document.getElementById('historyModal').style.display = 'none';
     currentHistoryKey = null;
     if (historyChart) {
@@ -114,6 +117,52 @@ function renderChart(data) {
     container.innerHTML = '';
     historyChart = new ApexCharts(container, options);
     historyChart.render();
+}
+
+// --- History auto-refresh (10s) ---
+function startHistoryRefresh() {
+    stopHistoryRefresh();
+    historyRefreshTimer = setInterval(refreshHistoryData, 10_000);
+}
+
+function stopHistoryRefresh() {
+    if (historyRefreshTimer) {
+        clearInterval(historyRefreshTimer);
+        historyRefreshTimer = null;
+    }
+}
+
+async function refreshHistoryData() {
+    if (!currentHistoryKey) return;
+    if (document.getElementById('historyModal')?.style.display !== 'flex') return;
+
+    const days = document.getElementById('daysSelector').value;
+
+    try {
+        // Fetch updated history + current value in parallel
+        const [histRes, valRes] = await Promise.all([
+            fetch(`?handler=History&key=${currentHistoryKey}&days=${days}`),
+            fetch(`/plswk/api/latest-value/${encodeURIComponent(currentHistoryKey)}`)
+        ]);
+
+        const data = await histRes.json();
+        const vals = await valRes.json();
+
+        // Update live value display
+        const liveVal = vals?.[currentHistoryKey];
+        if (liveVal != null) {
+            const lvEl = document.getElementById('chartLiveValue');
+            if (lvEl) lvEl.textContent = liveVal;
+        }
+
+        // Update chart series without full redraw
+        if (historyChart) {
+            const points = data.map(d => ({ x: new Date(d.ts).getTime(), y: d.value }));
+            historyChart.updateSeries([{ data: points }]);
+        }
+    } catch (e) {
+        console.error('History refresh failed:', e);
+    }
 }
 
 // --- Edit Modal ---

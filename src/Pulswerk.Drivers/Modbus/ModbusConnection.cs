@@ -11,13 +11,20 @@ namespace Pulswerk.Drivers.Modbus
     /// Provides connection-scoped access to a Modbus TCP master.
     /// Uses a persistent connection pool (one TCP socket per connection ID)
     /// to avoid TCP port exhaustion from TIME_WAIT accumulation.
-    /// Auto-reconnects on socket failure.
+    /// Auto-reconnects on socket failure with configurable timeout.
     /// </summary>
     public static class ModbusConnection
     {
         private static readonly ConcurrentDictionary<string, (TcpClient Tcp, IModbusMaster Master)> _pool = new();
         private static readonly ConcurrentDictionary<string, object> _connLocks = new();
+        private static readonly ConcurrentDictionary<string, DateTime> _lastConnectAttempt = new();
         private static readonly object _lock = new();
+
+        /// <summary>Minimum interval between reconnect attempts to the same connection (prevents hammering a dead gateway).</summary>
+        private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(10);
+
+        /// <summary>TCP connect timeout in milliseconds.</summary>
+        private const int ConnectTimeoutMs = 5_000;
 
         public static T WithMaster<T>(ConnectionConfig conn, Func<IModbusMaster, T> action)
         {
@@ -26,17 +33,38 @@ namespace Pulswerk.Drivers.Modbus
             var connLock = _connLocks.GetOrAdd(conn.Id, _ => new object());
             lock (connLock)
             {
-                var master = GetOrCreateMaster(conn);
+                IModbusMaster master;
+                try
+                {
+                    master = GetOrCreateMaster(conn);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[Modbus] Connection '{conn.Id}' ({conn.Address}:{conn.Port}): " +
+                              $"failed to establish — {ex.GetType().Name}: {ex.Message}");
+                    throw;
+                }
+
                 try
                 {
                     return action(master);
                 }
-                catch (Exception ex) when (ex is SocketException or System.IO.IOException or ObjectDisposedException or InvalidOperationException)
+                catch (Exception ex) when (IsTransportError(ex))
                 {
                     // Connection died — purge from pool and retry once with a fresh connection
+                    Log.Warning($"[Modbus] Connection '{conn.Id}' transport error: {ex.GetType().Name}: {ex.Message}. Reconnecting…");
                     PurgeConnection(conn.Id);
-                    master = GetOrCreateMaster(conn);
-                    return action(master);
+
+                    try
+                    {
+                        master = GetOrCreateMaster(conn);
+                        return action(master);
+                    }
+                    catch (Exception retryEx)
+                    {
+                        Log.Error($"[Modbus] Connection '{conn.Id}' retry failed: {retryEx.GetType().Name}: {retryEx.Message}");
+                        throw;
+                    }
                 }
             }
         }
@@ -44,26 +72,103 @@ namespace Pulswerk.Drivers.Modbus
         private static IModbusMaster GetOrCreateMaster(ConnectionConfig conn)
         {
             string key = conn.Id;
-            if (_pool.TryGetValue(key, out var entry) && entry.Tcp.Connected)
+            if (_pool.TryGetValue(key, out var entry) && IsAlive(entry.Tcp))
                 return entry.Master;
 
             lock (_lock)
             {
                 // Double-check after acquiring lock
-                if (_pool.TryGetValue(key, out entry) && entry.Tcp.Connected)
+                if (_pool.TryGetValue(key, out entry) && IsAlive(entry.Tcp))
                     return entry.Master;
+
+                // Cooldown check — don't hammer a dead gateway
+                if (_lastConnectAttempt.TryGetValue(key, out var lastAttempt) &&
+                    DateTime.UtcNow - lastAttempt < ReconnectCooldown)
+                {
+                    throw new SocketException((int)SocketError.HostUnreachable);
+                }
 
                 // Dispose old if present
                 PurgeConnection(key);
 
-                var tcp = new TcpClient();
-                tcp.Connect(
-                    conn.Address ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address."),
-                    conn.Port ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port."));
-                var master = new ModbusFactory().CreateMaster(tcp);
+                _lastConnectAttempt[key] = DateTime.UtcNow;
 
-                _pool[key] = (tcp, master);
-                return master;
+                string address = conn.Address
+                    ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address.");
+                int port = conn.Port
+                    ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port.");
+
+                var tcp = new TcpClient();
+                try
+                {
+                    // Use async connect with timeout to avoid blocking for 20+ seconds
+                    var connectTask = tcp.ConnectAsync(address, port);
+                    if (!connectTask.Wait(ConnectTimeoutMs))
+                    {
+                        tcp.Dispose();
+                        throw new TimeoutException(
+                            $"TCP connect to {address}:{port} timed out after {ConnectTimeoutMs}ms.");
+                    }
+
+                    if (connectTask.IsFaulted)
+                    {
+                        tcp.Dispose();
+                        throw connectTask.Exception?.InnerException
+                            ?? new SocketException((int)SocketError.ConnectionRefused);
+                    }
+
+                    // Set socket-level timeouts for read/write operations
+                    tcp.ReceiveTimeout = 5_000;
+                    tcp.SendTimeout = 5_000;
+
+                    var master = new ModbusFactory().CreateMaster(tcp);
+                    master.Transport.ReadTimeout = 3_000;
+                    master.Transport.WriteTimeout = 3_000;
+                    master.Transport.Retries = 1;
+
+                    _pool[key] = (tcp, master);
+                    Log.Info($"[Modbus] Connected to '{conn.Id}' ({address}:{port}).");
+                    return master;
+                }
+                catch
+                {
+                    tcp.Dispose();
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks whether a transport error should trigger reconnection.
+        /// Catches all common .NET socket/stream failure modes.
+        /// </summary>
+        private static bool IsTransportError(Exception ex) =>
+            ex is SocketException
+            or System.IO.IOException
+            or ObjectDisposedException
+            or InvalidOperationException
+            or TimeoutException
+            or NModbus.SlaveException;
+
+        /// <summary>
+        /// Checks if a TcpClient is still actually alive.
+        /// TcpClient.Connected only reflects the last known state —
+        /// this probes the socket for real connectivity.
+        /// </summary>
+        private static bool IsAlive(TcpClient tcp)
+        {
+            try
+            {
+                if (!tcp.Connected) return false;
+                var socket = tcp.Client;
+                if (socket == null) return false;
+                // Poll returns true if: (a) data available, (b) connection closed, (c) error
+                // If poll returns true but Available == 0, the connection was closed by the remote end
+                return !(socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -72,9 +177,16 @@ namespace Pulswerk.Drivers.Modbus
         {
             if (_pool.TryRemove(connId, out var entry))
             {
+                Log.Debug($"[Modbus] Purging pooled connection '{connId}'.");
                 try { entry.Master?.Dispose(); } catch { }
                 try { entry.Tcp?.Dispose(); } catch { }
             }
+        }
+
+        /// <summary>Resets the reconnect cooldown for a connection, allowing immediate reconnection.</summary>
+        public static void ResetCooldown(string connId)
+        {
+            _lastConnectAttempt.TryRemove(connId, out _);
         }
 
         /// <summary>Returns the number of active pooled connections.</summary>

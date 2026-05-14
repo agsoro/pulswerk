@@ -117,8 +117,20 @@
             </div>
             }
             <div class="flex justify-between border-t border-white/5 pt-4">
-                <span class="text-slate-400" data-i18n="total_updates_processed">Total updates processed</span>
+                <span class="text-slate-400" data-i18n="total_updates_processed">Total updates</span>
                 <span class="text-white font-medium" id="totalUpdates">@Model.Stats.TotalUpdates.ToString("N0")</span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500 pl-3 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-violet-500 inline-block"></span> Push (COV)
+                </span>
+                <span class="text-slate-300 font-medium font-mono" id="totalPush">@Model.Stats.TotalPushUpdates.ToString("N0")</span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500 pl-3 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Pull (Poll)
+                </span>
+                <span class="text-slate-300 font-medium font-mono" id="totalPull">@Model.Stats.TotalPullUpdates.ToString("N0")</span>
             </div>
         </div>
     </div>
@@ -149,23 +161,26 @@
 @section Scripts {
     <script>
         let chart;
-        let dataBuffer = Array(60).fill(0);
-        let lastTotalUpdates = @Model.Stats.TotalUpdates;
+        let pushBuffer = Array(60).fill(0);
+        let pullBuffer = Array(60).fill(0);
+        let lastPush = @Model.Stats.TotalPushUpdates;
+        let lastPull = @Model.Stats.TotalPullUpdates;
 
         function initChart() {
             const options = {
-                series: [{
-                    name: 'Updates/sec',
-                    data: dataBuffer
-                }],
+                series: [
+                    { name: 'Push (COV)', data: pushBuffer },
+                    { name: 'Pull (Poll)', data: pullBuffer }
+                ],
                 chart: {
                     type: 'area',
                     height: '100%',
+                    stacked: true,
                     animations: { enabled: false },
                     toolbar: { show: false },
                     sparkline: { enabled: false }
                 },
-                colors: ['#10b981'],
+                colors: ['#8b5cf6', '#10b981'],
                 fill: {
                     type: 'gradient',
                     gradient: {
@@ -176,6 +191,15 @@
                     }
                 },
                 stroke: { curve: 'smooth', width: 2 },
+                legend: {
+                    show: true,
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#94a3b8' },
+                    markers: { width: 8, height: 8, radius: 4 },
+                    fontSize: '12px',
+                    fontFamily: 'inherit'
+                },
                 grid: {
                     borderColor: 'rgba(255,255,255,0.1)',
                     xaxis: { lines: { show: false } },
@@ -196,10 +220,16 @@
                     forceNiceScale: true,
                     labels: {
                         style: { colors: '#64748b', fontSize: '10px' }
-                    }
+                    },
+                    title: { text: 'updates/s', style: { color: '#475569', fontSize: '11px' } }
                 },
                 dataLabels: { enabled: false },
-                tooltip: { theme: 'dark' }
+                tooltip: {
+                    theme: 'dark',
+                    shared: true,
+                    intersect: false,
+                    y: { formatter: (val) => val.toLocaleString() + ' upd/s' }
+                }
             };
 
             chart = new ApexCharts(document.querySelector("#throughputChart"), options);
@@ -229,6 +259,8 @@
                 }
                 
                 document.getElementById('totalUpdates').textContent = data.totalUpdates.toLocaleString();
+                document.getElementById('totalPush').textContent = data.totalPushUpdates.toLocaleString();
+                document.getElementById('totalPull').textContent = data.totalPullUpdates.toLocaleString();
                 
                 // Memory
                 const mem = document.getElementById('memStats');
@@ -241,8 +273,6 @@
                 const oldest = document.getElementById('oldestSeen');
                 if (oldest && data.oldestDeviceSeenUtc) oldest.textContent = data.oldestDeviceSeenUtc + ' UTC';
 
-
-
                 // Format uptime
                 const s = data.uptimeSeconds;
                 const d = Math.floor(s / 86400);
@@ -251,12 +281,19 @@
                 const sec = s % 60;
                 document.getElementById('uptime').textContent = d > 0 ? `${d}d ${h}h ${m}m` : (h > 0 ? `${h}h ${m}m ${sec}s` : `${m}m ${sec}s`);
 
-                // Update chart
-                const diff = Math.max(0, data.totalUpdates - lastTotalUpdates);
-                lastTotalUpdates = data.totalUpdates;
-                dataBuffer.shift();
-                dataBuffer.push(diff);
-                chart.updateSeries([{ data: dataBuffer }]);
+                // Update stacked chart
+                const pushDiff = Math.max(0, data.totalPushUpdates - lastPush);
+                const pullDiff = Math.max(0, data.totalPullUpdates - lastPull);
+                lastPush = data.totalPushUpdates;
+                lastPull = data.totalPullUpdates;
+
+                pushBuffer.shift(); pushBuffer.push(pushDiff);
+                pullBuffer.shift(); pullBuffer.push(pullDiff);
+
+                chart.updateSeries([
+                    { data: pushBuffer },
+                    { data: pullBuffer }
+                ]);
             } catch (e) {
                 console.error('Failed to update stats:', e);
             }

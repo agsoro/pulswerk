@@ -124,7 +124,8 @@
       "connectionId": "bacnet-deziko",
       "deviceId": 10,
       "address": "bacnet-sim",
-      "assetType": "BACnet Zone"
+      "assetType": "BACnet Zone",
+      "cov": { "enabled": true }
     }
   ]
 }

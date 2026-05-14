@@ -32,9 +32,19 @@ namespace Pulswerk.Dashboard
         public string Version { get; }
 
         private long _totalUpdates = 0;
+        private long _totalPushUpdates = 0;
+        private long _totalPullUpdates = 0;
         private readonly Queue<(DateTime Time, int Count)> _updateHistory = new();
+        private readonly Queue<(DateTime Time, int Count)> _pushHistory = new();
+        private readonly Queue<(DateTime Time, int Count)> _pullHistory = new();
         private readonly object _statsLock = new();
         private readonly HashSet<string> _bootstrappedKeys = new();
+
+        // ── Unified health history ───────────────────────────────────────────
+        // Sampled every 5 minutes, kept for 24 hours (288 data points max).
+        private readonly Queue<HealthSnapshot> _healthHistory = new();
+        private readonly object _healthLock = new();
+        private System.Threading.Timer? _healthTimer;
 
         public DashboardDataService(LogBuffer logBuffer, AppConfig config,
             TelemetryStore tsStore, AlarmStore alarmStore,
@@ -58,6 +68,107 @@ namespace Pulswerk.Dashboard
 
             // Initial registration of known keys (Modbus)
             RegisterAllKnownKeys();
+
+            // Start unified health sampling (every 5 minutes, first sample after 10s)
+            _healthTimer = new System.Threading.Timer(_ => SampleHealthSnapshot(), null, 10_000, 5 * 60_000);
+        }
+
+        // ── Unified health snapshot ──────────────────────────────────────────
+
+        /// <summary>
+        /// A single snapshot of all system health metrics at a point in time.
+        /// </summary>
+        public class HealthSnapshot
+        {
+            [JsonPropertyName("t")] public DateTime Time { get; set; }
+            [JsonPropertyName("pushTotal")] public long PushTotal { get; set; }
+            [JsonPropertyName("pullTotal")] public long PullTotal { get; set; }
+            [JsonPropertyName("workingSetMb")] public long WorkingSetMb { get; set; }
+            [JsonPropertyName("gcHeapMb")] public long GcHeapMb { get; set; }
+            [JsonPropertyName("dbSizeMb")] public long DbSizeMb { get; set; }
+            [JsonPropertyName("connections")] public Dictionary<string, ConnSnapshotEntry> Connections { get; set; } = new();
+        }
+
+        public class ConnSnapshotEntry
+        {
+            [JsonPropertyName("online")] public int Online { get; set; }
+            [JsonPropertyName("total")] public int Total { get; set; }
+        }
+
+        private void SampleHealthSnapshot()
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                var process = System.Diagnostics.Process.GetCurrentProcess();
+
+                // Database size on disk
+                long dbSize = 0;
+                try
+                {
+                    string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+                    if (Directory.Exists(dataDir))
+                        dbSize = new DirectoryInfo(dataDir)
+                            .EnumerateFiles("*", SearchOption.AllDirectories)
+                            .Sum(f => f.Length);
+                    string alarmDb = Path.Combine(AppContext.BaseDirectory, "alarms.db");
+                    if (File.Exists(alarmDb))
+                        dbSize += new FileInfo(alarmDb).Length;
+                }
+                catch { /* non-critical */ }
+
+                var snapshot = new HealthSnapshot
+                {
+                    Time = now,
+                    PushTotal = _totalPushUpdates,
+                    PullTotal = _totalPullUpdates,
+                    WorkingSetMb = process.WorkingSet64 / (1024 * 1024),
+                    GcHeapMb = GC.GetTotalMemory(false) / (1024 * 1024),
+                    DbSizeMb = dbSize / (1024 * 1024)
+                };
+
+                foreach (var conn in Config.Connections)
+                {
+                    var devices = Config.Devices.Where(d => d.ConnectionId == conn.Id).ToList();
+                    snapshot.Connections[conn.Id] = new ConnSnapshotEntry
+                    {
+                        Total = devices.Count,
+                        Online = devices.Count(d => !OfflineDevices.Contains(d.Name))
+                    };
+                }
+
+                lock (_healthLock)
+                {
+                    _healthHistory.Enqueue(snapshot);
+                    while (_healthHistory.Count > 288)
+                        _healthHistory.Dequeue();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[Dashboard] Health snapshot failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>Returns the full 24h health history.</summary>
+        public List<HealthSnapshot> GetHealthHistory()
+        {
+            lock (_healthLock)
+            {
+                return _healthHistory.ToList();
+            }
+        }
+
+        /// <summary>Returns the health history for a specific connection.</summary>
+        public List<(DateTime Time, int Online, int Total)> GetConnectionHealth(string connId)
+        {
+            lock (_healthLock)
+            {
+                return _healthHistory
+                    .Where(s => s.Connections.ContainsKey(connId))
+                    .Select(s => (s.Time, s.Connections[connId].Online, s.Connections[connId].Total))
+                    .ToList();
+            }
         }
         private void RegisterAllKnownKeys()
         {
@@ -80,7 +191,7 @@ namespace Pulswerk.Dashboard
         }
 
 
-        public Dictionary<string, (double val, DateTime ts)> UpdateTelemetry(Dictionary<string, object> values)
+        public Dictionary<string, (double val, DateTime ts)> UpdateTelemetry(Dictionary<string, object> values, bool isPush = false)
         {
             if (values == null) return new Dictionary<string, (double val, DateTime ts)>();
 
@@ -106,7 +217,7 @@ namespace Pulswerk.Dashboard
                     }
                 }
             }
-            RecordUpdate(values.Count);
+            RecordUpdate(values.Count, isPush);
             return persistedResults;
         }
 
@@ -118,17 +229,32 @@ namespace Pulswerk.Dashboard
             catch { return false; }
         }
 
-        private void RecordUpdate(int count)
+        private void RecordUpdate(int count, bool isPush)
         {
             lock (_statsLock)
             {
                 _totalUpdates += count;
                 _updateHistory.Enqueue((DateTime.UtcNow, count));
 
+                if (isPush)
+                {
+                    _totalPushUpdates += count;
+                    _pushHistory.Enqueue((DateTime.UtcNow, count));
+                }
+                else
+                {
+                    _totalPullUpdates += count;
+                    _pullHistory.Enqueue((DateTime.UtcNow, count));
+                }
+
                 // Keep only last 60 seconds
                 var cutoff = DateTime.UtcNow.AddSeconds(-60);
                 while (_updateHistory.Count > 0 && _updateHistory.Peek().Time < cutoff)
                     _updateHistory.Dequeue();
+                while (_pushHistory.Count > 0 && _pushHistory.Peek().Time < cutoff)
+                    _pushHistory.Dequeue();
+                while (_pullHistory.Count > 0 && _pullHistory.Peek().Time < cutoff)
+                    _pullHistory.Dequeue();
             }
         }
 
@@ -563,6 +689,8 @@ namespace Pulswerk.Dashboard
                 TotalDataPoints = dbStats.PointCount,
                 UpdatesPerMinute = GetUpdatesPerMinute(),
                 TotalUpdates = _totalUpdates,
+                TotalPushUpdates = _totalPushUpdates,
+                TotalPullUpdates = _totalPullUpdates,
                 DatabaseSizeBytes = dbSizeBytes,
                 WorkingSetMb = workingSetMb,
                 GcHeapMb = gcHeapMb,
@@ -587,6 +715,8 @@ namespace Pulswerk.Dashboard
         [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
         [JsonPropertyName("updatesPerMinute")] public double UpdatesPerMinute { get; set; }
         [JsonPropertyName("totalUpdates")] public long TotalUpdates { get; set; }
+        [JsonPropertyName("totalPushUpdates")] public long TotalPushUpdates { get; set; }
+        [JsonPropertyName("totalPullUpdates")] public long TotalPullUpdates { get; set; }
         [JsonPropertyName("databaseSizeBytes")] public long DatabaseSizeBytes { get; set; }
         [JsonPropertyName("workingSetMb")] public long WorkingSetMb { get; set; }
         [JsonPropertyName("gcHeapMb")] public long GcHeapMb { get; set; }

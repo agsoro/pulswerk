@@ -97,6 +97,7 @@ namespace Pulswerk.Dashboard.Pages
                                     ? "Never"
                                     : lastPolled.ToString("yyyy-MM-dd HH:mm:ss UTC"),
                     DeviceCount = connDevices.Count,
+                    OnlineCount = deviceRows.Count(d => d.Status == "online"),
                     Devices = deviceRows
                 });
             }
@@ -113,6 +114,7 @@ namespace Pulswerk.Dashboard.Pages
         public string Status { get; set; } = "";
         public string LastSeen { get; set; } = "";
         public int DeviceCount { get; set; }
+        public int OnlineCount { get; set; }
         public List<ConnectedDeviceDto> Devices { get; set; } = new();
     }
 

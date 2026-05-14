@@ -308,7 +308,8 @@ namespace Pulswerk.Drivers.BACnet
 
         /// <summary>Returns both telemetry and attributes. Called directly from Program.cs.</summary>
         public virtual BacnetReadResult ReadFull(ConnectionConfig conn, DeviceConfig device,
-            AlarmStore? alarmStore = null, TelemetryStore? tsStore = null)
+            AlarmStore? alarmStore = null, TelemetryStore? tsStore = null,
+            bool isRecovery = false)
         {
             if (device.DeviceId is null)
                 throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId.");
@@ -341,7 +342,7 @@ namespace Pulswerk.Drivers.BACnet
                     Interlocked.Increment(ref _busyCount);
                     Pulswerk.Core.Log.Info($"[BACnet] Discovering objects on {device.Name}…");
                     var all = DiscoverObjects(client, address, device.DeviceId.Value);
-                    var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value, GetExtraDiscoveryProperties());
+                    var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId.Value, GetExtraDiscoveryProperties(), disc.ReadDelayMs);
                     var filtered = resultDict.Objects;
 
                     // Enrich objects with vendor-specific properties (override in subclass)
@@ -381,11 +382,17 @@ namespace Pulswerk.Drivers.BACnet
                     Interlocked.Decrement(ref _busyCount);
 
                     // ── Sync Trend Logs (Historical Backfill) ─────────────────────
-                    if (tsStore != null)
+                    // Only on first startup or after device recovery from offline.
+                    // Periodic rediscovery does not re-sync trend logs.
+                    bool shouldSyncTrends = !state.TrendLogsSynced || isRecovery;
+                    if (tsStore != null && shouldSyncTrends)
                     {
+                        state.TrendLogsSynced = true;
                         Interlocked.Increment(ref _busyCount);
                         var syncClient = client;
                         var syncAddress = address;
+                        Pulswerk.Core.Log.Info($"[BACnet] Trend log sync triggered for {device.Name}" +
+                            (isRecovery ? " (recovery after stale)" : " (initial startup)") + ".");
                         _ = Task.Run(() =>
                         {
                             try
@@ -417,8 +424,17 @@ namespace Pulswerk.Drivers.BACnet
 
                 var allPropIds = telPropIds.Concat(attrPropIds).Distinct().ToArray();
 
+                // Inter-object read delay to avoid overwhelming the controller
+                int readDelayMs = disc.ReadDelayMs;
+                bool isFirstObject = true;
+
                 foreach (var obj in state.CachedObjects)
                 {
+                    // Pace requests: sleep before each read (skip the first to avoid unnecessary delay)
+                    if (!isFirstObject && readDelayMs > 0)
+                        Thread.Sleep(readDelayMs);
+                    isFirstObject = false;
+
                     var values = ReadObjectProperties(client, address, obj.ObjectId, allPropIds);
 
                     foreach (var propId in telPropIds)
@@ -752,7 +768,8 @@ namespace Pulswerk.Drivers.BACnet
             BacnetClient client, BacnetAddress address,
             List<BacnetObjectId> candidates, BacnetFilterConfig filter,
             string techDeviceId, uint deviceInstanceId,
-            List<BacnetPropertyIds>? extraProps = null)
+            List<BacnetPropertyIds>? extraProps = null,
+            int readDelayMs = 0)
         {
             var extraResults = new Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>>();
             // Build type allowlist (null = accept all)
@@ -790,6 +807,10 @@ namespace Pulswerk.Drivers.BACnet
             for (int i = 0; i < candidatesList.Count; i += 50)
             {
                 var batch = candidatesList.Skip(i).Take(50).ToList();
+
+                // Pace between batches (skip first batch)
+                if (i > 0 && readDelayMs > 0)
+                    Thread.Sleep(readDelayMs);
 
                 // ── Attempt batch RPM (50 objects at a time) ──────────────────
                 if (!rpmSegFault)
@@ -830,6 +851,10 @@ namespace Pulswerk.Drivers.BACnet
                 // ── Fallback: single-object RPM or individual reads ───────────
                 foreach (var oid in batch)
                 {
+                    // Pace single-object reads to avoid overwhelming the controller
+                    if (readDelayMs > 0)
+                        Thread.Sleep(readDelayMs);
+
                     try
                     {
                         // Try RPM for a single object first (most efficient fallback)
@@ -1810,6 +1835,11 @@ namespace Pulswerk.Drivers.BACnet
             public Func<Telemetry, Task>? PublishTelemetry { get; set; }
             public Func<Attributes, Task>? PublishAttributes { get; set; }
 
+            // ── Trend Log sync ───────────────────────────────────────────────
+            /// <summary>True after the initial trend log backfill has been performed.
+            /// Only reset on device recovery from stale/offline.</summary>
+            public bool TrendLogsSynced { get; set; }
+
             // Internal tracking for busy state
             public int DiscoveryTaskFinished { get; set; }
             public int SyncTaskFinished { get; set; } = 1; // Default to finished if no sync started
@@ -1977,7 +2007,8 @@ namespace Pulswerk.Drivers.BACnet
         {
             Pulswerk.Core.Log.Info($"[BACnet] Discovering objects on {device.Name}…");
             var all = DiscoverObjects(client, address, device.DeviceId!.Value);
-            var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId!.Value, GetExtraDiscoveryProperties());
+            var disc = cfg.Discovery ?? BacnetDiscoveryConfig.Default;
+            var resultDict = ApplyFilter(client, address, all, cfg.Filter ?? BacnetFilterConfig.Default, device.Id, device.DeviceId!.Value, GetExtraDiscoveryProperties(), disc.ReadDelayMs);
             var filtered = resultDict.Objects;
 
             // Enrich objects with vendor-specific properties (override in subclass)

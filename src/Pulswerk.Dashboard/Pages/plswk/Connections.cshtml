@@ -70,6 +70,19 @@
                     </div>
                 </div>
 
+                <!-- ── Health chart ── -->
+                <div class="px-6 py-5 border-b border-slate-700/50 shrink-0">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2 text-sm font-semibold text-slate-300">
+                            <i class="fas fa-heartbeat text-emerald-500 text-xs"></i>
+                            Device Availability
+                        </div>
+                        <div class="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest bg-white/5 px-2 py-0.5 rounded">24h · 5 min intervals</div>
+                    </div>
+                    <div class="h-[110px] health-chart" id="health-chart-@conn.Id"
+                         data-conn-id="@conn.Id" data-total="@conn.DeviceCount"></div>
+                </div>
+
                 <div class="flex-1 overflow-y-auto px-6 py-4 device-table-wrap">
                     @if (conn.Devices.Count == 0)
                     {
@@ -134,36 +147,147 @@
 @section Scripts {
 <script>
     let activeId = null;
+    const healthCharts = {};
 
     function selectConnection(id) {
-        // deselect old card + hide old panel
         if (activeId) {
             document.querySelector(`.conn-card[data-id="${activeId}"]`)?.classList.remove('active');
             const old = document.getElementById('panel-' + activeId);
             if (old) old.style.display = 'none';
         }
 
-        // select new card + show its panel
         activeId = id;
         document.querySelector(`.conn-card[data-id="${id}"]`)?.classList.add('active');
         document.getElementById('detailEmpty').style.display = 'none';
         const panel = document.getElementById('panel-' + id);
         if (panel) panel.style.display = 'flex';
 
-        // persist selection in URL without reload
         const url = new URL(window.location);
         url.searchParams.set('conn', id);
         history.replaceState({}, '', url);
+
+        loadHealthChart(id);
     }
 
-    // restore selection from URL on load
+    async function loadHealthChart(connId) {
+        const el = document.getElementById('health-chart-' + connId);
+        if (!el) return;
+
+        const total = parseInt(el.dataset.total) || 1;
+
+        try {
+            const res = await fetch(`/plswk/api/connection-health/${encodeURIComponent(connId)}`);
+            const data = await res.json();
+
+            const onlineSeries = data.map(d => ({
+                x: new Date(d.t).getTime(),
+                y: d.online
+            }));
+
+            const offlineSeries = data.map(d => ({
+                x: new Date(d.t).getTime(),
+                y: d.total - d.online
+            }));
+
+            if (healthCharts[connId]) {
+                healthCharts[connId].destroy();
+            }
+
+            const options = {
+                series: [
+                    { name: 'Online', data: onlineSeries },
+                    { name: 'Offline', data: offlineSeries }
+                ],
+                chart: {
+                    type: 'area',
+                    height: '100%',
+                    stacked: true,
+                    animations: { enabled: true, easing: 'easeinout', speed: 400 },
+                    toolbar: { show: false },
+                    zoom: { enabled: false }
+                },
+                colors: ['#10b981', '#ef4444'],
+                fill: {
+                    type: 'gradient',
+                    gradient: {
+                        shadeIntensity: 1,
+                        opacityFrom: 0.5,
+                        opacityTo: 0.08,
+                        stops: [10, 100]
+                    }
+                },
+                stroke: { curve: 'stepline', width: 2 },
+                legend: {
+                    show: true,
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#94a3b8' },
+                    markers: { width: 8, height: 8, radius: 4 },
+                    fontSize: '11px',
+                    fontFamily: 'inherit'
+                },
+                grid: {
+                    borderColor: 'rgba(255,255,255,0.06)',
+                    xaxis: { lines: { show: false } },
+                    yaxis: { lines: { show: true } },
+                    padding: { bottom: 0, left: 6, right: 6, top: 0 }
+                },
+                xaxis: {
+                    type: 'datetime',
+                    labels: {
+                        style: { colors: '#64748b', fontSize: '10px' },
+                        datetimeUTC: false,
+                        datetimeFormatter: { hour: 'HH:mm', day: 'dd MMM' }
+                    },
+                    axisBorder: { show: true, color: 'rgba(255,255,255,0.08)' },
+                    axisTicks: { show: false }
+                },
+                yaxis: {
+                    min: 0,
+                    max: total,
+                    forceNiceScale: false,
+                    tickAmount: Math.min(total, 5),
+                    labels: {
+                        style: { colors: '#64748b', fontSize: '10px' },
+                        formatter: (v) => Math.round(v).toString()
+                    },
+                    title: { text: 'devices', style: { color: '#475569', fontSize: '11px' } }
+                },
+                dataLabels: { enabled: false },
+                tooltip: {
+                    theme: 'dark',
+                    shared: true,
+                    intersect: false,
+                    x: { format: 'dd MMM HH:mm' },
+                    y: { formatter: (val) => val + ' device' + (val !== 1 ? 's' : '') }
+                },
+                noData: {
+                    text: 'Collecting data\u2026 (first sample in ~5 min)',
+                    align: 'center',
+                    style: { color: '#475569', fontSize: '13px' }
+                }
+            };
+
+            const chart = new ApexCharts(el, options);
+            chart.render();
+            healthCharts[connId] = chart;
+        } catch (e) {
+            console.error('Failed to load health chart:', e);
+        }
+    }
+
+    // Auto-refresh the active chart every 5 minutes
+    setInterval(() => {
+        if (activeId) loadHealthChart(activeId);
+    }, 5 * 60_000);
+
+    // Restore selection from URL on load
     window.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
         const conn = params.get('conn');
         if (conn && document.querySelector(`.conn-card[data-id="${conn}"]`)) {
             selectConnection(conn);
         } else {
-            // auto-select first connection if only one exists
             const first = document.querySelector('.conn-card');
             if (first && document.querySelectorAll('.conn-card').length === 1) {
                 selectConnection(first.dataset.id);

@@ -11,6 +11,7 @@ const PRESETS = [
     {label:'Last 7 days',ms:604800000},{label:'Last 30 days',ms:2592000000}
 ];
 let grid=null, dashboard=null, isEditing=false, charts={}, pollTimer=null, allKeys=[], twMode='realtime', twRealtimeMs=3600000, twHistFrom=null, twHistTo=null;
+const pendingRenders = new Set();  // guard against overlapping async renders
 const token=()=>document.querySelector('input[name="__RequestVerificationToken"]')?.value||'';
 const api=async(handler,opts)=>{const r=await fetch(`/plswk/Dashboards?handler=${handler}`,opts);return r.json();};
 
@@ -155,30 +156,52 @@ function renderWidgetContent(w){
 async function renderTimeseries(w,body,cfg){
     const keys=cfg.keys||[];
     if(!keys.length){body.innerHTML='<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>';return;}
-    
+
+    // Guard against overlapping async renders for the same widget
+    if(pendingRenders.has(w.id)) return;
+    pendingRenders.add(w.id);
+
     const {startTs,endTs}=getTimeRange();
     let data;
-    try{data=await api(`WidgetData&keys=${keys.join(',')}&startTs=${startTs}&endTs=${endTs}`);}catch(e){return;}
+    try{data=await api(`WidgetData&keys=${keys.join(',')}&startTs=${startTs}&endTs=${endTs}`);}catch(e){pendingRenders.delete(w.id);return;}
+    pendingRenders.delete(w.id);
 
     const many = keys.length > 5;  // threshold for "dense" chart mode
     const series=[], colors=[];
     keys.forEach((key,i)=>{
         const color=COLORS[i%COLORS.length];
         const raw=data?.[key]||[];
-        const points=raw.map(p=>({x:new Date(p.ts).getTime(),y:parseFloat(parseFloat(p.value).toFixed(2))})).filter(p=>!isNaN(p.y));
+        const points=raw.map(p=>({
+            x: typeof p.ts === 'number' ? p.ts : new Date(p.ts).getTime(),
+            y: p.value != null ? parseFloat(parseFloat(p.value).toFixed(2)) : NaN
+        })).filter(p=>!isNaN(p.y));
         
         const meta=allKeys.find(k=>k.key===key);
         series.push({name:meta?.fullName||friendlyName(key),data:points});
         colors.push(color);
     });
 
+    // Update existing chart if it still has a valid DOM element
     const existingChart = charts[w.id];
     if(existingChart){
-        existingChart.updateSeries(series);
-        return;
+        try {
+            // Verify the chart's container is still in the DOM
+            const chartEl = document.getElementById('chart_'+w.id);
+            if(chartEl && chartEl.querySelector('.apexcharts-canvas')) {
+                existingChart.updateSeries(series);
+                return;
+            }
+            // Chart container was destroyed — clean up and recreate
+            existingChart.destroy();
+        } catch(e) { /* destroyed chart, ignore */ }
+        delete charts[w.id];
     }
 
-    body.innerHTML='<div style="flex:1;min-height:0;position:relative"><div id="chart_'+w.id+'" style="height:100%"></div></div>';
+    // Calculate the actual available height in pixels for reliable rendering
+    const bodyRect = body.getBoundingClientRect();
+    const chartHeight = Math.max(bodyRect.height - 10, 150);  // fallback min 150px
+
+    body.innerHTML='<div style="flex:1;min-height:0;position:relative"><div id="chart_'+w.id+'" style="width:100%;height:'+chartHeight+'px"></div></div>';
 
     // ── Chart config adapts to series count ─────────────────────
     const useArea = !many && cfg.chartType !== 'bar';
@@ -186,7 +209,7 @@ async function renderTimeseries(w,body,cfg){
         series: series,
         chart: {
             type: useArea ? 'area' : (cfg.chartType==='bar'?'bar':'line'),
-            height: '100%',
+            height: chartHeight,
             fontFamily: 'Inter, sans-serif',
             animations: { enabled: !many, easing: 'easeinout', speed: 400 },
             toolbar: { show: false },
@@ -236,12 +259,16 @@ async function renderTimeseries(w,body,cfg){
         }
     };
 
-    const chart = new ApexCharts(document.getElementById('chart_'+w.id), options);
+    const chartEl = document.getElementById('chart_'+w.id);
+    if(!chartEl) return;  // safety: body may have been replaced by another widget
+    const chart = new ApexCharts(chartEl, options);
+    charts[w.id] = chart;  // register BEFORE render to prevent concurrent creation
     chart.render().then(() => {
-        // Force a resize event after rendering to ensure layout is correct
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+        setTimeout(() => chart.windowResize?.(), 200);
+    }).catch(e => {
+        console.error('Chart render failed for', w.id, e);
+        delete charts[w.id];
     });
-    charts[w.id] = chart;
 }
 
 async function renderLatestValues(w,body,cfg){
@@ -480,7 +507,7 @@ function removeWidget(wid){
 }
 
 // ── POLLING ────────────────────────────────────────────────────
-function startPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(refreshAllWidgets,3000);}
+function startPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(refreshAllWidgets,10000);}
 function refreshAllWidgets(){
     if(!dashboard?.widgets)return;
     dashboard.widgets.forEach(w=>{
