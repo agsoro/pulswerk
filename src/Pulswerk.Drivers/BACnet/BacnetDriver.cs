@@ -1813,17 +1813,17 @@ namespace Pulswerk.Drivers.BACnet
             public BacnetAddress? CovAddress { get; set; }
 
             /// <summary>Latest value received via COV notification per object.</summary>
-            public Dictionary<BacnetObjectId, CovSnapshot>
+            public System.Collections.Concurrent.ConcurrentDictionary<BacnetObjectId, CovSnapshot>
                                           CovValues
             { get; set; } = new();
 
             /// <summary>When each COV subscription expires (we renew 30 s before).</summary>
-            public Dictionary<BacnetObjectId, DateTime>
+            public System.Collections.Concurrent.ConcurrentDictionary<BacnetObjectId, DateTime>
                                           CovSubExpiry
             { get; set; } = new();
 
             /// <summary>Objects that returned a NAK to SubscribeCOV – polled the old way.</summary>
-            public HashSet<BacnetObjectId> CovFallbackPoll { get; set; } = new();
+            public System.Collections.Concurrent.ConcurrentDictionary<BacnetObjectId, byte> CovFallbackPoll { get; set; } = new();
 
             /// <summary>When fallback-polled objects were last read (throttled to device poll interval).</summary>
             public DateTime LastFallbackPoll { get; set; } = DateTime.MinValue;
@@ -2078,7 +2078,7 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         state.CovSubExpiry[obj.ObjectId] =
                             now.AddSeconds(covCfg.LifetimeSeconds);
-                        state.CovFallbackPoll.Remove(obj.ObjectId);
+                        state.CovFallbackPoll.TryRemove(obj.ObjectId, out _);
 
                         // Seed value cache on first subscription
                         if (!state.CovValues.ContainsKey(obj.ObjectId))
@@ -2102,13 +2102,13 @@ namespace Pulswerk.Drivers.BACnet
                     else
                     {
                         Pulswerk.Core.Log.Debug($"[COV] {obj.ObjectName}: fallback-poll (NAK)");
-                        state.CovFallbackPoll.Add(obj.ObjectId);
+                        state.CovFallbackPoll.TryAdd(obj.ObjectId, 0);
                     }
                 }
                 catch (Exception ex)
                 {
                     Pulswerk.Core.Log.Debug($"[COV] {obj.ObjectName}: fallback-poll ({ex.Message})");
-                    state.CovFallbackPoll.Add(obj.ObjectId);
+                    state.CovFallbackPoll.TryAdd(obj.ObjectId, 0);
                 }
             }
         }
@@ -2170,7 +2170,7 @@ namespace Pulswerk.Drivers.BACnet
             {
                 state.LastFallbackPoll = DateTime.UtcNow;
                 var fallback = state.CachedObjects
-                    .Where(o => state.CovFallbackPoll.Contains(o.ObjectId));
+                    .Where(o => state.CovFallbackPoll.ContainsKey(o.ObjectId));
                 foreach (var obj in fallback)
                 {
                     var vals = ReadObjectProperties(
@@ -2257,7 +2257,7 @@ namespace Pulswerk.Drivers.BACnet
                 {
                     // Cancel all active subscriptions before closing the socket
                     foreach (var obj in s.CachedObjects
-                        .Where(o => !s.CovFallbackPoll.Contains(o.ObjectId)))
+                        .Where(o => !s.CovFallbackPoll.ContainsKey(o.ObjectId)))
                     {
                         try
                         {

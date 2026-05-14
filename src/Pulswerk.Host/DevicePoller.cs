@@ -11,6 +11,7 @@ using Pulswerk.Dashboard;
 using Pulswerk.Drivers;
 using Pulswerk.Drivers.BACnet;
 using Pulswerk.Storage;
+using System.Collections.Concurrent;
 
 namespace Pulswerk.Host
 {
@@ -25,8 +26,8 @@ namespace Pulswerk.Host
     {
         readonly Dictionary<string, IDeviceDriver> _drivers;
         readonly DashboardDataService? _dataService;
-        readonly HashSet<string> _offlineDevices;
-        readonly Dictionary<string, DateTime> _lastPolledAt;
+        readonly ConcurrentDictionary<string, byte> _offlineDevices;
+        readonly ConcurrentDictionary<string, DateTime> _lastPolledAt;
 
         readonly Dictionary<string, int> _failCounts = new();
         readonly Dictionary<string, DateTime> _lastAttempt = new();
@@ -36,8 +37,8 @@ namespace Pulswerk.Host
         public DevicePoller(
             Dictionary<string, IDeviceDriver> drivers,
             DashboardDataService? dataService,
-            HashSet<string> offlineDevices,
-            Dictionary<string, DateTime> lastPolledAt)
+            ConcurrentDictionary<string, byte> offlineDevices,
+            ConcurrentDictionary<string, DateTime> lastPolledAt)
         {
             _drivers = drivers;
             _dataService = dataService;
@@ -74,7 +75,7 @@ namespace Pulswerk.Host
 
                 // Check if device is recovering from offline — used to trigger
                 // trend log backfill for any missed history during the outage.
-                bool wasOffline = _offlineDevices.Contains(device.Name);
+                bool wasOffline = _offlineDevices.ContainsKey(device.Name);
 
                 if (reader is BacnetDriver br)
                 {
@@ -98,7 +99,7 @@ namespace Pulswerk.Host
                 _lastPolledAt[device.Name] = DateTime.UtcNow;
                 _failCounts[device.Name] = 0;
 
-                if (_offlineDevices.Remove(device.Name))
+                if (_offlineDevices.TryRemove(device.Name, out _))
                 {
                     alarmStore.ClearByOriginAndType(device.Name, "Communication Loss");
                     Log.Info(
@@ -224,7 +225,7 @@ namespace Pulswerk.Host
                     $"[{device.DeviceType,-10}] {device.Name,-38} " +
                     $"offline ({count} consecutive failures)");
 
-                if (_offlineDevices.Add(device.Name))
+                if (_offlineDevices.TryAdd(device.Name, 0))
                 {
                     alarmStore.CreateOrUpdate(
                         device.Name, "DEVICE",

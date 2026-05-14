@@ -1,30 +1,47 @@
-/**
- * Modals logic for History, Edit, and Properties
- */
-
 let currentHistoryKey = null;
 let currentEditKey = null;
 let currentPropsKey = null;
 let historyChart = null;
 let historyRefreshTimer = null;
+let historyTw = null; // reusable TW selector instance
+
+// Initialize TW module for history modal (once)
+function ensureHistoryTw() {
+    if (historyTw) return;
+    const container = document.getElementById('historyTwContainer');
+    if (!container) return;
+    historyTw = createTimeWindowSelector(container, {
+        mode: 'realtime',
+        realtimeMs: 3600000,
+        onChange: () => reloadHistory()
+    });
+}
 
 // --- History Modal ---
-async function openHistory(key, name, units, pathEnc) {
+async function openHistory(key) {
     currentHistoryKey = key;
-    const path = JSON.parse(decodeURIComponent(pathEnc || '[]'));
+    ensureHistoryTw();
+    await ensureKeysMeta();
+    const meta = resolveKeyMeta(key);
+    const path = meta.parentPath || [];
     
-    document.getElementById('chartTitle').textContent = name;
-    document.getElementById('chartUnit').textContent = units;
+    document.getElementById('chartTitle').textContent = meta.name || key;
+    document.getElementById('chartUnit').textContent = meta.units || '';
     document.getElementById('chartMeta').textContent = key;
     renderModalBreadcrumb('chartPath', path);
     
     document.getElementById('historyModal').style.display = 'flex';
     
-    // Try to pre-fill live value from any element on the page matching this key
-    const valEl = document.querySelector(`.point-value[data-key="${key}"]`)
-              || document.querySelector(`.sv-card-val[data-key="${key}"]`)
-              || document.querySelector(`[data-key="${key}"]`);
-    document.getElementById('chartLiveValue').textContent = valEl ? valEl.textContent.trim() : '---';
+    // Fetch live value from API
+    document.getElementById('chartLiveValue').textContent = '---';
+    try {
+        const data = await fetchLatestValues(key);
+        const raw = data?.[key];
+        if (raw != null) {
+            document.getElementById('chartLiveValue').textContent = 
+                typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
+        }
+    } catch(e) { /* non-critical */ }
     
     await reloadHistory();
     startHistoryRefresh();
@@ -49,7 +66,8 @@ function closeHistory() {
 }
 
 async function reloadHistory() {
-    const days = document.getElementById('daysSelector').value;
+    const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now() };
+    const days = (range.endTs - range.startTs) / 86400000;
     const loader = document.getElementById('chartLoading');
     loader.classList.remove('hidden');
     loader.classList.add('flex');
@@ -135,8 +153,8 @@ function stopHistoryRefresh() {
 async function refreshHistoryData() {
     if (!currentHistoryKey) return;
     if (document.getElementById('historyModal')?.style.display !== 'flex') return;
-
-    const days = document.getElementById('daysSelector').value;
+    const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now() };
+    const days = (range.endTs - range.startTs) / 86400000;
 
     try {
         // Fetch updated history + current value in parallel
@@ -166,14 +184,17 @@ async function refreshHistoryData() {
 }
 
 // --- Edit Modal ---
-function openEdit(key, name, fullName, units, pathEnc, type, enumValuesEnc) {
+async function openEdit(key) {
     currentEditKey = key;
-    const path = JSON.parse(decodeURIComponent(pathEnc || '[]'));
-    const enums = JSON.parse(decodeURIComponent(enumValuesEnc || 'null'));
+    await ensureKeysMeta();
+    const meta = resolveKeyMeta(key);
+    const path = meta.parentPath || [];
+    const enums = meta.enumValues || null;
+    const type = meta.type || '';
     
-    document.getElementById('editTitle').textContent = name;
-    document.getElementById('editMeta').textContent = fullName;
-    document.getElementById('editUnitLabel').textContent = units;
+    document.getElementById('editTitle').textContent = meta.name || key;
+    document.getElementById('editMeta').textContent = meta.fullName || key;
+    document.getElementById('editUnitLabel').textContent = meta.units || '';
     renderModalBreadcrumb('editPath', path);
     
     // Hide all groups
@@ -184,10 +205,15 @@ function openEdit(key, name, fullName, units, pathEnc, type, enumValuesEnc) {
     status.textContent = '';
     status.className = 'status-msg';
     
-    const valEl = document.querySelector(`.point-value[data-key="${key}"]`)
-              || document.querySelector(`.sv-card-val[data-key="${key}"]`)
-              || document.querySelector(`[data-key="${key}"]`);
-    const currentVal = valEl ? valEl.textContent.trim() : '---';
+    // Fetch current value from API
+    let currentVal = '---';
+    try {
+        const data = await fetchLatestValues(key);
+        const raw = data?.[key];
+        if (raw != null) {
+            currentVal = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
+        }
+    } catch(e) { /* use fallback */ }
     document.getElementById('currentVal').textContent = currentVal;
 
     if (enums && Object.keys(enums).length > 0) {
@@ -312,11 +338,13 @@ async function submitEdit(e) {
 }
 
 // --- Properties Modal ---
-async function openProperties(key, name, pathEnc) {
+async function openProperties(key) {
     currentPropsKey = key;
-    const path = JSON.parse(decodeURIComponent(pathEnc || '[]'));
+    await ensureKeysMeta();
+    const meta = resolveKeyMeta(key);
+    const path = meta.parentPath || [];
     
-    document.getElementById('propsTitle').textContent = name;
+    document.getElementById('propsTitle').textContent = meta.name || key;
     document.getElementById('propsMeta').textContent = key;
     renderModalBreadcrumb('propsPath', path);
     
@@ -393,11 +421,14 @@ let currentScheduleKey = null;
 let scheduleValueType = 'real';    // 'boolean' | 'enumerated' | 'real'
 let scheduleStates = null;         // ['Off','On'] or ['State1','State2',...]
 
-async function openScheduleView(key, name, pathEnc) {
+async function openScheduleView(key) {
     const modal = document.getElementById('scheduleModal');
     const grid = document.getElementById('scheduleGrid');
     const loading = document.getElementById('scheduleLoading');
     const view = document.getElementById('scheduleView');
+    
+    await ensureKeysMeta();
+    const meta = resolveKeyMeta(key);
     
     currentScheduleKey = key;
     isEditingSchedule = false;
@@ -405,8 +436,7 @@ async function openScheduleView(key, name, pathEnc) {
     scheduleStates = null;
     toggleScheduleEdit(false);
 
-    let path = [];
-    try { path = JSON.parse(decodeURIComponent(pathEnc)); } catch(e) {}
+    const path = meta.parentPath || [];
     document.getElementById('schedulePath').textContent = path.map(p => p.name).join(' › ');
     document.getElementById('scheduleMeta').textContent = key;
     

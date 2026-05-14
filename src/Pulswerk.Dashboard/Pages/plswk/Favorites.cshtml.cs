@@ -28,6 +28,14 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(trees);
         }
 
+        public JsonResult OnGetLatestValues(string keys)
+        {
+            var keyList = keys?.Split(',', System.StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>();
+            return new JsonResult(_dataService.GetCurrentValues(keyList));
+        }
+
+        public JsonResult OnGetAvailableKeys() => new JsonResult(_dataService.GetAvailableKeys());
+
         public async Task<JsonResult> OnGetHistory(string key, string days)
         {
             if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))

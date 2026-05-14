@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -23,8 +24,8 @@ namespace Pulswerk.Dashboard
         public AppConfig Config { get; }
         public TelemetryStore TsStore { get; }
         public AlarmStore AlarmStore { get; }
-        public HashSet<string> OfflineDevices { get; }
-        public Dictionary<string, DateTime> LastPolledAtMap { get; }
+        public ConcurrentDictionary<string, byte> OfflineDevices { get; }
+        public ConcurrentDictionary<string, DateTime> LastPolledAtMap { get; }
         public Dictionary<string, object> LatestValues { get; } = new();
         public Dictionary<string, DateTime> LatestTimestamps { get; } = new();
         public Dictionary<string, IDeviceDriver> Drivers { get; }
@@ -48,7 +49,7 @@ namespace Pulswerk.Dashboard
 
         public DashboardDataService(LogBuffer logBuffer, AppConfig config,
             TelemetryStore tsStore, AlarmStore alarmStore,
-            HashSet<string> offlineDevices, Dictionary<string, DateTime> lastPolledAtMap,
+            ConcurrentDictionary<string, byte> offlineDevices, ConcurrentDictionary<string, DateTime> lastPolledAtMap,
             Dictionary<string, IDeviceDriver> drivers)
         {
             LogBuffer = logBuffer;
@@ -160,7 +161,7 @@ namespace Pulswerk.Dashboard
                     {
                         Total = devices.Count,
                         Online = devices.Count(d =>
-                            !OfflineDevices.Contains(d.Name) &&
+                            !OfflineDevices.ContainsKey(d.Name) &&
                             LastPolledAtMap.TryGetValue(d.Name, out var lp) && lp != default &&
                             (now - lp).TotalMinutes <= 5)
                     };
@@ -645,7 +646,7 @@ namespace Pulswerk.Dashboard
 
                 foreach (var d in connDevices)
                 {
-                    if (OfflineDevices.Contains(d.Name))
+                    if (OfflineDevices.ContainsKey(d.Name))
                     {
                         connOffline++;
                         continue;

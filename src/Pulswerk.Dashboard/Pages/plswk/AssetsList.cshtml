@@ -188,11 +188,6 @@
         }
 
         function renderRow(p, index) {
-            const safeName = (p.name || 'Unnamed').replace(/'/g, "\\'");
-            const safeFullName = (p.fullName || '').replace(/'/g, "\\'");
-            const safeUnits = (p.units || '').replace(/'/g, "\\'");
-            const safePathEnc = encodeURIComponent(JSON.stringify(p.parentPath || []));
-            
             const isSchedule = p.type === 'OBJECT_SCHEDULE';
             
             const valueDisplay = isSchedule 
@@ -231,21 +226,21 @@
                     <td class="px-6 py-3" style="width:10%">
                         <div class="flex justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-all">
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
-                                    title="Trend" onclick="openHistory('${p.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')">
+                                    title="Trend" onclick="openHistory('${p.key}')">
                                 <i class="fas fa-chart-area text-xs"></i>
                             </button>
                             ${p.type === 'OBJECT_SCHEDULE' ? `
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
-                                    title="Schedule View" onclick="openScheduleView('${p.key}', '${safeName}', '${safePathEnc}')">
+                                    title="Schedule View" onclick="openScheduleView('${p.key}')">
                                 <i class="fas fa-calendar-alt text-xs"></i>
                             </button>` : ''}
                             ${p.isWritable && p.type !== 'OBJECT_SCHEDULE' ? `
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-sky-400/20 text-slate-400 hover:text-sky-400 border border-white/5 transition-all" 
-                                    title="Edit Value" onclick="openEdit('${p.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${p.type}', '${encodeURIComponent(JSON.stringify(p.enumValues || null))}')">
+                                    title="Edit Value" onclick="openEdit('${p.key}')">
                                 <i class="fas fa-pen text-xs"></i>
                             </button>` : ''}
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800/40 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 transition-all" 
-                                    title="Properties" onclick="openProperties('${p.key}', '${safeName}', '${safePathEnc}')">
+                                    title="Properties" onclick="openProperties('${p.key}')">
                                 <i class="fas fa-cog text-xs"></i>
                             </button>
                         </div>

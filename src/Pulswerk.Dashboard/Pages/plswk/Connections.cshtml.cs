@@ -27,7 +27,7 @@ namespace Pulswerk.Dashboard.Pages
                     .ToList();
 
                 bool isOffline = connDevices.Count > 0 &&
-                                 connDevices.All(d => _data.OfflineDevices.Contains(d.Name));
+                                 connDevices.All(d => _data.OfflineDevices.ContainsKey(d.Name));
 
                 var lastPolled = connDevices
                     .Select(d => _data.LastPolledAtMap.TryGetValue(d.Name, out var t) ? t : default)
@@ -44,7 +44,7 @@ namespace Pulswerk.Dashboard.Pages
 
                 var deviceRows = connDevices.Select(d =>
                 {
-                    bool offline = _data.OfflineDevices.Contains(d.Name);
+                    bool offline = _data.OfflineDevices.ContainsKey(d.Name);
                     _data.LastPolledAtMap.TryGetValue(d.Name, out var polledAt);
 
                     // If the device is not explicitly offline but hasn't delivered

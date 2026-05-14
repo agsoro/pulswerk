@@ -20,15 +20,7 @@
         </div>
         
         <div class="chart-controls">
-            <select class="select-days" id="daysSelector" onchange="reloadHistory()">
-                <option value="0.04167" selected data-i18n="last_hour">Last Hour</option>
-                <option value="0.16667" data-i18n="last_4h">Last 4 Hours</option>
-                <option value="1" data-i18n="last_24h">Last 24 Hours</option>
-                <option value="7" data-i18n="last_7d">Last 7 Days</option>
-                <option value="14" data-i18n="last_14d">Last 14 Days</option>
-                <option value="30" data-i18n="last_30d">Last 30 Days</option>
-                <option value="365" data-i18n="last_year">Last Year</option>
-            </select>
+            <div id="historyTwContainer"></div>
             <div id="chartLoading" class="hidden items-center gap-2 text-sky-400">
                 <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading">Loading...</span>
             </div>

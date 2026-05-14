@@ -96,8 +96,13 @@
             </li>
         </ul>
         <footer
-            class="mt-auto pt-6 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full text-center overflow-hidden"
+            class="mt-auto pt-4 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full flex flex-col items-center gap-3 overflow-hidden"
             data-testid="sidebar-footer">
+            <div class="lang-switcher" data-testid="lang-switcher">
+                <button onclick="setLanguage('en')" id="lang-en" class="lang-btn">EN</button>
+                <div class="lang-sep"></div>
+                <button onclick="setLanguage('de')" id="lang-de" class="lang-btn">DE</button>
+            </div>
             <span
                 class="sidebar-version opacity-0 transition-opacity duration-200">v@(System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3)
                                                                                                                 ?? "2.0.0")</span>
@@ -105,22 +110,8 @@
         </aside>
 
         <main class="flex-1 ml-[72px] px-6 py-4 w-[calc(100%-72px)] transition-[margin-left] duration-300">
-            <header class="flex justify-between items-center mb-4" data-testid="page-header">
+            <header id="pageHeader" class="flex justify-between items-center mb-4" data-testid="page-header">
                 <h1 class="text-xl font-bold tracking-tight" data-testid="page-title">@ViewData["Title"]</h1>
-                <div class="flex items-center gap-6">
-                    <div
-                        class="flex items-center gap-1 bg-white/5 p-1 rounded-lg border border-white/10 text-[0.65rem] font-bold uppercase tracking-wider">
-                        <button onclick="setLanguage('en')" id="lang-en"
-                                class="px-2 py-1 rounded transition-colors duration-200 hover:text-white">EN</button>
-                        <div class="w-px h-3 bg-white/10"></div>
-                        <button onclick="setLanguage('de')" id="lang-de"
-                                class="px-2 py-1 rounded transition-colors duration-200 hover:text-white">DE</button>
-                    </div>
-                    <div id="connection-status" class="flex items-center gap-2 text-sm text-slate-400">
-                        <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-                        <span data-i18n="status_connected">Connected to</span> @Environment.MachineName
-                    </div>
-                </div>
             </header>
 
             @RenderBody()
@@ -131,6 +122,8 @@
         <script src="/plswk/lib/apexcharts.js"></script>
         <script src="/plswk/js/i18n.js"></script>
         <script src="/plswk/js/app-utils.js"></script>
+        <script src="/plswk/js/timewindow.js"></script>
+        <script src="/plswk/js/base.js"></script>
         <script src="/plswk/js/modals.js"></script>
         <script>
             initI18n('@(DashboardData.Config.Monitoring?.Language ?? "en")');

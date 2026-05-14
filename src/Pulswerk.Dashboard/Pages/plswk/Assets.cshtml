@@ -250,11 +250,6 @@
                 const icon = getPointIcon(point.type || '');
                 let displayName = point.name || 'Unnamed';
 
-                const safeName = displayName.replace(/'/g, "\\'");
-                const safeFullName = (point.fullName || '').replace(/'/g, "\\'");
-                const safeUnits = (point.units || '').replace(/'/g, "\\'");
-                const safePathEnc = encodeURIComponent(JSON.stringify(point.parentPath || []));
-                
                 const isSchedule = point.type === 'OBJECT_SCHEDULE';
                 const valueDisplay = isSchedule 
                     ? `<span class="text-sky-400/50 text-[0.65rem] font-black tracking-widest uppercase"><i class="fas fa-clock mr-1 opacity-70"></i>Schedule</span>`
@@ -272,10 +267,10 @@
                     </div>
                     <div class="flex gap-2">
                         <button class="btn-icon star-btn" data-key="${point.key}" title="Favorite" onclick="toggleFavorite('${point.key}', this)"><i class="far fa-star"></i></button>
-                        <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')"><i class="fas fa-chart-area"></i></button>
-                        ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Schedule View" data-testid="schedule-btn" onclick="openScheduleView('${point.key}', '${safeName}', '${safePathEnc}')"><i class="fas fa-calendar-check"></i></button>` : ''}
-                        ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${point.type}', '${encodeURIComponent(JSON.stringify(point.enumValues || null))}')"><i class="fas fa-pen"></i></button>` : ''}
-                        <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}', '${safeName}', '${safePathEnc}')"><i class="fas fa-cog"></i></button>
+                        <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}')"><i class="fas fa-chart-area"></i></button>
+                        ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Schedule View" data-testid="schedule-btn" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
+                        ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
+                        <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}')"><i class="fas fa-cog"></i></button>
                     </div>
                 `;
                 updateStarState(point.key, item.querySelector('.star-btn'));

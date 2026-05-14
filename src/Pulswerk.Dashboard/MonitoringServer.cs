@@ -130,7 +130,7 @@ namespace Pulswerk.Dashboard
             {
                 var devices = _data.Config.Devices.Select(d =>
                 {
-                    bool isOffline = _data.OfflineDevices.Contains(d.Name);
+                    bool isOffline = _data.OfflineDevices.ContainsKey(d.Name);
                     _data.LastPolledAtMap.TryGetValue(d.Name, out var lastPolled);
                     var connCfg = _data.Config.Connections.FirstOrDefault(c => c.Id == d.ConnectionId);
 
@@ -208,6 +208,30 @@ namespace Pulswerk.Dashboard
             {
                 var values = _data.GetCurrentValues(new List<string> { key });
                 return Results.Json(values, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            });
+
+            // Client-side JS error reporting endpoint
+            _app.MapPost("/plswk/api/client-error", async (HttpContext ctx) =>
+            {
+                try
+                {
+                    using var reader = new StreamReader(ctx.Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    var err = JsonSerializer.Deserialize<JsonElement>(body);
+
+                    var msg   = err.TryGetProperty("msg", out var m) ? m.GetString() : "unknown";
+                    var src   = err.TryGetProperty("source", out var s) ? s.GetString() : "";
+                    var line  = err.TryGetProperty("line", out var l) ? l.GetInt32().ToString() : "?";
+                    var col   = err.TryGetProperty("col", out var c) ? c.GetInt32().ToString() : "?";
+                    var stack = err.TryGetProperty("stack", out var st) ? st.GetString() : "";
+                    var page  = err.TryGetProperty("page", out var p) ? p.GetString() : "";
+
+                    Log.Warning($"[UI] JS Error on {page} at {src}:{line}:{col} — {msg}");
+                    if (!string.IsNullOrEmpty(stack))
+                        Log.Warning($"[UI]   Stack: {stack.Replace("\n", " | ")}");
+                }
+                catch { /* don't fail on malformed reports */ }
+                return Results.Ok();
             });
         }
 

@@ -16,6 +16,7 @@ using Pulswerk.Drivers;
 using Pulswerk.Drivers.BACnet;
 using Pulswerk.Storage;
 using System.IO.BACnet;
+using System.Collections.Concurrent;
 
 namespace Pulswerk.Host
 {
@@ -30,8 +31,8 @@ namespace Pulswerk.Host
         readonly AppConfig _cfg;
         readonly Dictionary<string, ConnectionConfig> _connections;
         readonly Dictionary<string, IDeviceDriver> _drivers = new();
-        readonly HashSet<string> _offlineDevices = new();
-        readonly Dictionary<string, DateTime> _lastPolledAt = new();
+        readonly ConcurrentDictionary<string, byte> _offlineDevices = new();
+        readonly ConcurrentDictionary<string, DateTime> _lastPolledAt = new();
         readonly Dictionary<string, SemaphoreSlim> _connLocks = new();
 
         ConsoleLogger _logger = null!;

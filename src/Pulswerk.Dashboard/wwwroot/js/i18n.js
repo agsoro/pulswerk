@@ -238,12 +238,6 @@ function applyTranslations() {
     // Highlight active language button
     document.querySelectorAll('[id^="lang-"]').forEach(btn => {
         const lang = btn.id.replace('lang-', '');
-        if (lang === currentLang) {
-            btn.classList.add('bg-sky-400', 'text-black');
-            btn.classList.remove('text-slate-400');
-        } else {
-            btn.classList.remove('bg-sky-400', 'text-black');
-            btn.classList.add('text-slate-400');
-        }
+        btn.classList.toggle('active', lang === currentLang);
     });
 }

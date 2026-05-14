@@ -72,11 +72,6 @@
                 return link + sep;
             }).join('');
 
-            const safeName = (point.name || 'Unnamed').replace(/'/g, "\\'");
-            const safeFullName = (point.fullName || '').replace(/'/g, "\\'");
-            const safeUnits = (point.units || '').replace(/'/g, "\\'");
-            const safePathEnc = encodeURIComponent(JSON.stringify(point.parentPath || []));
-
             item.innerHTML = `
                 <div class="text-sky-400/60 text-[0.7rem] font-bold tracking-wide w-full border-b border-white/5 pb-3 mb-5 break-words leading-relaxed">${pathHtml}</div>
                 <div class="flex items-start gap-4 w-full mb-6">
@@ -94,10 +89,10 @@
                     <div class="text-[0.7rem] font-bold text-slate-500 uppercase tracking-tighter">${point.units || ''}</div>
                 </div>
                 <div class="flex gap-2 mt-5 w-full justify-end">
-                    <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}', '${safeName}', '${safeUnits}', '${safePathEnc}')"><i class="fas fa-chart-area"></i></button>
-                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Schedule View" onclick="openScheduleView('${point.key}', '${safeName}', '${safePathEnc}')"><i class="fas fa-calendar-check"></i></button>` : ''}
-                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}', '${safeName}', '${safeFullName}', '${safeUnits}', '${safePathEnc}', '${point.type}', '${encodeURIComponent(JSON.stringify(point.enumValues || null))}')"><i class="fas fa-pen"></i></button>` : ''}
-                    <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}', '${safeName}', '${safePathEnc}')"><i class="fas fa-cog"></i></button>
+                    <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}')"><i class="fas fa-chart-area"></i></button>
+                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Schedule View" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
+                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
+                    <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}')"><i class="fas fa-cog"></i></button>
                 </div>
             `;
             container.appendChild(item);

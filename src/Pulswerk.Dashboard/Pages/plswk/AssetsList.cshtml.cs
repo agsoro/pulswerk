@@ -31,6 +31,14 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(_dataService.GetAvailableKeys());
         }
 
+        public JsonResult OnGetLatestValues(string keys)
+        {
+            var keyList = keys?.Split(',', System.StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>();
+            return new JsonResult(_dataService.GetCurrentValues(keyList));
+        }
+
+        public JsonResult OnGetAvailableKeys() => new JsonResult(_dataService.GetAvailableKeys());
+
         public async Task<IActionResult> OnGetHistoryAsync(string key, int hours = 4)
         {
             var history = await _dataService.GetTelemetryHistoryAsync(key, hours);
