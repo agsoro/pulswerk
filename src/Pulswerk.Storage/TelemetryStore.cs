@@ -385,8 +385,15 @@ namespace Pulswerk.Storage
         /// <summary>Basic escaping for Flux string literals.</summary>
         private static string EscapeFlux(string s) => s.Replace("\"", "\\\"").Replace("\\", "\\\\");
 
+        private TelemetryStats? _cachedStats;
+        private DateTime _cachedStatsExpiry;
+
         public async Task<TelemetryStats> GetStatsAsync()
         {
+            // Cache stats for 5 minutes — the underlying Flux queries scan the entire bucket
+            if (_cachedStats != null && DateTime.UtcNow < _cachedStatsExpiry)
+                return _cachedStats;
+
             var stats = new TelemetryStats();
             try
             {
@@ -395,7 +402,7 @@ namespace Pulswerk.Storage
                 // 1. Count unique keys (series)
                 string keysFlux = $"""
                     from(bucket: "{_bucket}")
-                      |> range(start: 0)
+                      |> range(start: -30d)
                       |> filter(fn: (r) => r._measurement == "telemetry")
                       |> keep(columns: ["key"])
                       |> group()
@@ -406,10 +413,10 @@ namespace Pulswerk.Storage
                 if (keyTables.Count > 0 && keyTables[0].Records.Count > 0)
                     stats.KeyCount = Convert.ToInt64(keyTables[0].Records[0].GetValue());
 
-                // 2. Count total points (approximate if range is large, but let's try)
+                // 2. Approximate total points (last 30 days to keep query fast)
                 string pointsFlux = $"""
                     from(bucket: "{_bucket}")
-                      |> range(start: 0)
+                      |> range(start: -30d)
                       |> filter(fn: (r) => r._measurement == "telemetry" and r._field == "value")
                       |> count()
                       |> group()
@@ -440,6 +447,9 @@ namespace Pulswerk.Storage
             {
                 Log.Error($"[InfluxDB] Stats error: {ex.Message}");
             }
+
+            _cachedStats = stats;
+            _cachedStatsExpiry = DateTime.UtcNow.AddMinutes(5);
             return stats;
         }
 

@@ -86,6 +86,8 @@ namespace Pulswerk.Dashboard
             [JsonPropertyName("workingSetMb")] public long WorkingSetMb { get; set; }
             [JsonPropertyName("gcHeapMb")] public long GcHeapMb { get; set; }
             [JsonPropertyName("dbSizeMb")] public long DbSizeMb { get; set; }
+            [JsonPropertyName("telemetryKeys")] public long TelemetryKeys { get; set; }
+            [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
             [JsonPropertyName("connections")] public Dictionary<string, ConnSnapshotEntry> Connections { get; set; } = new();
         }
 
@@ -95,27 +97,49 @@ namespace Pulswerk.Dashboard
             [JsonPropertyName("total")] public int Total { get; set; }
         }
 
-        private void SampleHealthSnapshot()
+        private async void SampleHealthSnapshot()
         {
             try
             {
                 var now = DateTime.UtcNow;
                 var process = System.Diagnostics.Process.GetCurrentProcess();
 
-                // Database size on disk
-                long dbSize = 0;
+                // ── Database size on disk ─────────────────────────────────────
+                long dbSizeBytes = 0;
                 try
                 {
+                    // 1. InfluxDB (mounted volume)
+                    var influxDir = new DirectoryInfo("/var/lib/influxdb2");
+                    if (influxDir.Exists)
+                        dbSizeBytes += influxDir.EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+
+                    // 2. SQLite / local data files
+                    var appDir = new DirectoryInfo(AppContext.BaseDirectory);
+                    if (appDir.Exists)
+                        dbSizeBytes += appDir.EnumerateFiles("*.db").Sum(f => f.Length);
+
                     string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
                     if (Directory.Exists(dataDir))
-                        dbSize = new DirectoryInfo(dataDir)
-                            .EnumerateFiles("*", SearchOption.AllDirectories)
-                            .Sum(f => f.Length);
-                    string alarmDb = Path.Combine(AppContext.BaseDirectory, "alarms.db");
-                    if (File.Exists(alarmDb))
-                        dbSize += new FileInfo(alarmDb).Length;
+                        dbSizeBytes += new DirectoryInfo(dataDir)
+                            .EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
                 }
                 catch { /* non-critical */ }
+
+                // ── InfluxDB telemetry stats (key count, point count) ─────────
+                long telemetryKeys = 0, totalDataPoints = 0;
+                try
+                {
+                    var dbStats = await TsStore.GetStatsAsync();
+                    telemetryKeys = dbStats.KeyCount;
+                    totalDataPoints = dbStats.PointCount;
+                    // Use InfluxDB internal stats as fallback for disk size
+                    if (dbSizeBytes == 0 || dbSizeBytes < 1000)
+                        dbSizeBytes = dbStats.DiskSizeBytes;
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug($"[Dashboard] InfluxDB stats query failed in snapshot: {ex.Message}");
+                }
 
                 var snapshot = new HealthSnapshot
                 {
@@ -124,7 +148,9 @@ namespace Pulswerk.Dashboard
                     PullTotal = _totalPullUpdates,
                     WorkingSetMb = process.WorkingSet64 / (1024 * 1024),
                     GcHeapMb = GC.GetTotalMemory(false) / (1024 * 1024),
-                    DbSizeMb = dbSize / (1024 * 1024)
+                    DbSizeMb = dbSizeBytes / (1024 * 1024),
+                    TelemetryKeys = telemetryKeys,
+                    TotalDataPoints = totalDataPoints
                 };
 
                 foreach (var conn in Config.Connections)
@@ -133,7 +159,10 @@ namespace Pulswerk.Dashboard
                     snapshot.Connections[conn.Id] = new ConnSnapshotEntry
                     {
                         Total = devices.Count,
-                        Online = devices.Count(d => !OfflineDevices.Contains(d.Name))
+                        Online = devices.Count(d =>
+                            !OfflineDevices.Contains(d.Name) &&
+                            LastPolledAtMap.TryGetValue(d.Name, out var lp) && lp != default &&
+                            (now - lp).TotalMinutes <= 5)
                     };
                 }
 
@@ -592,34 +621,17 @@ namespace Pulswerk.Dashboard
                 .FirstOrDefault();
         }
 
-        public async Task<HeartbeatStatsDto> GetHeartbeatStatsAsync()
+        public Task<HeartbeatStatsDto> GetHeartbeatStatsAsync()
         {
-            var dbStats = await TsStore.GetStatsAsync();
-
-            // Get database size (SQLite + InfluxDB)
-            long dbSizeBytes = 0;
-            try
+            // Read cached values from the latest health snapshot (sampled every 5 min)
+            HealthSnapshot? latest = null;
+            lock (_healthLock)
             {
-                // 1. InfluxDB (mounted volume)
-                var influxDir = new System.IO.DirectoryInfo("/var/lib/influxdb2");
-                if (influxDir.Exists)
-                {
-                    dbSizeBytes += influxDir.EnumerateFiles("*", System.IO.SearchOption.AllDirectories).Sum(f => f.Length);
-                }
-
-                // 2. SQLite files in app directory
-                var appDir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
-                if (appDir.Exists)
-                {
-                    dbSizeBytes += appDir.EnumerateFiles("*.db").Sum(f => f.Length);
-                }
+                if (_healthHistory.Count > 0)
+                    latest = _healthHistory.Last();
             }
-            catch { }
 
-            // Fallback to InfluxDB internal stats if volume mount isn't yielding results
-            if (dbSizeBytes == 0 || dbSizeBytes < 1000) dbSizeBytes = dbStats.DiskSizeBytes;
-
-            // ── Device health breakdown ─────────────────────────────────
+            // ── Device health breakdown (cheap — just in-memory maps) ────
             var now = DateTime.UtcNow;
             int staleCount = 0;
             int offlineCount = OfflineDevices.Count;
@@ -671,12 +683,12 @@ namespace Pulswerk.Dashboard
                 });
             }
 
-            // ── Memory stats ─────────────────────────────────────────────
+            // ── Memory stats (live — cheap) ──────────────────────────────
             var process = System.Diagnostics.Process.GetCurrentProcess();
             long workingSetMb = process.WorkingSet64 / (1024 * 1024);
             long gcHeapMb = GC.GetTotalMemory(false) / (1024 * 1024);
 
-            return new HeartbeatStatsDto
+            return Task.FromResult(new HeartbeatStatsDto
             {
                 UptimeSeconds = (long)Uptime.Elapsed.TotalSeconds,
                 Version = Version,
@@ -685,19 +697,19 @@ namespace Pulswerk.Dashboard
                 OnlineDevices = Config.Devices.Count - OfflineDevices.Count - staleCount,
                 StaleDevices = staleCount,
                 OfflineDevices = offlineCount,
-                TotalTelemetryKeys = dbStats.KeyCount,
-                TotalDataPoints = dbStats.PointCount,
+                TotalTelemetryKeys = latest?.TelemetryKeys ?? 0,
+                TotalDataPoints = latest?.TotalDataPoints ?? 0,
                 UpdatesPerMinute = GetUpdatesPerMinute(),
                 TotalUpdates = _totalUpdates,
                 TotalPushUpdates = _totalPushUpdates,
                 TotalPullUpdates = _totalPullUpdates,
-                DatabaseSizeBytes = dbSizeBytes,
+                DatabaseSizeBytes = (latest?.DbSizeMb ?? 0) * 1024 * 1024,
                 WorkingSetMb = workingSetMb,
                 GcHeapMb = gcHeapMb,
                 OldestDeviceSeenUtc = oldestSeen == now ? null : oldestSeen.ToString("yyyy-MM-dd HH:mm:ss"),
                 TcpConnections = Pulswerk.Drivers.Modbus.ModbusConnection.ActiveConnectionCount,
                 Connections = connSummaries
-            };
+            });
         }
 
     }

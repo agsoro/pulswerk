@@ -280,7 +280,7 @@ namespace Pulswerk.Host
         {
             foreach (var d in _cfg.Devices)
             {
-                if (d.Cov is not { Enabled: true }) continue;
+                if (d.EffectiveCov is not { Enabled: true }) continue;
 
                 var capturedDevice = d;
                 var capturedConn = _connections[d.ConnectionId];
@@ -430,7 +430,7 @@ namespace Pulswerk.Host
             Log.Info("Shutting down…");
 
             foreach (var d in _cfg.Devices)
-                if (d.Cov is { Enabled: true })
+                if (d.EffectiveCov is { Enabled: true })
                     (_drivers[d.Name] as BacnetDriver)?.DisposeCovClient(d.Name);
 
             var dbCfg = _cfg.Database ?? new DatabaseConfig();

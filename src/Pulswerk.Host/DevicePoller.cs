@@ -62,7 +62,7 @@ namespace Pulswerk.Host
                 Attributes attributes = new();
 
                 // ── BACnet COV mode ──────────────────────────────────────
-                if (reader is BacnetDriver bacnetDrv && device.Cov is { Enabled: true })
+                if (reader is BacnetDriver bacnetDrv && device.EffectiveCov is { Enabled: true })
                 {
                     ServiceCovDevice(bacnetDrv, device, conn, tsStore, reader);
                     return;

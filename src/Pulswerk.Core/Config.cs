@@ -117,6 +117,8 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("pollIntervalSeconds")] int? PollIntervalSeconds = null
     )
     {
+        private static readonly string[] _bacnetTypes = { "bacnet", "deziko" };
+
         public string AccessToken =>
             "device_" + Id.ToLowerInvariant()
                           .Replace(' ', '_')
@@ -126,6 +128,15 @@ namespace Pulswerk.Core
 
         /// <summary>True when hierarchy provisioning is active (AssetType set).</summary>
         public bool HierarchyEnabled => AssetType != null;
+
+        /// <summary>
+        /// Returns the effective COV config. For BACnet/Deziko devices, COV is
+        /// enabled by default (no need to specify it in the config file).
+        /// </summary>
+        public BacnetCovConfig? EffectiveCov =>
+            Cov ?? (_bacnetTypes.Contains(DeviceType, StringComparer.OrdinalIgnoreCase)
+                        ? new BacnetCovConfig()   // Enabled=true by default
+                        : null);
     }
 
     // ── BACnet COV subscription config ────────────────────────────────────────

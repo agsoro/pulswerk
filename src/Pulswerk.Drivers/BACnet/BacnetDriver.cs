@@ -2050,7 +2050,7 @@ namespace Pulswerk.Drivers.BACnet
         /// </summary>
         void EnsureCovSubscriptions(DiscoveryState state, DeviceConfig cfg)
         {
-            var covCfg = cfg.Cov!;
+            var covCfg = cfg.EffectiveCov!;
             var now = DateTime.UtcNow;
             var renew = now.AddSeconds(30);   // renew anything expiring in next 30 s
 
@@ -2121,7 +2121,7 @@ namespace Pulswerk.Drivers.BACnet
         public BacnetReadResult ServiceCovDevice(ConnectionConfig conn, DeviceConfig device)
         {
             var cfg = device;  // BACnet config is flat on DeviceConfig
-            var covCfg = cfg.Cov!;
+            var covCfg = cfg.EffectiveCov!;
             var state = GetOrCreateState(device.Name);
             var result = new BacnetReadResult();
 

@@ -48,9 +48,10 @@ namespace Pulswerk.Dashboard.Pages
                     _data.LastPolledAtMap.TryGetValue(d.Name, out var polledAt);
 
                     // If the device is not explicitly offline but hasn't delivered
-                    // data in over 5 minutes, mark it as "stale" (amber).
-                    bool stale = !offline && polledAt != default &&
-                                 (System.DateTime.UtcNow - polledAt).TotalMinutes > 5;
+                    // data in over 5 minutes (or never), mark it as "stale" (amber).
+                    bool stale = !offline &&
+                                 (polledAt == default ||
+                                  (System.DateTime.UtcNow - polledAt).TotalMinutes > 5);
 
                     string protocol = d.DeviceType.ToLowerInvariant() switch
                     {
