@@ -1825,6 +1825,9 @@ namespace Pulswerk.Drivers.BACnet
             /// <summary>Objects that returned a NAK to SubscribeCOV – polled the old way.</summary>
             public HashSet<BacnetObjectId> CovFallbackPoll { get; set; } = new();
 
+            /// <summary>When fallback-polled objects were last read (throttled to device poll interval).</summary>
+            public DateTime LastFallbackPoll { get; set; } = DateTime.MinValue;
+
             // ── Attribute drip-poll ───────────────────────────────────────────
             /// <summary>Round-robin cursor across (object × attribute-property) slots.</summary>
             public int AttrPollCursor { get; set; } = 0;
@@ -2156,9 +2159,16 @@ namespace Pulswerk.Drivers.BACnet
 
             var telPropIds = ParsePropertyIds(props.EffectiveTelemetry);
 
-            // Fallback poll – objects that NAK'd COV: read telemetry the old way
-            if (telPropIds.Length > 0 && state.CovFallbackPoll.Count > 0)
+            // Fallback poll – objects that NAK'd COV: read telemetry at the device
+            // poll interval (default 1h for BACnet), not every 1s tick.
+            int fallbackIntervalSec = device.PollIntervalSeconds ?? 3600;
+            bool shouldFallbackPoll = telPropIds.Length > 0
+                && state.CovFallbackPoll.Count > 0
+                && (DateTime.UtcNow - state.LastFallbackPoll).TotalSeconds >= fallbackIntervalSec;
+
+            if (shouldFallbackPoll)
             {
+                state.LastFallbackPoll = DateTime.UtcNow;
                 var fallback = state.CachedObjects
                     .Where(o => state.CovFallbackPoll.Contains(o.ObjectId));
                 foreach (var obj in fallback)

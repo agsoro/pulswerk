@@ -278,50 +278,64 @@ namespace Pulswerk.Host
 
         void StartCovSubscriptions(CancellationToken ct)
         {
-            foreach (var d in _cfg.Devices)
+            // Group COV devices by connection — parallelize across connections,
+            // but keep devices on the same connection sequential to avoid
+            // UDP contention on the shared BACnet socket.
+            var covDevices = _cfg.Devices
+                .Where(d => d.EffectiveCov is { Enabled: true })
+                .GroupBy(d => d.ConnectionId)
+                .ToList();
+
+            if (covDevices.Count == 0) return;
+
+            var tasks = covDevices.Select(connGroup => Task.Run(() =>
             {
-                if (d.EffectiveCov is not { Enabled: true }) continue;
-
-                try
+                foreach (var d in connGroup)
                 {
-                    var covDriver = _drivers[d.Name] as BacnetDriver;
-                    if (covDriver == null)
+                    try
                     {
-                        Log.Warning($"[COV] Skipping '{d.Name}': driver is {d.DeviceType}, not BACnet.");
-                        continue;
-                    }
-
-                    var capturedDevice = d;
-                    var capturedConn = _connections[d.ConnectionId];
-
-                    Log.Info($"[COV] Initialising COV mode for '{d.Name}'…");
-
-                    covDriver.InitCovMode(
-                        capturedConn,
-                        capturedDevice,
-                        _alarmStore,
-                        _tsStore,
-                        tel =>
+                        var covDriver = _drivers[d.Name] as BacnetDriver;
+                        if (covDriver == null)
                         {
-                            var persisted = _dataService?.UpdateTelemetry(tel, isPush: true);
-                            if (persisted != null)
-                            {
-                                foreach (var p in persisted)
-                                    _tsStore.Insert(p.Key,
-                                        new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
-                                        p.Value.val);
-                            }
-                            return Task.CompletedTask;
-                        },
-                        attr => { _dataService?.UpdateAttributes(attr); return Task.CompletedTask; });
+                            Log.Warning($"[COV] Skipping '{d.Name}': driver is {d.DeviceType}, not BACnet.");
+                            continue;
+                        }
 
-                    _lastPolledAt[d.Name] = DateTime.UtcNow;
+                        var capturedDevice = d;
+                        var capturedConn = _connections[d.ConnectionId];
+
+                        Log.Info($"[COV] Initialising COV mode for '{d.Name}'…");
+
+                        covDriver.InitCovMode(
+                            capturedConn,
+                            capturedDevice,
+                            _alarmStore,
+                            _tsStore,
+                            tel =>
+                            {
+                                var persisted = _dataService?.UpdateTelemetry(tel, isPush: true);
+                                if (persisted != null)
+                                {
+                                    foreach (var p in persisted)
+                                        _tsStore.Insert(p.Key,
+                                            new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                            p.Value.val);
+                                }
+                                return Task.CompletedTask;
+                            },
+                            attr => { _dataService?.UpdateAttributes(attr); return Task.CompletedTask; });
+
+                        _lastPolledAt[d.Name] = DateTime.UtcNow;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[COV] Failed to init COV for '{d.Name}': {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Log.Error($"[COV] Failed to init COV for '{d.Name}': {ex.Message}");
-                }
-            }
+            }, ct)).ToArray();
+
+            Task.WaitAll(tasks);
+            Log.Info($"[COV] All COV subscriptions initialised ({covDevices.Sum(g => g.Count())} devices across {covDevices.Count} connections).");
         }
 
         // ── BACnet hierarchy background jobs ─────────────────────────────────
