@@ -85,11 +85,13 @@ namespace Pulswerk.Host
 
             StartMonitoringDashboard(cts.Token);
             StartBacnetClients();
-            StartCovSubscriptions(cts.Token);
-            StartHierarchyJobs(cts.Token);
 
             _poller = new DevicePoller(_drivers, _dataService, _offlineDevices, _lastPolledAt);
             StartPollingLoops(cts.Token);
+
+            // BACnet COV discovery + hierarchy run in background — Modbus polling is already active
+            _ = Task.Run(() => StartCovSubscriptions(cts.Token), cts.Token);
+            StartHierarchyJobs(cts.Token);
 
             // Block until Ctrl+C
             try { await Task.Delay(-1, cts.Token); }
