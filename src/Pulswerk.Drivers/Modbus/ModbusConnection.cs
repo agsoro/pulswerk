@@ -51,9 +51,11 @@ namespace Pulswerk.Drivers.Modbus
                 }
                 catch (Exception ex) when (IsTransportError(ex))
                 {
-                    // Connection died — purge from pool and retry once with a fresh connection
+                    // Connection died — purge from pool AND reset cooldown so the
+                    // retry below can actually open a new TCP socket instead of
+                    // hitting the cooldown gate and throwing a synthetic error.
                     Log.Warning($"[Modbus] Connection '{conn.Id}' transport error: {ex.GetType().Name}: {ex.Message}. Reconnecting…");
-                    PurgeConnection(conn.Id);
+                    FullReset(conn.Id);
 
                     try
                     {
@@ -127,6 +129,10 @@ namespace Pulswerk.Drivers.Modbus
                     master.Transport.Retries = 1;
 
                     _pool[key] = (tcp, master);
+                    // Clear the cooldown on success — a previously-failed connection
+                    // should not penalise subsequent reconnect attempts if the link
+                    // drops again later.
+                    _lastConnectAttempt.TryRemove(key, out _);
                     Log.Info($"[Modbus] Connected to '{conn.Id}' ({address}:{port}).");
                     return master;
                 }
@@ -187,6 +193,16 @@ namespace Pulswerk.Drivers.Modbus
         public static void ResetCooldown(string connId)
         {
             _lastConnectAttempt.TryRemove(connId, out _);
+        }
+
+        /// <summary>
+        /// Purges the pooled connection AND resets the cooldown in one atomic operation.
+        /// Use this when a connection is known-dead and should be retried immediately.
+        /// </summary>
+        public static void FullReset(string connId)
+        {
+            PurgeConnection(connId);
+            ResetCooldown(connId);
         }
 
         /// <summary>Returns the number of active pooled connections.</summary>
