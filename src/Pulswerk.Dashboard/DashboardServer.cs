@@ -1,4 +1,4 @@
-// MonitoringServer.cs – Embedded Kestrel server + Razor Pages dashboard
+// DashboardServer.cs – Embedded Kestrel server + Razor Pages dashboard
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -22,19 +22,19 @@ namespace Pulswerk.Dashboard
     /// <summary>
     /// Embedded Kestrel server that serves a read-only monitoring dashboard using Razor Pages.
     /// </summary>
-    public sealed class MonitoringServer : IDisposable
+    public sealed class DashboardServer : IDisposable
     {
         private readonly WebApplication _app;
         private readonly DashboardDataService _data;
 
-        public MonitoringServer(DashboardDataService data, DashboardStore dashboardStore)
+        public DashboardServer(DashboardDataService data, DashboardStore dashboardStore)
         {
             _data = data;
 
             try
             {
                 var builder = WebApplication.CreateBuilder();
-                var port = _data.Config.Monitoring?.Port ?? 5000;
+                var port = _data.Config.Server?.Port ?? 5000;
 
                 builder.WebHost.UseUrls($"http://*:{port}");
 
@@ -66,8 +66,8 @@ namespace Pulswerk.Dashboard
             }
             catch (Exception ex)
             {
-                Log.Error($"[Monitoring] FATAL: Failed to build WebApplication: {ex.Message}");
-                if (ex.InnerException != null) Log.Error($"[Monitoring]   Inner: {ex.InnerException.Message}");
+                Log.Error($"[Server] FATAL: Failed to build WebApplication: {ex.Message}");
+                if (ex.InnerException != null) Log.Error($"[Server]   Inner: {ex.InnerException.Message}");
                 throw;
             }
         }
@@ -94,6 +94,58 @@ namespace Pulswerk.Dashboard
                     RequestPath = "/plswk"
                 });
             }
+            // ── Anti-spoofing: strip Authelia headers from untrusted sources ──
+            // Remote-User/Name/Email/Groups must only be trusted from the
+            // reverse proxy (nginx + Authelia).  Direct access to Kestrel
+            // could forge these headers otherwise.
+            // Anti-spoofing: Strip identity headers if not from a trusted proxy.
+            // Malicious users on the local network (bypassing the reverse proxy)
+            // could forge these headers otherwise.
+            var authCfg = _data.Config.Server?.Auth;
+            _app.Use(async (ctx, next) =>
+            {
+                bool trusted = false;
+                if (authCfg is { Enabled: true, TrustedProxies: { Count: > 0 } })
+                {
+                    var remoteIp = ctx.Connection.RemoteIpAddress;
+                    if (remoteIp != null)
+                    {
+                        // Normalize IPv6-mapped IPv4 (::ffff:10.0.0.1 → 10.0.0.1)
+                        if (remoteIp.IsIPv4MappedToIPv6)
+                            remoteIp = remoteIp.MapToIPv4();
+
+                        foreach (var entry in authCfg.TrustedProxies!)
+                        {
+                            if (entry.Contains('/'))
+                            {
+                                // CIDR range (e.g. "172.16.0.0/12")
+                                if (IsInCidr(remoteIp, entry)) { trusted = true; break; }
+                            }
+                            else if (System.Net.IPAddress.TryParse(entry, out var ip))
+                            {
+                                var compareIp = ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip;
+                                if (remoteIp.Equals(compareIp)) { trusted = true; break; }
+                            }
+                        }
+                    }
+                }
+
+                if (!trusted)
+                {
+                    ctx.Request.Headers.Remove("Remote-User");
+                    ctx.Request.Headers.Remove("Remote-Name");
+                    ctx.Request.Headers.Remove("Remote-Email");
+                    ctx.Request.Headers.Remove("Remote-Groups");
+                }
+
+                await next();
+            });
+
+            // Forward headers from reverse proxy (e.g. nginx)
+            _app.UseForwardedHeaders(new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions
+            {
+                ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.All
+            });
 
             _app.UseRouting();
 
@@ -233,17 +285,78 @@ namespace Pulswerk.Dashboard
                 catch { /* don't fail on malformed reports */ }
                 return Results.Ok();
             });
+
+            // ── Authelia user identity endpoint ──────────────────────────────
+            _app.MapGet("/plswk/api/user", (HttpContext ctx) =>
+            {
+                var serverCfg = _data.Config.Server;
+                var authCfg = serverCfg?.Auth;
+                
+                string? user = DashboardAuth.GetUser(ctx, authCfg);
+                var groups = DashboardAuth.GetGroups(ctx, authCfg);
+                
+                var headers = ctx.Request.Headers;
+                string? name  = headers["Remote-Name"].FirstOrDefault();
+                string? email = headers["Remote-Email"].FirstOrDefault();
+
+                var dto = new
+                {
+                    authenticated = !string.IsNullOrWhiteSpace(user) && user != authCfg?.DefaultUser,
+                    isDefault = !string.IsNullOrWhiteSpace(user) && user == authCfg?.DefaultUser,
+                    user  = user ?? "public",
+                    name  = name ?? user ?? "Public",
+                    email = email ?? "",
+                    groups = groups,
+                    canWriteValue = DashboardAuth.CanWriteValue(ctx, serverCfg),
+                    canAckAlarm = DashboardAuth.CanAckAlarm(ctx, serverCfg),
+                    canEditDashboard = DashboardAuth.CanEditDashboard(ctx, serverCfg),
+                    canEditFavorites = DashboardAuth.CanEditFavorites(ctx, serverCfg)
+                };
+
+                return Results.Json(dto, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            });
         }
 
         public async Task RunAsync(CancellationToken cancellationToken)
         {
-            Log.Info($"[Monitoring] Dashboard starting...");
+            Log.Info($"[Server] Dashboard starting...");
             await _app.RunAsync(cancellationToken);
         }
 
         public void Dispose()
         {
             _data.Uptime?.Stop();
+        }
+
+        // ── CIDR range matching helper ──────────────────────────────────────
+        private static bool IsInCidr(System.Net.IPAddress address, string cidr)
+        {
+            try
+            {
+                var parts = cidr.Split('/');
+                if (parts.Length != 2) return false;
+                if (!System.Net.IPAddress.TryParse(parts[0], out var network)) return false;
+                if (!int.TryParse(parts[1], out var prefixLen)) return false;
+
+                var addrBytes = address.GetAddressBytes();
+                var netBytes = network.GetAddressBytes();
+                if (addrBytes.Length != netBytes.Length) return false;
+
+                int fullBytes = prefixLen / 8;
+                int remainBits = prefixLen % 8;
+
+                for (int i = 0; i < fullBytes && i < addrBytes.Length; i++)
+                    if (addrBytes[i] != netBytes[i]) return false;
+
+                if (remainBits > 0 && fullBytes < addrBytes.Length)
+                {
+                    int mask = 0xFF << (8 - remainBits);
+                    if ((addrBytes[fullBytes] & mask) != (netBytes[fullBytes] & mask)) return false;
+                }
+
+                return true;
+            }
+            catch { return false; }
         }
     }
 }

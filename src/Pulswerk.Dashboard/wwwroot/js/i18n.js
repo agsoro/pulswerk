@@ -58,6 +58,9 @@ const TRANSLATIONS = {
         'favorites': 'Favorites',
         'no_favorites': 'No favorites yet.',
         'favorites_hint': 'Go to {0} and click {1} to pin a point.',
+        'fav_dashboards': 'Favorite Dashboards',
+        'no_fav_dashboards': 'No favorite dashboards yet.',
+        'fav_dashboards_hint': 'Go to {0} and click the {1} to pin one.',
         'loading_tree': 'Loading assets...',
         'select_asset': 'Select an asset',
         'select_node_hint': 'Select a node from the tree to view data points',
@@ -94,7 +97,12 @@ const TRANSLATIONS = {
         'prop_name': 'Property',
         'prop_value': 'Value',
         'no_properties_found': 'No extended properties found.',
-        'error_loading_properties': 'Error loading properties.'
+        'error_loading_properties': 'Error loading properties.',
+        'weekly_schedule': 'Weekly Schedule',
+        'schedule_configuration': 'Schedule Configuration',
+        'edit': 'Edit',
+        'cancel': 'Cancel',
+        'save': 'Save'
     },
     'de': {
         'nav_dashboard': 'Übersicht',
@@ -155,6 +163,9 @@ const TRANSLATIONS = {
         'favorites': 'Favoriten',
         'no_favorites': 'Noch keine Favoriten.',
         'favorites_hint': 'Gehen Sie zu {0} und klicken Sie auf {1}, um einen Punkt anzuheften.',
+        'fav_dashboards': 'Favorisierte Dashboards',
+        'no_fav_dashboards': 'Noch keine favorisierten Dashboards.',
+        'fav_dashboards_hint': 'Gehen Sie zu {0} und klicken Sie auf das {1}, um eines anzuheften.',
         'loading_tree': 'Struktur wird geladen...',
         'select_asset': 'Wählen Sie eine Anlage aus',
         'select_node_hint': 'Wählen Sie einen Knoten aus dem Baum aus, um Datenpunkte anzuzeigen',
@@ -191,7 +202,12 @@ const TRANSLATIONS = {
         'prop_name': 'Eigenschaft',
         'prop_value': 'Wert',
         'no_properties_found': 'Keine erweiterten Eigenschaften gefunden.',
-        'error_loading_properties': 'Fehler beim Laden der Eigenschaften.'
+        'error_loading_properties': 'Fehler beim Laden der Eigenschaften.',
+        'weekly_schedule': 'Wochenplan',
+        'schedule_configuration': 'Zeitplan-Konfiguration',
+        'edit': 'Bearbeiten',
+        'cancel': 'Abbrechen',
+        'save': 'Speichern'
     }
 };
 

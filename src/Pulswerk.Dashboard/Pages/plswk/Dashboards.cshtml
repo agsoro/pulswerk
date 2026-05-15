@@ -10,6 +10,38 @@
 
 @section Styles {
 <link rel="stylesheet" href="/plswk/lib/gridstack.min.css">
+<style>
+    .key-picker-expanded {
+        position: fixed !important;
+        inset: 2rem !important;
+        z-index: 2000 !important;
+        max-height: none !important;
+        background: #0f172a !important;
+        display: flex !important;
+        flex-direction: column !important;
+        box-shadow: 0 50px 100px -20px rgba(0, 0, 0, 0.8) !important;
+        border: 1px solid #334155 !important;
+        border-radius: 1.5rem !important;
+        padding: 1.5rem !important;
+    }
+    .key-picker-expanded #keyPicker {
+        flex: 1;
+        max-height: none !important;
+        border: none !important;
+    }
+    .key-picker-expanded #keyList {
+        flex: 1;
+        overflow-y: auto;
+    }
+    .key-picker-expanded .sticky {
+        background: #1e293b !important;
+        padding: 1rem !important;
+        border-radius: 0.75rem 0.75rem 0 0 !important;
+    }
+    .key-picker-expanded .key-picker-header {
+        display: none !important;
+    }
+</style>
 }
 
 
@@ -17,13 +49,13 @@
 <div id="listMode" style="@(Model.CurrentDashboard != null ? "display:none" : "")" data-testid="dash-list-mode">
     <div class="flex justify-between items-center mb-6">
         <p class="text-slate-400 text-sm">Create and manage custom data dashboards.</p>
-        <button class="btn-primary" onclick="createDashboard()" data-testid="dash-create-btn"><i class="fas fa-plus"></i> New Dashboard</button>
+        <button class="btn-primary auth-edit-dash-only" onclick="createDashboard()" data-testid="dash-create-btn"><i class="fas fa-plus"></i> New Dashboard</button>
     </div>
     <div id="dashGrid" class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5" data-testid="dash-grid"></div>
     <div id="emptyDashboards" class="hidden flex-col items-center justify-center gap-4 text-center text-slate-400 p-16 glass rounded-2xl">
         <i class="fas fa-th-large text-5xl opacity-30 text-sky-400"></i>
         <p class="text-sm">No dashboards yet.</p>
-        <button class="btn-primary btn-sm" onclick="createDashboard()"><i class="fas fa-plus"></i> Create your first dashboard</button>
+        <button class="btn-primary btn-sm auth-edit-dash-only" onclick="createDashboard()"><i class="fas fa-plus"></i> Create your first dashboard</button>
     </div>
 </div>
 
@@ -34,15 +66,18 @@
         <i class="fas fa-chevron-right text-[0.55rem] text-slate-600" id="dashBreadcrumbSep" style="display:none"></i>
         <input type="text" class="bg-transparent border-0 text-white text-lg font-bold outline-none flex-1 min-w-0" id="dashTitle" style="display:none" placeholder="Dashboard name">
         <span class="text-lg font-bold flex-1" id="dashTitleView"></span>
+        <button class="btn-icon auth-edit-fav-only" id="btnFavDash" onclick="toggleFavoriteDash(dashboard.id)" title="Favorite">
+            <i class="far fa-star"></i>
+        </button>
 
         <!-- Timewindow selector (reusable module) -->
         <div id="dashTwContainer"></div>
 
         <div class="flex gap-2" id="editButtons">
-            <button class="btn-ghost" id="btnAddWidget" onclick="openAddWidget()" style="display:none" data-testid="dash-add-widget-btn"><i class="fas fa-plus"></i> Add Widget</button>
-            <button class="btn-ghost" id="btnEdit" onclick="enterEditMode()" data-testid="dash-edit-btn"><i class="fas fa-pen"></i> Edit</button>
-            <button class="btn-primary btn-sm" id="btnSave" onclick="saveDashboard()" style="display:none" data-testid="dash-save-btn"><i class="fas fa-save"></i> Save</button>
-            <button class="btn-ghost" id="btnCancel" onclick="cancelEdit()" style="display:none" data-testid="dash-cancel-btn"><i class="fas fa-times"></i></button>
+            <button class="btn-ghost auth-edit-dash-only" id="btnAddWidget" onclick="openAddWidget()" style="display:none" data-testid="dash-add-widget-btn"><i class="fas fa-plus"></i> Add Widget</button>
+            <button class="btn-ghost auth-edit-dash-only" id="btnEdit" onclick="enterEditMode()" data-testid="dash-edit-btn"><i class="fas fa-pen"></i> Edit</button>
+            <button class="btn-primary btn-sm auth-edit-dash-only" id="btnSave" onclick="saveDashboard()" style="display:none" data-testid="dash-save-btn"><i class="fas fa-save"></i> Save</button>
+            <button class="btn-ghost auth-edit-dash-only" id="btnCancel" onclick="cancelEdit()" style="display:none" data-testid="dash-cancel-btn"><i class="fas fa-times"></i></button>
         </div>
     </div>
 
@@ -99,16 +134,25 @@
             </div>
 
             <!-- Step 3: Keys -->
-            <div class="mb-5">
-                <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Data Keys</label>
-                <div class="max-h-[250px] overflow-y-auto border border-slate-700 rounded-lg" id="keyPicker">
-                    <div class="sticky top-0 z-[1] p-2 bg-slate-800 border-b border-white/5">
-                        <input type="text" placeholder="Search keys... (space = AND)" id="keySearch" oninput="filterKeys()"
-                            class="w-full bg-white/5 border border-slate-700 text-white px-2.5 py-2 rounded text-xs outline-none focus:border-sky-400">
-                        <label class="flex items-center gap-1.5 mt-1.5 cursor-pointer text-[0.7rem] text-slate-500 hover:text-slate-300 transition-colors select-none">
-                            <input type="checkbox" id="keyShowSelected" onchange="filterKeys()" class="accent-sky-400" style="width:13px;height:13px">
-                            Show selected only
-                        </label>
+            <div class="mb-5 relative" id="keyPickerWrapper">
+                <div class="flex justify-between items-center mb-1.5 key-picker-header">
+                    <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide">Data Keys</label>
+                    <div class="flex items-center gap-1">
+                        <button class="btn-ghost btn-sm h-7 !px-2 !py-0 text-[0.65rem] font-bold" id="btnKeyPickerOpen" title="Select Keys" onclick="window.openKeySelector()">
+                            <i class="fas fa-plus mr-1"></i> SELECT KEYS
+                        </button>
+                    </div>
+                </div>
+                <div class="max-h-[250px] overflow-y-auto border border-slate-700 rounded-lg transition-all duration-300" id="keyPicker">
+                    <div class="sticky top-0 z-[1] p-2 bg-slate-800 border-b border-white/5 hidden" id="keySearchWrapper">
+                        <div class="flex items-center gap-2">
+                            <input type="text" placeholder="Search keys... (space = AND)" id="keySearch" oninput="window.filterKeys()"
+                                class="flex-1 bg-white/5 border border-slate-700 text-white px-2.5 py-2 rounded text-xs outline-none focus:border-sky-400">
+                            <div class="flex items-center gap-1">
+                                <button class="btn-primary btn-sm !px-3 !py-1 text-[0.65rem] font-bold uppercase tracking-wider" onclick="window.closeKeySelector(event)">OK</button>
+                                <button class="btn-ghost btn-sm !px-3 !py-1 text-[0.65rem] font-bold uppercase tracking-wider" onclick="window.cancelKeySelector(event)">Cancel</button>
+                            </div>
+                        </div>
                     </div>
                     <div id="keyList"></div>
                 </div>
@@ -208,7 +252,11 @@
 
 @section Scripts {
 <script src="/plswk/lib/gridstack-all.js"></script>
-<script src="/plswk/js/dashboards.js"></script>
+<script src="/plswk/js/dashboards/core.js"></script>
+<script src="/plswk/js/dashboards/scada.js"></script>
+<script src="/plswk/js/dashboards/widgets.js"></script>
+<script src="/plswk/js/dashboards/picker.js"></script>
+<script src="/plswk/js/dashboards/editor.js"></script>
 <script>
     // Bootstrap with server-rendered data
     const INITIAL_DASH = @Html.Raw(dashJson);

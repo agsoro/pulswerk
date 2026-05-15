@@ -122,9 +122,30 @@
       "assetType": "BACnet Zone"
     }
   ],
-  "monitoring": {
-    "enabled": true,
+  "server": {
     "port": 5000,
-    "logBufferSize": 5000
+    "logBufferSize": 5000,
+    "auth": {
+      "enabled": true,
+      // IP addresses or CIDR ranges of reverse proxies (nginx/Authelia).
+      // Remote-User/Groups/Name/Email headers are ONLY trusted from these sources.
+      // When disabled, auth headers are stripped from ALL requests (safe default).
+      "trustedProxies": ["10.192.30.1"],
+      // Fallback user/groups if no authentication headers are present.
+      "defaultUser": "operator",
+      "defaultGroups": ["operators"]
+    },
+    // Role-based access control for write operations.
+    "rights": {
+      "enabled": true,
+      // Groups allowed to change telemetry values (write-back).
+      "allowAssetValueEdit": ["users", "admins"],
+      // Groups allowed to acknowledge alarms.
+      "allowAlarmAck": ["users", "admins"],
+      // Groups allowed to edit dashboards (create, save, delete).
+      "allowDashboardEdit": ["admins"],
+      // Groups allowed to pin/unpin favorites.
+      "allowFavoriteEdit": ["users", "admins"]
+    }
   }
 }

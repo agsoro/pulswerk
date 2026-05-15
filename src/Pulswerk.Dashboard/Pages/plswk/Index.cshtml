@@ -34,8 +34,24 @@
     </a>
 </div>
 
-<!-- ── Favorites ─────────────────────────────────────────────────────────── -->
-<div class="animate-fade-in" style="animation-delay: 0.1s">
+<!-- ── Favorite Dashboards ─────────────────────────────────────────────────── -->
+<div class="animate-fade-in mb-10" style="animation-delay: 0.05s">
+    <div class="flex items-center gap-3 text-base font-bold text-slate-50 mb-5">
+        <i class="fas fa-th-large text-sky-400"></i> <span data-i18n="fav_dashboards">Favorite Dashboards</span>
+        <button class="btn-icon ml-auto" title="Refresh" data-i18n-title="btn_refresh" onclick="loadFavoriteDashboards()">
+            <i class="fas fa-sync-alt"></i>
+        </button>
+    </div>
+    <div id="favoriteDashList" class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5"></div>
+    <div id="emptyFavoriteDash" class="hidden flex-col items-center justify-center gap-3 text-center text-slate-400 p-12 glass rounded-2xl">
+        <i class="fas fa-th-large text-4xl opacity-20"></i>
+        <p data-i18n="no_fav_dashboards">No favorite dashboards yet.</p>
+        <p class="text-xs">Go to <a href="/plswk/Dashboards" class="text-sky-400 hover:underline" data-i18n="nav_dashboards">Dashboards</a> and click the ★ to pin one.</p>
+    </div>
+</div>
+
+<!-- ── Telemetry Favorites ──────────────────────────────────────────────────── -->
+<div class="animate-fade-in" style="animation-delay: 0.15s">
     <div class="flex items-center gap-3 text-base font-bold text-slate-50 mb-5">
         <i class="fas fa-star text-sky-400"></i> <span data-i18n="favorites">Favorites</span>
         <button class="btn-icon ml-auto" title="Refresh" data-i18n-title="btn_refresh" onclick="loadFavorites()">
@@ -47,20 +63,74 @@
 
     <div id="emptyFavorites" class="hidden flex-col items-center justify-center gap-3 text-center text-slate-400 p-12 glass rounded-2xl">
         <i class="fas fa-star text-4xl opacity-20"></i>
-        <p>No favorites yet.</p>
-        <p class="text-xs">Go to <a href="/plswk/Assets" class="text-sky-400 hover:underline">Assets</a> and click the ★ to pin a point.</p>
+        <p data-i18n="no_favorites">No favorites yet.</p>
+        <p class="text-xs">Go to <a href="/plswk/Assets" class="text-sky-400 hover:underline" data-i18n="nav_assets">Assets</a> and click the ★ to pin a point.</p>
     </div>
 </div>
-
-@await Html.PartialAsync("_AssetModals")
-@Html.AntiForgeryToken()
 
 @section Scripts {
     <script>
         let allPoints = [];
+        let allDashboards = [];
+
+        async function loadFavoriteDashboards() {
+            const favIds = pw_fav.get('pw_fav_dashboards');
+            const list = document.getElementById('favoriteDashList');
+            const empty = document.getElementById('emptyFavoriteDash');
+
+            if (favIds.length === 0) {
+                list.style.display = 'none';
+                empty.style.display = 'flex';
+                return;
+            }
+
+            list.style.display = 'grid';
+            empty.style.display = 'none';
+
+            try {
+                // We need to fetch the dashboard list to get names/descriptions
+                const response = await fetch('/plswk/Dashboards?handler=List');
+                allDashboards = await response.json();
+
+                list.innerHTML = '';
+                favIds.forEach(id => {
+                    const d = allDashboards.find(x => x.id === id);
+                    if (d) renderDashCard(d, list);
+                });
+            } catch (err) { console.error("Failed to load favorite dashboards:", err); }
+        }
+
+        function renderDashCard(d, container) {
+            const wc = d.widgets?.length || 0;
+            const item = document.createElement('div');
+            item.className = 'dash-card animate-scale-in';
+            item.onclick = () => location.href = `/plswk/Dashboards/${d.id}/${slugify(d.name)}`;
+            item.innerHTML = `
+                <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.75rem">
+                    <div style="width:36px;height:36px;border-radius:10px;background:rgba(56,189,248,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                        <i class="fas fa-th-large" style="color:#38bdf8;font-size:1rem"></i>
+                    </div>
+                    <div style="flex:1;min-width:0"><div class="dash-card-title">${esc(d.name)}</div></div>
+                </div>
+                <div class="dash-card-desc">${esc(d.description || 'No description')}</div>
+                <div class="dash-card-meta">
+                    <span><i class="fas fa-puzzle-piece" style="margin-right:0.3rem"></i>${wc} widget${wc !== 1 ? 's' : ''}</span>
+                </div>
+            `;
+            container.appendChild(item);
+        }
+
+        function slugify(text) {
+            return text.toString().toLowerCase()
+                .replace(/\s+/g, '-')           
+                .replace(/[^\w\-]+/g, '')       
+                .replace(/\-\-+/g, '-')         
+                .replace(/^-+/, '')             
+                .replace(/-+$/, '');            
+        }
 
         async function loadFavorites() {
-            const favKeys = JSON.parse(localStorage.getItem('deziko_favorites') || '[]');
+            const favKeys = pw_fav.get('deziko_favorites');
             const list = document.getElementById('favoritesList');
             const empty = document.getElementById('emptyFavorites');
 
@@ -125,8 +195,8 @@
                 </div>
                 <div class="flex gap-2 mt-3 w-full justify-end border-t border-white/5 pt-2.5">
                     <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}')"><i class="fas fa-chart-area"></i></button>
-                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Schedule View" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
-                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
+                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}" title="Schedule View" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
+                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
                     <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}')"><i class="fas fa-cog"></i></button>
                 </div>
             `;
@@ -157,6 +227,7 @@
         }
 
         loadFavorites();
+        loadFavoriteDashboards();
         setInterval(refreshValues, 2000);
     </script>
 }

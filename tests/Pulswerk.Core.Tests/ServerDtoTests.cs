@@ -9,7 +9,7 @@ namespace Connector.Tests
     /// Tests for monitoring DTOs to ensure serialization correctness and
     /// that TB-specific types have been removed.
     /// </summary>
-    public class MonitoringDtoTests
+    public class ServerDtoTests
     {
         // ── DeviceStatusDto ──────────────────────────────────────────────────
 

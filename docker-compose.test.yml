@@ -10,6 +10,7 @@
 #   4. modbus-sim2   – Second Modbus TCP simulator   (port 503)
 #   5. bacnet-sim    – Deziko-style BACnet/IP device  (port 47808 UDP)
 #   6. browserless   – Headless Chrome for visual UI tests (port 3000)
+#   7. auth-proxy    – Fake Authelia nginx proxy (port 5001 → admin user)
 #
 # Visual tests:
 #   cd testing/visual && npm test
@@ -87,3 +88,24 @@ services:
       timeout: 10s
       retries: 20
       start_period: 10s
+
+  # ── Fake Authelia auth proxy ────────────────────────────────────────────────
+  #
+  # Simulates an Authelia reverse proxy by injecting Remote-User/Groups/Name/
+  # Email headers on every request.  Use to test the user identity badge.
+  #
+  #   Authenticated (Admin): http://localhost:5002/plswk/  (admins group)
+  #   Authenticated (User):  http://localhost:5001/plswk/  (users group)
+  #   Unauthenticated:       http://localhost:5000/plswk/  (public, direct to Kestrel)
+  #
+  auth-proxy:
+    image: nginx:alpine
+    container_name: auth-proxy
+    restart: unless-stopped
+    ports:
+      - "5001:80"
+      - "5002:81"
+    volumes:
+      - ./testing/auth-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - pulswerk

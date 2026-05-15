@@ -96,3 +96,158 @@ function friendlyName(key) {
         });
     };
 })();
+
+// ── Authelia User Identity ────────────────────────────────────────────────
+// Fetches user info from the backend (reads Authelia reverse-proxy headers)
+// and updates the sidebar badge + popover.
+
+let _currentUser = null;
+
+function getUserInitials(name) {
+    if (!name || name === 'Public' || name === 'public') return '';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+}
+
+window.pw_fav = {
+    get: (key) => {
+        const u = window._currentUser?.user || 'public';
+        const userKey = `${u}_${key}`;
+        const raw = localStorage.getItem(userKey);
+        if (raw) return JSON.parse(raw);
+        // Fallback/Migration: try global legacy key
+        const legacy = localStorage.getItem(key);
+        return legacy ? JSON.parse(legacy) : [];
+    },
+    set: (key, val) => {
+        const u = window._currentUser?.user || 'public';
+        localStorage.setItem(`${u}_${key}`, JSON.stringify(val));
+    }
+};
+
+async function loadUserIdentity() {
+    try {
+        const r = await fetch('/plswk/api/user');
+        if (!r.ok) return;
+        _currentUser = await r.json();
+    } catch (e) {
+        _currentUser = { authenticated: false, user: 'public', name: 'Public', email: '', groups: [], canWriteValue: true, canAckAlarm: true, canEditDashboard: true, canEditFavorites: true };
+    }
+    
+    // Set global permission flags
+    window.pwCanWriteValue = _currentUser.canWriteValue;
+    window.pwCanAckAlarm = _currentUser.canAckAlarm;
+    window.pwCanEditDashboard = _currentUser.canEditDashboard;
+    window.pwCanEditFavorites = _currentUser.canEditFavorites;
+
+    updateUserBadge(_currentUser);
+    applyRightsToUI(_currentUser);
+}
+
+/** Hides/Disables UI elements based on user rights. */
+function applyRightsToUI(u) {
+    if (!u.canWriteValue) {
+        document.querySelectorAll('.auth-write-only').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.auth-write-disable').forEach(el => {
+            el.disabled = true;
+            el.title = 'Insufficient rights (value edit permission required)';
+        });
+    }
+    if (!u.canAckAlarm) {
+        document.querySelectorAll('.auth-ack-only').forEach(el => el.style.display = 'none');
+    }
+    if (!u.canEditDashboard) {
+        document.querySelectorAll('.auth-edit-dash-only').forEach(el => el.style.display = 'none');
+    }
+    if (!u.canEditFavorites) {
+        document.querySelectorAll('.auth-edit-fav-only').forEach(el => el.style.display = 'none');
+    }
+}
+
+function updateUserBadge(u) {
+    const avatar = document.getElementById('userAvatar');
+    const nameLabel = document.getElementById('userNameLabel');
+    const popAvatar = document.getElementById('popoverAvatar');
+    const popName = document.getElementById('popoverName');
+    const popEmail = document.getElementById('popoverEmail');
+    const popGroups = document.getElementById('popoverGroups');
+    const popGroupList = document.getElementById('popoverGroupList');
+    const authChip = document.getElementById('authChip');
+
+    if (!avatar) return; // layout not loaded yet
+
+    if (u.user && u.user !== 'public') {
+        const initials = getUserInitials(u.name);
+        avatar.innerHTML = initials;
+        avatar.classList.add('authenticated');
+        avatar.title = u.name || u.user;
+        if (nameLabel) nameLabel.textContent = u.name || u.user;
+
+        if (popAvatar) {
+            popAvatar.innerHTML = initials;
+            popAvatar.classList.add('authenticated');
+        }
+        if (popName) popName.textContent = u.name || u.user;
+        if (popEmail) popEmail.textContent = u.email || u.user;
+
+        if (popGroups && popGroupList && u.groups && u.groups.length > 0) {
+            popGroups.style.display = '';
+            popGroupList.innerHTML = u.groups.map(g => {
+                const isAdmin = g.toLowerCase().includes('admin');
+                const icon = isAdmin ? 'fa-shield-alt' : 'fa-tag';
+                return `<span class="user-group-chip${isAdmin ? ' admin' : ''}"><i class="fas ${icon}"></i>${esc(g)}</span>`;
+            }).join('');
+        } else if (popGroups) {
+            popGroups.style.display = 'none';
+        }
+
+        if (authChip) {
+            authChip.className = 'user-auth-chip authenticated';
+            if (u.isDefault) {
+                authChip.innerHTML = '<i class="fas fa-id-badge"></i> Default Profile';
+            } else {
+                authChip.innerHTML = '<i class="fas fa-shield-alt"></i> Authenticated';
+            }
+        }
+    } else {
+        avatar.innerHTML = '<i class="fas fa-globe"></i>';
+        avatar.classList.remove('authenticated');
+        avatar.title = 'Public';
+        if (nameLabel) nameLabel.textContent = 'Public';
+
+        if (popAvatar) {
+            popAvatar.innerHTML = '<i class="fas fa-globe"></i>';
+            popAvatar.classList.remove('authenticated');
+        }
+        if (popName) popName.textContent = 'Public';
+        if (popEmail) popEmail.textContent = 'Not authenticated';
+        if (popGroups) popGroups.style.display = 'none';
+        if (authChip) {
+            authChip.className = 'user-auth-chip public';
+            authChip.innerHTML = '<i class="fas fa-globe"></i> Public Access';
+        }
+    }
+}
+
+function toggleUserPopover(e) {
+    e?.stopPropagation();
+    const pop = document.getElementById('userPopover');
+    if (!pop) return;
+    pop.classList.toggle('open');
+}
+
+// Close popover when clicking outside
+document.addEventListener('click', function(e) {
+    const pop = document.getElementById('userPopover');
+    if (pop && pop.classList.contains('open') && !e.target.closest('#userPopover') && !e.target.closest('#userBadge')) {
+        pop.classList.remove('open');
+    }
+});
+
+// Load user on page ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadUserIdentity);
+} else {
+    loadUserIdentity();
+}

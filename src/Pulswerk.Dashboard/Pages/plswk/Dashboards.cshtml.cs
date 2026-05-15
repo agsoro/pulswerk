@@ -45,6 +45,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public IActionResult OnPostCreate([FromBody] CreateDashboardRequest req)
         {
+            if (!DashboardAuth.CanEditDashboard(HttpContext, _data.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (req == null || string.IsNullOrWhiteSpace(req.Name))
                 return BadRequest("Name is required");
 
@@ -54,6 +57,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public IActionResult OnPostSave([FromBody] DashboardDefinition dash)
         {
+            if (!DashboardAuth.CanEditDashboard(HttpContext, _data.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (dash == null || string.IsNullOrEmpty(dash.Id))
                 return BadRequest("Invalid dashboard");
 
@@ -63,6 +69,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public IActionResult OnPostDelete([FromBody] DeleteRequest req)
         {
+            if (!DashboardAuth.CanEditDashboard(HttpContext, _data.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (req == null || string.IsNullOrEmpty(req.Id))
                 return BadRequest("Invalid ID");
 
@@ -125,6 +134,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public async Task<IActionResult> OnPostWrite([FromBody] WriteRequest request)
         {
+            if (!DashboardAuth.CanWriteValue(HttpContext, _data.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 

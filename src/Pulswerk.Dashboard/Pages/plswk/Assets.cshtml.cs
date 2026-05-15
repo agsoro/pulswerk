@@ -36,8 +36,14 @@ namespace Pulswerk.Dashboard.Pages
 
         public JsonResult OnGetAvailableKeys() => new JsonResult(_dataService.GetAvailableKeys());
 
-        public async Task<JsonResult> OnGetHistory(string key, string days)
+        public async Task<JsonResult> OnGetHistory(string key, string? days, long? startTs, long? endTs)
         {
+            if (startTs.HasValue && endTs.HasValue)
+            {
+                var d2 = await _dataService.GetTelemetryHistoryAsync(key, startTs.Value, endTs.Value);
+                return new JsonResult(d2);
+            }
+
             if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
                 d = 7;
             var data = await _dataService.GetTelemetryHistoryAsync(key, d);
@@ -52,6 +58,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public async Task<IActionResult> OnPostWrite([FromBody] WriteRequest request)
         {
+            if (!DashboardAuth.CanWriteValue(HttpContext, _dataService.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 
@@ -61,6 +70,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public async Task<IActionResult> OnPostWriteComplex([FromBody] WriteComplexRequest request)
         {
+            if (!DashboardAuth.CanWriteValue(HttpContext, _dataService.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 

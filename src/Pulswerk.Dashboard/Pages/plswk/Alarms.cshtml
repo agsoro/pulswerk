@@ -75,7 +75,7 @@
                     <div>@alarm.Time</div>
                     @if (!alarm.Status.StartsWith("ACK") && !string.IsNullOrEmpty(alarm.AlarmId))
                     {
-                        <button class="mt-2 bg-transparent border border-emerald-500 text-emerald-500 px-3 py-1 rounded text-xs cursor-pointer transition-all duration-200 inline-flex items-center gap-1.5 hover:bg-emerald-500/10"
+                        <button class="mt-2 bg-transparent border border-emerald-500 text-emerald-500 px-3 py-1 rounded text-xs cursor-pointer transition-all duration-200 inline-flex items-center gap-1.5 hover:bg-emerald-500/10 auth-write-only"
                             data-alarm-id="@alarm.AlarmId"
                             data-bacnet-ack-key="@(alarm.BacnetAckKey ?? "")"
                             onclick="openAck(this)">

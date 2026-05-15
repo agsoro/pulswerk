@@ -39,9 +39,18 @@ namespace Pulswerk.Dashboard.Pages
 
         public JsonResult OnGetAvailableKeys() => new JsonResult(_dataService.GetAvailableKeys());
 
-        public async Task<IActionResult> OnGetHistoryAsync(string key, int hours = 4)
+        public async Task<IActionResult> OnGetHistoryAsync(string key, string? days, long? startTs, long? endTs)
         {
-            var history = await _dataService.GetTelemetryHistoryAsync(key, hours);
+            if (startTs.HasValue && endTs.HasValue)
+            {
+                var historyRange = await _dataService.GetTelemetryHistoryAsync(key, startTs.Value, endTs.Value);
+                return new JsonResult(historyRange);
+            }
+
+            if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
+                d = 0.166; // fallback to ~4 hours if nothing provided
+
+            var history = await _dataService.GetTelemetryHistoryAsync(key, d);
             return new JsonResult(history);
         }
 
@@ -53,6 +62,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public async Task<IActionResult> OnPostWriteAsync([FromBody] WriteRequest request)
         {
+            if (!DashboardAuth.CanWriteValue(HttpContext, _dataService.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (string.IsNullOrEmpty(request.Key)) return new JsonResult(new { success = false, message = "Key missing" });
             var success = await _dataService.WriteValueAsync(request.Key, request.Value);
             return new JsonResult(new { success });
@@ -60,6 +72,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public async Task<IActionResult> OnPostWriteComplexAsync([FromBody] WriteComplexRequest request)
         {
+            if (!DashboardAuth.CanWriteValue(HttpContext, _dataService.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (string.IsNullOrEmpty(request.Key)) return new JsonResult(new { success = false, message = "Key missing" });
             var success = await _dataService.WriteComplexValueAsync(request.Key, request.Value);
             return new JsonResult(new { success });

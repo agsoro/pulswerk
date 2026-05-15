@@ -90,8 +90,8 @@
                 </div>
                 <div class="flex gap-2 mt-5 w-full justify-end">
                     <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}')"><i class="fas fa-chart-area"></i></button>
-                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Schedule View" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
-                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
+                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}" title="Schedule View" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
+                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
                     <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}')"><i class="fas fa-cog"></i></button>
                 </div>
             `;

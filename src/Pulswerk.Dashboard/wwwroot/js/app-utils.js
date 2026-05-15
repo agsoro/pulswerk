@@ -187,7 +187,7 @@ function getPointIcon(type) {
  * Toggles a key in localStorage favorites and updates the UI star
  */
 function toggleFavorite(key, btn) {
-    let favs = JSON.parse(localStorage.getItem('deziko_favorites') || '[]');
+    let favs = pw_fav.get('deziko_favorites');
     const index = favs.indexOf(key);
 
     if (index > -1) {
@@ -204,7 +204,7 @@ function toggleFavorite(key, btn) {
         }
     }
 
-    localStorage.setItem('deziko_favorites', JSON.stringify(favs));
+    pw_fav.set('deziko_favorites', favs);
 
     // If we are on the Index page, reload the favorites list
     if (typeof loadFavorites === 'function') {
@@ -217,7 +217,7 @@ function toggleFavorite(key, btn) {
  */
 function updateStarState(key, btn) {
     if (!btn) return;
-    const favs = JSON.parse(localStorage.getItem('deziko_favorites') || '[]');
+    const favs = pw_fav.get('deziko_favorites');
     if (favs.includes(key)) {
         btn.querySelector('i').className = 'fas fa-star text-amber-400';
         btn.classList.add('active');

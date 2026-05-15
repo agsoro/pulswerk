@@ -10,7 +10,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("polling")] PollingConfig? Polling,
         [property: JsonPropertyName("connections")] List<ConnectionConfig> Connections,
         [property: JsonPropertyName("devices")] List<DeviceConfig> Devices,
-        [property: JsonPropertyName("monitoring")] MonitoringConfig? Monitoring
+        [property: JsonPropertyName("server")] ServerConfig? Server
     );
 
     // ── InfluxDB ───────────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("assetType")] string? AssetType = null,
 
         // Write-back (BACnet only – direct via dashboard or API)
-        [property: JsonPropertyName("writeback")] bool Writeback = true,
+        [property: JsonPropertyName("writeback")] bool Writeback = false,
 
         /// <summary>
         /// Per-device poll interval in seconds. Overrides the global polling.intervalSeconds.
@@ -282,10 +282,80 @@ namespace Pulswerk.Core
     /// Configuration for the embedded read-only monitoring dashboard.
     /// When enabled, a Kestrel HTTP server serves a dashboard on the configured port.
     /// </summary>
-    public record MonitoringConfig(
-        [property: JsonPropertyName("enabled")] bool Enabled,
+    public record ServerConfig(
         [property: JsonPropertyName("port")] int Port = 5000,
         [property: JsonPropertyName("logBufferSize")] int LogBufferSize = 5000,
-        [property: JsonPropertyName("language")] string Language = "en"
+        [property: JsonPropertyName("language")] string Language = "en",
+
+        /// <summary>
+        /// Authentication settings (e.g. Authelia/Reverse Proxy headers).
+        /// </summary>
+        [property: JsonPropertyName("auth")] AuthConfig? Auth = null,
+
+        /// <summary>
+        /// Role-based access control for write operations.
+        /// When null or disabled, all writes are permitted (backward compatible).
+        /// </summary>
+        [property: JsonPropertyName("rights")] RightsConfig? Rights = null
+    );
+
+    /// <summary>
+    /// Configuration for header-based authentication (e.g. from Authelia via Nginx).
+    /// </summary>
+    public record AuthConfig(
+        /// <summary>
+        /// Enable header-based authentication. If false, Remote-* headers are ignored.
+        /// </summary>
+        [property: JsonPropertyName("enabled")] bool Enabled = false,
+
+        /// <summary>
+        /// List of trusted reverse-proxy IPs or CIDR ranges (e.g. "10.192.30.1", "172.16.0.0/12").
+        /// Remote-User/Groups/Name/Email headers are ONLY trusted from these sources.
+        /// When empty/null, auth headers are stripped from ALL requests (safe default).
+        /// </summary>
+        [property: JsonPropertyName("trustedProxies")] List<string>? TrustedProxies = null,
+
+        /// <summary>
+        /// Fallback username used when no user is authenticated via headers.
+        /// Useful for local development or providing a "public" identity with specific groups.
+        /// </summary>
+        [property: JsonPropertyName("defaultUser")] string? DefaultUser = null,
+
+        /// <summary>
+        /// Fallback groups assigned to the defaultUser.
+        /// </summary>
+        [property: JsonPropertyName("defaultGroups")] List<string>? DefaultGroups = null
+    );
+
+    /// <summary>
+    /// Controls which authenticated user groups may perform write operations.
+    /// </summary>
+    public record RightsConfig(
+        /// <summary>Enable rights enforcement. When false, all writes are allowed.</summary>
+        [property: JsonPropertyName("enabled")] bool Enabled = false,
+
+        /// <summary>
+        /// Groups that are allowed to edit telemetry values (write-back).
+        /// Matched case-insensitively against the Authelia Remote-Groups header.
+        /// </summary>
+        [property: JsonPropertyName("allowAssetValueEdit")] List<string>? AllowAssetValueEdit = null,
+
+        /// <summary>
+        /// Groups that are allowed to acknowledge alarms.
+        /// Falls back to AllowAssetValueEdit when null.
+        /// </summary>
+        [property: JsonPropertyName("allowAlarmAck")] List<string>? AllowAlarmAck = null,
+
+        /// <summary>
+        /// Groups that are allowed to edit dashboards (create, save, delete).
+        /// Falls back to AllowAssetValueEdit when null.
+        /// </summary>
+        [property: JsonPropertyName("allowDashboardEdit")] List<string>? AllowDashboardEdit = null,
+        
+        /// <summary>
+        /// Groups that are allowed to pin/unpin favorites.
+        /// Falls back to AllowAssetValueEdit when null.
+        /// </summary>
+        [property: JsonPropertyName("allowFavoriteEdit")] List<string>? AllowFavoriteEdit = null
     );
 }

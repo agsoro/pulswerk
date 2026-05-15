@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <VersionMajor>2</VersionMajor>
-    <VersionMinor>3</VersionMinor>
+    <VersionMinor>4</VersionMinor>
     <VersionBuild>$([System.IO.File]::ReadAllText($(MSBuildThisFileDirectory)version.txt).Trim())</VersionBuild>
     <Version>$(VersionMajor).$(VersionMinor).$(VersionBuild)</Version>
     <Authors>Pulswerk Team</Authors>

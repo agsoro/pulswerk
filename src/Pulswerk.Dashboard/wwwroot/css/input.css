@@ -65,13 +65,13 @@
 
     /* Key Picker */
     .key-item {
-        @apply flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors duration-150
+        @apply flex items-center gap-3 px-3 py-1.5 cursor-pointer transition-colors duration-150
                border-b border-white/[0.03] hover:bg-white/[0.03];
     }
     .key-item.selected { @apply bg-sky-400/10; }
-    .key-name { @apply text-sm font-medium text-white; }
-    .key-path { @apply text-[0.7rem] text-slate-500 truncate; }
-    .key-val { @apply text-xs text-cyan-500 font-mono whitespace-nowrap; }
+    .key-name { @apply text-[0.82rem] font-medium text-white; }
+    .key-path { @apply text-[0.68rem] text-slate-500 truncate; }
+    .key-val { @apply text-[0.7rem] text-cyan-500 font-mono whitespace-nowrap; }
 
     /* Asset Tree */
     .tree-row.active { @apply bg-cyan-500/15 text-cyan-500 font-semibold; }
@@ -550,3 +550,121 @@ aside:hover .lang-sep { width: 1px; opacity: 1; }
 }
 .tw-hist-input:focus { border-color: #38bdf8; }
 .tw-apply-btn { width: 100%; margin-top: 0.5rem; }
+
+/* ══════════════════════════════════════════════════════════
+   User identity badge & popover (Authelia)
+   ══════════════════════════════════════════════════════════ */
+
+/* Badge in sidebar */
+.user-badge {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; padding: 2px; border-radius: 8px; cursor: pointer;
+    transition: all 0.3s; position: relative;
+    background: transparent; border: none;
+}
+.user-badge:hover .user-avatar {
+    border-color: rgba(56,189,248,0.5);
+    box-shadow: 0 0 12px -2px rgba(56,189,248,0.2);
+}
+.user-avatar {
+    width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.6rem; font-weight: 800; text-transform: uppercase;
+    background: rgba(255,255,255,0.04);
+    color: #64748b; border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+}
+.user-avatar i { font-size: 0.65rem; }
+.user-avatar.authenticated {
+    background: linear-gradient(135deg, rgba(56,189,248,0.2), rgba(139,92,246,0.2));
+    color: #e2e8f0; border-color: rgba(56,189,248,0.25);
+}
+.user-name {
+    font-size: 0.68rem; font-weight: 600; color: #94a3b8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 90px; width: 0; opacity: 0; transition: all 0.2s;
+    margin-left: 0;
+}
+/* Expand name when sidebar hovers */
+aside:hover .user-name {
+    width: auto; opacity: 1; margin-left: 0.5rem;
+}
+
+/* Popover panel */
+.user-popover {
+    display: none; position: fixed; z-index: 1100;
+    bottom: 72px; left: 80px;
+    min-width: 260px; max-width: 300px;
+    background: rgba(30,41,59,0.97); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+    padding: 0; overflow: hidden;
+    box-shadow: 0 20px 60px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05);
+    animation: userPopIn 0.2s ease-out;
+}
+.user-popover.open { display: block; }
+@keyframes userPopIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.user-popover-header {
+    display: flex; align-items: center; gap: 0.65rem;
+    padding: 0.85rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.user-popover-avatar {
+    width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 800; text-transform: uppercase;
+    background: rgba(255,255,255,0.04);
+    color: #64748b; border: 1px solid rgba(255,255,255,0.1);
+}
+.user-popover-avatar.authenticated {
+    background: linear-gradient(135deg, #38bdf8, #a78bfa);
+    color: #0f172a; font-size: 0.85rem; border: none;
+}
+.user-popover-info { min-width: 0; flex: 1; }
+.user-popover-name {
+    font-size: 0.82rem; font-weight: 700; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.user-popover-email {
+    font-size: 0.68rem; color: #64748b; margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.user-popover-groups {
+    padding: 0.6rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.user-popover-section-title {
+    font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #64748b; margin-bottom: 0.4rem;
+}
+.user-popover-group-list {
+    display: flex; flex-wrap: wrap; gap: 0.3rem;
+}
+.user-group-chip {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    padding: 0.2rem 0.5rem; border-radius: 5px;
+    font-size: 0.65rem; font-weight: 600;
+    background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.15);
+    color: #38bdf8;
+}
+.user-group-chip i { font-size: 0.5rem; opacity: 0.5; }
+.user-group-chip.admin {
+    background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.2);
+    color: #fbbf24;
+}
+.user-popover-footer {
+    padding: 0.6rem 1rem;
+}
+.user-auth-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.2rem 0.55rem; border-radius: 5px;
+    font-size: 0.65rem; font-weight: 600;
+}
+.user-auth-chip.public {
+    background: rgba(100,116,139,0.08); border: 1px solid rgba(100,116,139,0.15);
+    color: #94a3b8;
+}
+.user-auth-chip.authenticated {
+    background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);
+    color: #10b981;
+}

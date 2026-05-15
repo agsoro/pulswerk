@@ -73,7 +73,14 @@ async function reloadHistory() {
     loader.classList.add('flex');
     
     try {
-        const response = await fetch(`?handler=History&key=${currentHistoryKey}&days=${days}`);
+        let url = `?handler=History&key=${currentHistoryKey}`;
+        if (range.mode === 'history') {
+            url += `&startTs=${range.startTs}&endTs=${range.endTs}`;
+        } else {
+            url += `&days=${days}`;
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
         
         renderChart(data);
@@ -154,6 +161,10 @@ async function refreshHistoryData() {
     if (!currentHistoryKey) return;
     if (document.getElementById('historyModal')?.style.display !== 'flex') return;
     const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now() };
+    
+    // In history mode, we don't auto-refresh because the data is static
+    if (range.mode === 'history') return;
+
     const days = (range.endTs - range.startTs) / 86400000;
 
     try {
@@ -167,10 +178,11 @@ async function refreshHistoryData() {
         const vals = await valRes.json();
 
         // Update live value display
-        const liveVal = vals?.[currentHistoryKey];
-        if (liveVal != null) {
+        const raw = vals?.[currentHistoryKey];
+        if (raw != null) {
+            const meta = resolveKeyMeta(currentHistoryKey);
             const lvEl = document.getElementById('chartLiveValue');
-            if (lvEl) lvEl.textContent = liveVal;
+            if (lvEl) lvEl.textContent = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
         }
 
         // Update chart series without full redraw

@@ -52,6 +52,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public async Task<IActionResult> OnPostWrite([FromBody] WriteRequest request)
         {
+            if (!DashboardAuth.CanWriteValue(HttpContext, _dataService.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 

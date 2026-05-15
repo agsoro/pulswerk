@@ -432,14 +432,22 @@ namespace Pulswerk.Dashboard
         }
 
         /// <summary>
-        /// Returns telemetry history from InfluxDB for a single key.
+        /// Returns telemetry history from InfluxDB for a single key within a specific time range.
+        /// </summary>
+        public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, long startTs, long endTs)
+        {
+            Log.Debug($"[Dashboard] History requested: {key}, range={startTs} to {endTs}");
+            return await TsStore.QueryAsync(key, startTs, endTs, limit: 5000);
+        }
+
+        /// <summary>
+        /// Returns telemetry history from InfluxDB for a single key, looking back a number of days from now.
         /// </summary>
         public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, double days)
         {
-            Log.Debug($"[Dashboard] History requested: {key}, days={days}");
-            long endTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 5000; 
+            long endTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 5000;
             long startTs = endTs - (long)(days * 24 * 60 * 60 * 1000.0) - 5000;
-            return await TsStore.QueryAsync(key, startTs, endTs, limit: 5000);
+            return await GetTelemetryHistoryAsync(key, startTs, endTs);
         }
 
         public Task<bool> WriteValueAsync(string key, double value)

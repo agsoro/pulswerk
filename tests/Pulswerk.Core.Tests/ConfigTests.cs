@@ -96,9 +96,16 @@ namespace Connector.Tests
                   "slaveId": 1
                 }
               ],
-              "monitoring": {
-                "enabled": true,
-                "port": 5000
+              "server": {
+                "port": 5000,
+                "auth": {
+                  "enabled": true,
+                  "trustedProxies": ["10.0.0.1"]
+                },
+                "rights": {
+                  "enabled": true,
+                  "allowAssetValueEdit": ["ops"]
+                }
               }
             }
             """;
@@ -118,8 +125,14 @@ namespace Connector.Tests
             Assert.Equal("conn1", cfg.Connections[0].Id);
             Assert.Single(cfg.Devices);
             Assert.Equal("Device 1", cfg.Devices[0].Name);
-            Assert.True(cfg.Monitoring!.Enabled);
-            Assert.Equal(5000, cfg.Monitoring.Port);
+
+            Assert.NotNull(cfg.Server!.Auth);
+            Assert.True(cfg.Server.Auth!.Enabled);
+            Assert.Equal("10.0.0.1", cfg.Server.Auth.TrustedProxies![0]);
+            Assert.NotNull(cfg.Server.Rights);
+            Assert.True(cfg.Server.Rights!.Enabled);
+            Assert.Equal("ops", cfg.Server.Rights.AllowAssetValueEdit![0]);
+            Assert.Equal(5000, cfg.Server.Port);
         }
 
         [Fact]
@@ -287,7 +300,7 @@ namespace Connector.Tests
             """;
 
             var cfg = JsonSerializer.Deserialize<AppConfig>(json);
-            Assert.Null(cfg!.Monitoring);
+            Assert.Null(cfg!.Server);
         }
 
         [Fact]
@@ -297,8 +310,7 @@ namespace Connector.Tests
             {
               "connections": [],
               "devices": [],
-              "monitoring": {
-                "enabled": true,
+              "server": {
                 "port": 8080,
                 "logBufferSize": 10000
               }
@@ -306,7 +318,27 @@ namespace Connector.Tests
             """;
 
             var cfg = JsonSerializer.Deserialize<AppConfig>(json);
-            Assert.Equal(10000, cfg!.Monitoring!.LogBufferSize);
+            Assert.Equal(10000, cfg!.Server!.LogBufferSize);
+        }
+
+        [Fact]
+        public void ServerConfig_Auth_NestedCorrectly()
+        {
+            string json = """
+            {
+              "server": {
+                "auth": {
+                  "enabled": true,
+                  "trustedProxies": ["1.1.1.1"]
+                }
+              }
+            }
+            """;
+
+            var cfg = JsonSerializer.Deserialize<AppConfig>(json);
+            Assert.NotNull(cfg!.Server!.Auth);
+            Assert.True(cfg.Server.Auth!.Enabled);
+            Assert.Equal("1.1.1.1", cfg.Server.Auth.TrustedProxies![0]);
         }
 
         // ── No ThingsBoard config accepted ───────────────────────────────────

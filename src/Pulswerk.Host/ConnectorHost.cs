@@ -39,7 +39,7 @@ namespace Pulswerk.Host
         DashboardDataService? _dataService;
         TelemetryStore _tsStore = null!;
         AlarmStore _alarmStore = null!;
-        MonitoringServer? _monitoringServer;
+        DashboardServer? _dashboardServer;
         DevicePoller _poller = null!;
 
         ConnectorHost(AppConfig cfg)
@@ -154,7 +154,7 @@ namespace Pulswerk.Host
 
         void InitLogging(string configPath)
         {
-            _logger = new ConsoleLogger(new LogBuffer(_cfg.Monitoring?.LogBufferSize ?? 5000));
+            _logger = new ConsoleLogger(new LogBuffer(_cfg.Server?.LogBufferSize ?? 5000));
             Log.Init(_logger);
             Log.Info($"Config: {configPath}");
         }
@@ -197,7 +197,7 @@ namespace Pulswerk.Host
 
         void PrintSummary()
         {
-            Log.Info($"Monitoring Config: Enabled={_cfg.Monitoring?.Enabled}, Port={_cfg.Monitoring?.Port}");
+            Log.Info($"Server Config: Port={_cfg.Server?.Port}");
 
             Log.Info("Connections (" + _cfg.Connections.Count + "):");
             foreach (var c in _cfg.Connections)
@@ -216,9 +216,8 @@ namespace Pulswerk.Host
 
         void StartMonitoringDashboard(CancellationToken ct)
         {
-            if (_cfg.Monitoring?.Enabled != true) return;
-
-            Log.Info($"Starting monitoring dashboard on port {_cfg.Monitoring.Port}...");
+            if (_cfg.Server == null) return;
+            Log.Info($"Starting dashboard on port {_cfg.Server.Port}...");
 
             var dataService = new DashboardDataService(
                 _logger.Buffer, _cfg, _tsStore, _alarmStore,
@@ -228,8 +227,8 @@ namespace Pulswerk.Host
             string dataDir = "/app/data";
             var dashboardStore = new DashboardStore(dataDir);
 
-            _monitoringServer = new MonitoringServer(dataService, dashboardStore);
-            var server = _monitoringServer;
+            _dashboardServer = new DashboardServer(dataService, dashboardStore);
+            var server = _dashboardServer;
 
             _ = Task.Run(async () =>
             {
@@ -466,7 +465,7 @@ namespace Pulswerk.Host
 
             _tsStore.Dispose();
             _alarmStore.Dispose();
-            _monitoringServer?.Dispose();
+            _dashboardServer?.Dispose();
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

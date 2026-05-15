@@ -98,6 +98,31 @@
         <footer
             class="mt-auto pt-4 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full flex flex-col items-center gap-3 overflow-hidden"
             data-testid="sidebar-footer">
+
+            <!-- User identity badge (Authelia) -->
+            <div class="user-badge" id="userBadge" onclick="toggleUserPopover(event)" data-testid="user-badge">
+                <div class="user-avatar" id="userAvatar" title="Public">
+                    <i class="fas fa-globe"></i>
+                </div>
+                <span class="user-name nav-label" id="userNameLabel">Public</span>
+            </div>
+            <div class="user-popover" id="userPopover" data-testid="user-popover">
+                <div class="user-popover-header">
+                    <div class="user-popover-avatar" id="popoverAvatar"><i class="fas fa-globe"></i></div>
+                    <div class="user-popover-info">
+                        <div class="user-popover-name" id="popoverName">Public</div>
+                        <div class="user-popover-email" id="popoverEmail">Not authenticated</div>
+                    </div>
+                </div>
+                <div class="user-popover-groups" id="popoverGroups" style="display:none">
+                    <div class="user-popover-section-title"><i class="fas fa-users" style="margin-right:0.4rem;opacity:0.5"></i>Groups</div>
+                    <div id="popoverGroupList" class="user-popover-group-list"></div>
+                </div>
+                <div class="user-popover-footer" id="popoverAuthStatus">
+                    <span class="user-auth-chip public" id="authChip"><i class="fas fa-globe"></i> Public Access</span>
+                </div>
+            </div>
+
             <div class="lang-switcher" data-testid="lang-switcher">
                 <button onclick="setLanguage('en')" id="lang-en" class="lang-btn">EN</button>
                 <div class="lang-sep"></div>
@@ -126,7 +151,7 @@
         <script src="/plswk/js/base.js"></script>
         <script src="/plswk/js/modals.js"></script>
         <script>
-            initI18n('@(DashboardData.Config.Monitoring?.Language ?? "en")');
+            initI18n('@(DashboardData.Config.Server?.Language ?? "en")');
         </script>
         @RenderSection("Scripts", required: false)
     </body>

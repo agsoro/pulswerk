@@ -75,7 +75,7 @@
 
             <div id="editStatus" class="status-msg"></div>
 
-            <button type="button" class="save-btn" id="saveBtn" onclick="submitEdit(event)">
+            <button type="button" class="save-btn auth-write-only" id="saveBtn" onclick="submitEdit(event)">
                 <i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>
             </button>
         </div>
@@ -139,7 +139,7 @@
             <div class="flex justify-between items-center mb-4">
                 <span class="text-xs text-slate-500 uppercase tracking-wider font-bold"
                       data-i18n="schedule_configuration">Schedule Configuration</span>
-                <button class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded transition-colors"
+                <button class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded transition-colors auth-write-only"
                         id="btnEditSchedule" onclick="toggleScheduleEdit(true)">
                     <i class="fas fa-edit mr-1"></i> <span data-i18n="edit">Edit</span>
                 </button>

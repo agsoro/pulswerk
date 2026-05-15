@@ -15,11 +15,40 @@
   "polling": {
     "intervalSeconds": 30
   },
-  // ── Monitoring Dashboard ──────────────────────────────────────────────────
-  "monitoring": {
-    "enabled": true,
+  // ── Server / Web Dashboard ────────────────────────────────────────────────
+  "server": {
     "port": 5000,
-    "logBufferSize": 5000
+    "logBufferSize": 5000,
+    "auth": {
+      "enabled": true,
+      "defaultUser": "operator",
+      "defaultGroups": [
+        "operators"
+      ],
+      // Trust Docker-internal proxies (compose network)
+      "trustedProxies": [
+        "172.16.0.0/12",
+        "10.0.0.0/8"
+      ]
+    },
+    "rights": {
+      "enabled": true,
+      "allowAssetValueEdit": [
+        "users",
+        "admins"
+      ],
+      "allowAlarmAck": [
+        "users",
+        "admins"
+      ],
+      "allowDashboardEdit": [
+        "admins"
+      ],
+      "allowFavoriteEdit": [
+        "users",
+        "admins"
+      ]
+    }
   },
   // ── Connections ──────────────────────────────────────────────────────────
   "connections": [
@@ -125,7 +154,9 @@
       "deviceId": 10,
       "address": "bacnet-sim",
       "assetType": "BACnet Zone",
-      "cov": { "enabled": true }
+      "cov": {
+        "enabled": true
+      }
     }
   ]
 }

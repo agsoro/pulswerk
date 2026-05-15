@@ -72,6 +72,9 @@ namespace Pulswerk.Dashboard.Pages
 
         public IActionResult OnPostAck([FromBody] AckRequest req)
         {
+            if (!DashboardAuth.CanAckAlarm(HttpContext, _data.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
             if (string.IsNullOrEmpty(req?.AlarmId))
                 return new JsonResult(new { success = false, error = "Missing alarm ID" });
 
