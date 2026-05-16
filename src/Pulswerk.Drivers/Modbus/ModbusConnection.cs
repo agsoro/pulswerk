@@ -131,7 +131,6 @@ namespace Pulswerk.Drivers.Modbus
                     if (!connectTask.Wait(ConnectTimeoutMs))
                     {
                         tcp.Dispose();
-                        _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
                         throw new TimeoutException(
                             $"TCP connect to {address}:{port} timed out after {ConnectTimeoutMs}ms.");
                     }
@@ -139,7 +138,6 @@ namespace Pulswerk.Drivers.Modbus
                     if (connectTask.IsFaulted)
                     {
                         tcp.Dispose();
-                        _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
                         throw connectTask.Exception?.InnerException
                             ?? new SocketException((int)SocketError.ConnectionRefused);
                     }
@@ -218,6 +216,7 @@ namespace Pulswerk.Drivers.Modbus
         public static void ResetCooldown(string connId)
         {
             _lastConnectAttempt.TryRemove(connId, out _);
+            _consecutiveFailures.TryRemove(connId, out _);
         }
 
         /// <summary>
