@@ -18,30 +18,33 @@ namespace Pulswerk.Drivers.Modbus
         private static readonly ConcurrentDictionary<string, (TcpClient Tcp, IModbusMaster Master)> _pool = new();
         private static readonly ConcurrentDictionary<string, object> _connLocks = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastConnectAttempt = new();
+        private static readonly ConcurrentDictionary<string, int> _consecutiveFailures = new();
         private static readonly object _lock = new();
 
-        /// <summary>Minimum interval between reconnect attempts to the same connection (prevents hammering a dead gateway).</summary>
-        private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(10);
+        /// <summary>Minimum interval between reconnect attempts to the same connection.</summary>
+        private static readonly TimeSpan BaseReconnectCooldown = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan MaxReconnectCooldown = TimeSpan.FromMinutes(5);
 
         /// <summary>TCP connect timeout in milliseconds.</summary>
         private const int ConnectTimeoutMs = 5_000;
 
         public static T WithMaster<T>(ConnectionConfig conn, Func<IModbusMaster, T> action)
         {
-            // Per-connection lock — NModbus masters are NOT thread-safe;
-            // concurrent reads on the same TCP stream corrupt the framing.
             var connLock = _connLocks.GetOrAdd(conn.Id, _ => new object());
             lock (connLock)
             {
                 IModbusMaster master;
+                bool wasFreshConnection = false;
                 try
                 {
-                    master = GetOrCreateMaster(conn);
+                    var result = GetOrCreateMaster(conn);
+                    master = result.Master;
+                    wasFreshConnection = result.IsNew;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Log.Error($"[Modbus] Connection '{conn.Id}' ({conn.Address}:{conn.Port}): " +
-                              $"failed to establish — {ex.GetType().Name}: {ex.Message}");
+                    // Connection establishment failed — log and re-throw.
+                    // The error is already logged inside GetOrCreateMaster if it's the first one.
                     throw;
                 }
 
@@ -51,16 +54,24 @@ namespace Pulswerk.Drivers.Modbus
                 }
                 catch (Exception ex) when (IsTransportError(ex))
                 {
-                    // Connection died — purge from pool AND reset cooldown so the
-                    // retry below can actually open a new TCP socket instead of
-                    // hitting the cooldown gate and throwing a synthetic error.
+                    // Connection died during action.
                     Log.Warning($"[Modbus] Connection '{conn.Id}' transport error: {ex.GetType().Name}: {ex.Message}. Reconnecting…");
+                    
+                    // Mark as dead and purge.
                     FullReset(conn.Id);
+
+                    // If it was already a fresh connection that died during the action,
+                    // we don't retry immediately to avoid a loop. If it was a pooled
+                    // connection, we try exactly once more.
+                    if (wasFreshConnection)
+                    {
+                        throw;
+                    }
 
                     try
                     {
-                        master = GetOrCreateMaster(conn);
-                        return action(master);
+                        var result = GetOrCreateMaster(conn);
+                        return action(result.Master);
                     }
                     catch (Exception retryEx)
                     {
@@ -71,28 +82,40 @@ namespace Pulswerk.Drivers.Modbus
             }
         }
 
-        private static IModbusMaster GetOrCreateMaster(ConnectionConfig conn)
+        private struct MasterResult
+        {
+            public IModbusMaster Master;
+            public bool IsNew;
+        }
+
+        private static MasterResult GetOrCreateMaster(ConnectionConfig conn)
         {
             string key = conn.Id;
             if (_pool.TryGetValue(key, out var entry) && IsAlive(entry.Tcp))
-                return entry.Master;
+                return new MasterResult { Master = entry.Master, IsNew = false };
 
             lock (_lock)
             {
                 // Double-check after acquiring lock
                 if (_pool.TryGetValue(key, out entry) && IsAlive(entry.Tcp))
-                    return entry.Master;
+                    return new MasterResult { Master = entry.Master, IsNew = false };
+
+                // Calculate backoff based on consecutive failures
+                _consecutiveFailures.TryGetValue(key, out int failCount);
+                var cooldown = TimeSpan.FromTicks(Math.Min(
+                    MaxReconnectCooldown.Ticks,
+                    BaseReconnectCooldown.Ticks * (long)Math.Pow(2, Math.Min(failCount, 6)) // exponential up to ~10.6 mins, but capped at 5
+                ));
 
                 // Cooldown check — don't hammer a dead gateway
                 if (_lastConnectAttempt.TryGetValue(key, out var lastAttempt) &&
-                    DateTime.UtcNow - lastAttempt < ReconnectCooldown)
+                    DateTime.UtcNow - lastAttempt < cooldown)
                 {
                     throw new SocketException((int)SocketError.HostUnreachable);
                 }
 
                 // Dispose old if present
                 PurgeConnection(key);
-
                 _lastConnectAttempt[key] = DateTime.UtcNow;
 
                 string address = conn.Address
@@ -103,11 +126,12 @@ namespace Pulswerk.Drivers.Modbus
                 var tcp = new TcpClient();
                 try
                 {
-                    // Use async connect with timeout to avoid blocking for 20+ seconds
+                    // Use async connect with timeout
                     var connectTask = tcp.ConnectAsync(address, port);
                     if (!connectTask.Wait(ConnectTimeoutMs))
                     {
                         tcp.Dispose();
+                        _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
                         throw new TimeoutException(
                             $"TCP connect to {address}:{port} timed out after {ConnectTimeoutMs}ms.");
                     }
@@ -115,11 +139,11 @@ namespace Pulswerk.Drivers.Modbus
                     if (connectTask.IsFaulted)
                     {
                         tcp.Dispose();
+                        _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
                         throw connectTask.Exception?.InnerException
                             ?? new SocketException((int)SocketError.ConnectionRefused);
                     }
 
-                    // Set socket-level timeouts for read/write operations
                     tcp.ReceiveTimeout = 5_000;
                     tcp.SendTimeout = 5_000;
 
@@ -129,16 +153,17 @@ namespace Pulswerk.Drivers.Modbus
                     master.Transport.Retries = 1;
 
                     _pool[key] = (tcp, master);
-                    // Clear the cooldown on success — a previously-failed connection
-                    // should not penalise subsequent reconnect attempts if the link
-                    // drops again later.
                     _lastConnectAttempt.TryRemove(key, out _);
+                    _consecutiveFailures.TryRemove(key, out _); // Reset failures on success
+                    
                     Log.Info($"[Modbus] Connected to '{conn.Id}' ({address}:{port}).");
-                    return master;
+                    return new MasterResult { Master = master, IsNew = true };
                 }
-                catch
+                catch (Exception ex)
                 {
                     tcp.Dispose();
+                    _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
+                    Log.Error($"[Modbus] Connection '{conn.Id}' ({address}:{port}) establishment failed: {ex.Message}");
                     throw;
                 }
             }

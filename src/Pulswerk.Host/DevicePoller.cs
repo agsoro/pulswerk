@@ -249,11 +249,11 @@ namespace Pulswerk.Host
                 !device.DeviceType.Equals("bacnet", StringComparison.OrdinalIgnoreCase) &&
                 !device.DeviceType.Equals("deziko", StringComparison.OrdinalIgnoreCase);
 
-            if (isModbus && (count == FailThreshold || count == FailThreshold * 3 || count == FailThreshold * 5))
+            if (isModbus && (count % 50 == 0))
             {
                 Log.Warning(
                     $"[{device.DeviceType,-10}] {device.Name,-38} " +
-                    $"forcing Modbus connection reset for '{device.ConnectionId}'");
+                    $"prolonged outage ({count} fails) — forcing Modbus connection reset for '{device.ConnectionId}'");
                 Pulswerk.Drivers.Modbus.ModbusConnection.FullReset(device.ConnectionId!);
             }
         }
