@@ -1,7 +1,7 @@
 @page
-@model Pulswerk.Dashboard.Pages.AssetsListModel
+@model Pulswerk.Dashboard.Pages.DataPointsListModel
 @{
-    ViewData["Title"] = "Asset Inventory";
+    ViewData["Title"] = "Data Points";
 }
 
 <div class="h-[calc(100vh-110px)] flex flex-col gap-6 animate-fade-in">
@@ -9,11 +9,11 @@
     <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-800/40 backdrop-blur-md border border-white/5 rounded-2xl p-5 shadow-2xl">
         <div class="flex items-center gap-4">
             <div class="w-12 h-12 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
-                <i class="fas fa-boxes text-xl"></i>
+                <i class="fas fa-list-ul text-xl"></i>
             </div>
             <div>
-                <h1 class="text-xl font-extrabold text-white tracking-tight">Asset Inventory</h1>
-                <p class="text-[0.7rem] text-slate-400 uppercase tracking-widest font-semibold opacity-60">Real-time telemetry overview</p>
+                <h1 class="text-xl font-extrabold text-white tracking-tight">Data Points</h1>
+                <p class="text-[0.7rem] text-slate-400 uppercase tracking-widest font-semibold opacity-60">Real-time point overview</p>
             </div>
         </div>
         
@@ -75,7 +75,7 @@
                                         <div class="absolute inset-0 rounded-full border-4 border-cyan-500/10"></div>
                                         <div class="absolute inset-0 rounded-full border-4 border-cyan-500 border-t-transparent animate-spin"></div>
                                     </div>
-                                    <p class="text-slate-400 font-medium animate-pulse">Synchronizing inventory...</p>
+                                    <p class="text-slate-400 font-medium animate-pulse">Synchronizing points...</p>
                                 </div>
                             </td>
                         </tr>
@@ -147,7 +147,7 @@
                         <td colspan="8" class="px-6 py-32 text-center">
                             <div class="flex flex-col items-center gap-2 opacity-20">
                                 <i class="fas fa-search text-4xl mb-2"></i>
-                                <p class="text-slate-400 italic">No assets matching your search criteria</p>
+                                <p class="text-slate-400 italic">No data points matching your search criteria</p>
                             </div>
                         </td>
                     </tr>`;

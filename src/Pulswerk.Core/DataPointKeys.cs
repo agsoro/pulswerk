@@ -1,7 +1,7 @@
-// TelemetryKeys.cs – Centralized constants for telemetry keys
+// DataPointKeys.cs – Centralized constants for data point keys
 namespace Pulswerk.Core
 {
-    public static class TelemetryKeys
+    public static class DataPointKeys
     {
         // Standard energy/power keys used across all readers
         public const string PowerKw = "power";

@@ -1,71 +1,67 @@
 # Pulswerk Data Model & Hierarchy
 
-This document describes the internal data structures used by the Pulswerk Dashboard to represent asset hierarchies, telemetry points, and navigation states.
+This document describes the internal data structures used by the Pulswerk Dashboard to represent hierarchies, assets, and data points.
 
-## 1. Asset Hierarchy Overview
+## 1. System Topology
 
-Pulswerk uses a unified tree structure to represent assets from different protocols (BACnet, Modbus). The tree is composed of nodes (`AssetNodeDto`) which can contain other nodes or a list of telemetry points (`AssetPointDto`).
+Pulswerk follows a strict five-layer hierarchy for data organization:
 
-### Node Types
-- **Root**: The top-level container (internal).
-- **Folder**: Manual path segments defined in `pulswerk.compose.json` (e.g., "Building A", "Floor 1").
-- **BACnet Device**: The entry point for a BACnet controller.
-- **Structured View**: Folders derived from BACnet `OBJECT_STRUCTURED_VIEW` (Type 29) objects.
-- **Modbus Device**: The entry point for a Modbus device.
+**Connection** → **Device** → **Hierarchy (Assets)** → **DataPoint** → **TimeSeries**
 
-### ID Uniqueness
-To prevent collisions between multiple devices or connections, IDs are globally unique:
-- **Manual Segments**: Prefixed with `path_` followed by a slugified name (e.g., `path_building_a`).
-- **BACnet/Modbus Nodes**: Prefixed with the Connection Name (e.g., `bacnet-deziko_OBJECT_STRUCTURED_VIEW:10`).
-- **Telemetry Points**: Prefixed with the Connection Name (e.g., `bacnet-deziko_OBJECT_ANALOG_INPUT:5`).
+1.  **Connection**: The physical or logical transport layer (e.g., Modbus TCP, BACnet IP).
+2.  **Device**: A specific piece of hardware defined in configuration (e.g., "Main Meter", "Deziko ASP-01").
+3.  **Hierarchy (Assets)**: The logical organization layer. These are "Nodes" in the tree that can represent physical locations (Building A / Floor 1) or structured sub-sections of a device.
+4.  **DataPoint**: An individual sensor, metric, or register (e.g., `power_kw`, `room_temp`).
+5.  **TimeSeries**: The historical progression of a DataPoint's value over time, stored in the database.
 
 ---
 
-## 2. Data Structures (DTOs)
+## 2. Inventory & Hierarchy Tree
 
-### AssetNodeDto
+The dashboard represents the inventory as a unified tree of **Nodes** (`AssetNodeDto`).
+
+### Node Types
+- **Root**: The top-level container (Internal).
+- **Folder**: Manual path segments defined in configuration.
+- **Device**: The entry point for a hardware device.
+- **Structured View**: (BACnet only) Folders derived from `OBJECT_STRUCTURED_VIEW`.
+
+### ID Uniqueness
+To prevent collisions, IDs are globally unique:
+- **Manual Folders**: Prefixed with `path_` followed by a slugified name (e.g., `path_building_a`).
+- **DataPoints**: Prefixed with the internal Device ID (e.g., `meter-01_energy_import`).
+
+---
+
+## 3. Data Structures (DTOs)
+
+### AssetNodeDto (The "Asset" / "Hierarchy" Layer)
 Represents a folder or device in the navigation tree.
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `Id` | string | Globally unique ID (ConnectionPrefix + ObjectId). Used for URL deep-linking. |
+| `Id` | string | Globally unique ID. Used for URL deep-linking. |
 | `Name` | string | Friendly display name. |
-| `Type` | string | "Folder", "BACnet Device", "OBJECT_ANALOG_INPUT", etc. |
+| `Type` | string | "Folder", "Device", "Structured View", etc. |
 | `IsView` | bool | `true` if it acts as a container/folder. |
-| `Children` | List | Sub-nodes. |
-| `Points` | List | Data points belonging to this specific node. |
+| `Children` | List | Sub-nodes of type `AssetNodeDto`. |
+| `DataPoints` | List | List of `DataPointDto` belonging to this specific node. |
 
-### AssetPointDto
-Represents a single data point (sensor, setpoint, or schedule).
+### DataPointDto (The "DataPoint" Layer)
+Represents a single point of data (sensor, setpoint, or calculated metric).
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `Id` | string | Unique identifier for favorites and navigation. |
-| `Key` | string | Telemetry key used for data lookup (InfluxDB/Live values). |
+| `Key` | string | The authoritative key used for data lookup (DeviceID_PointKey). |
+| `FullName` | string | Combined name (Asset Name + Point Name) for unique identification. |
 | `Value` | string | Current live value formatted as a string. |
 | `Units` | string | Engineering units (e.g., "°C", "kW"). |
 | `IsWritable` | bool | `true` if the point supports manual overrides. |
-| `EnumValues` | List | Labels for Binary or Multi-state points (renders as a dropdown). |
+| `EnumValues` | List | Labels for Binary or Multi-state points. |
 | `ParentPath` | List | Breadcrumb data back to the root. |
 
 ---
 
-## 3. Telemetry Key Schema
+## 4. Storage & History
 
-Telemetry keys are used for real-time updates and historical data queries.
-
-### Unified Key Schema
-All telemetry keys follow the pattern: `{DeviceId}_{PointKey}`
-
-- **BACnet Example**: `ahu-01_G01'ASP01'RLT002'REG'TPF102'TSu_value`
-- **Modbus Example**: `meter-main_power_kw`
-
----
-
-## 4. Special Objects
-
-### Schedules (BACnet)
-Objects of type `OBJECT_SCHEDULE` (17) are rendered with a specialized UI.
-- **Read**: The `Weekly_Schedule` property is parsed into a JSON-like array of switching points for 7 days.
-- **Write**: The dashboard sends a `WriteComplex` request containing the full updated 7-day schedule to the device.
-
-### Favorites
-Favorites are stored in `localStorage` as a list of `AssetPointDto.Key` strings. The dashboard uses these keys to fetch live values and metadata from the `DashboardDataService`.
+Historical data is stored as a **TimeSeries**. 
+Each DataPoint is mapped to a series in the database (InfluxDB) where the full `Key` is used as a tag to retrieve history.

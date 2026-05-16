@@ -7,7 +7,7 @@
 
 <div class="flex flex-col gap-8 animate-fade-in">
     <div class="flex justify-between items-center">
-        <p class="text-slate-400">Pinned assets and telemetry points for quick access.</p>
+        <p class="text-slate-400">Pinned assets and data points for quick access.</p>
         <button class="btn-icon" title="Refresh" onclick="loadFavorites()"><i class="fas fa-sync-alt"></i></button>
     </div>
 
@@ -45,7 +45,7 @@
                 allPoints = [];
                 const extractPoints = (nodes) => {
                     nodes.forEach(n => {
-                        if (n.points) allPoints.push(...n.points);
+                        if (n.dataPoints) allPoints.push(...n.dataPoints);
                         if (n.children) extractPoints(n.children);
                     });
                 };
@@ -104,8 +104,8 @@
             const newTrees = await response.json();
             const updateValues = (nodes) => {
                 nodes.forEach(node => {
-                    if (node.points) {
-                        node.points.forEach(p => {
+                    if (node.dataPoints) {
+                        node.dataPoints.forEach(p => {
                             const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
                             if (el) el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
                             if (currentHistoryKey === p.key && document.getElementById('historyModal').style.display === 'flex') {

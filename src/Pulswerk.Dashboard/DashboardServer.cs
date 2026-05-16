@@ -59,6 +59,26 @@ namespace Pulswerk.Dashboard
                 builder.Services.AddDataProtection()
                     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")));
 
+                // Robust discovery of the dashboard's static assets (wwwroot)
+                // This handles both published (Docker) and source (Dev) environments.
+                string[] possibleWwwRoots = {
+                    Path.Combine(AppContext.BaseDirectory, "wwwroot", "_content", "Pulswerk.Dashboard"),
+                    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Pulswerk.Dashboard", "wwwroot")),
+                    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Pulswerk.Dashboard", "wwwroot")),
+                    Path.Combine(AppContext.BaseDirectory, "wwwroot")
+                };
+
+                string? finalWwwRoot = possibleWwwRoots.FirstOrDefault(Directory.Exists);
+                if (finalWwwRoot != null)
+                {
+                    builder.Environment.WebRootPath = finalWwwRoot;
+                    Log.Info($"[Server] Using static assets from: {finalWwwRoot}");
+                }
+                else
+                {
+                    Log.Warning("[Server] Could not locate dashboard wwwroot folder. Static assets (icons/logo) may be broken.");
+                }
+
                 _app = builder.Build();
 
                 ConfigureMiddleware();
@@ -79,19 +99,30 @@ namespace Pulswerk.Dashboard
                 _app.UseDeveloperExceptionPage();
             }
 
-            // Serve the Host's own wwwroot (if any) at /plswk
-            _app.UseStaticFiles("/plswk");
+            var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+            contentTypeProvider.Mappings[".woff2"] = "font/woff2";
+            contentTypeProvider.Mappings[".woff"] = "font/woff";
+            contentTypeProvider.Mappings[".ttf"] = "font/ttf";
+            contentTypeProvider.Mappings[".otf"] = "font/otf";
+            contentTypeProvider.Mappings[".eot"] = "application/vnd.ms-fontobject";
 
-            // Razor class library static files are published under
-            // wwwroot/_content/Pulswerk.Dashboard/.  Map them to /plswk
-            // so that <script src="/plswk/js/dashboards.js"> resolves correctly.
-            var rclPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "_content", "Pulswerk.Dashboard");
-            if (Directory.Exists(rclPath))
+            // Serve static files from the discovered WebRootPath at /plswk
+            if (!string.IsNullOrEmpty(_app.Environment.WebRootPath))
             {
-                _app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
+                _app.UseStaticFiles(new StaticFileOptions
                 {
-                    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(rclPath),
-                    RequestPath = "/plswk"
+                    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(_app.Environment.WebRootPath),
+                    RequestPath = "/plswk",
+                    ContentTypeProvider = contentTypeProvider
+                });
+            }
+            else
+            {
+                // Fallback to default behavior if no path was discovered
+                _app.UseStaticFiles(new StaticFileOptions
+                {
+                    RequestPath = "/plswk",
+                    ContentTypeProvider = contentTypeProvider
                 });
             }
             // ── Anti-spoofing: strip Authelia headers from untrusted sources ──
@@ -190,7 +221,7 @@ namespace Pulswerk.Dashboard
                     {
                         Name = d.Name,
                         Type = d.DeviceType,
-                        ConnectionId = d.ConnectionId,
+                        ConnectionId = d.ConnectionId ?? "",
                         Status = isOffline ? "offline" : "online",
                         StatusColor = isOffline ? "#ef4444" : "#10b981",
                         LastSeen = lastPolled == default ? "Never" : lastPolled.ToString("yyyy-MM-dd HH:mm:ss UTC"),

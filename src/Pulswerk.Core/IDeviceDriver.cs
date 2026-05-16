@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Pulswerk.Core
 {
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     /// <summary>
     /// Implement one class per device type.
@@ -17,16 +17,16 @@ namespace Pulswerk.Core
         /// <summary>Returns true if the driver is currently busy with background tasks like discovery or history sync.</summary>
         bool IsBusy { get; }
 
-        Telemetry Read(ConnectionConfig connection, DeviceConfig device);
+        DataPointValues Read(ConnectionConfig connection, DeviceConfig device);
 
-        /// <summary>Returns the list of telemetry keys this driver produces.</summary>
-        IEnumerable<string> GetTelemetryKeys();
+        /// <summary>Returns the list of data point keys this driver produces.</summary>
+        IEnumerable<string> GetDataPointKeys();
 
         /// <summary>
         /// Returns a key → unit string map for display purposes.
         /// Drivers that know their units override this; the default returns an empty dict.
         /// </summary>
-        IReadOnlyDictionary<string, string> GetTelemetryUnits()
+        IReadOnlyDictionary<string, string> GetDataPointUnits()
             => new Dictionary<string, string>();
 
         /// <summary>Returns the hierarchical tree of assets/points for this device.</summary>
@@ -44,8 +44,7 @@ namespace Pulswerk.Core
     {
         /// <summary>
         /// Writes one value to the field device.
-        /// <paramref name="key"/> is the telemetry/attribute key
-        /// (e.g. "ao_3_supply_sp_value").
+        /// <paramref name="key"/> is the data point key.
         /// Throws on error; the caller logs and handles the failure.
         /// </summary>
         void Write(ConnectionConfig connection, DeviceConfig device,

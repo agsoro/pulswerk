@@ -21,7 +21,7 @@ namespace Connector.Tests
             Assert.Equal("http://localhost:8086", cfg.Url);
             Assert.Equal("connector-token", cfg.Token);
             Assert.Equal("pulswerk", cfg.Org);
-            Assert.Equal("telemetry", cfg.Bucket);
+            Assert.Equal("data_points", cfg.Bucket);
         }
 
         [Fact]

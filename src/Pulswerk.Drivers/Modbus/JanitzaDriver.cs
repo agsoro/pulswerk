@@ -2,7 +2,7 @@
 //
 //  Register map  (UMG 604/605-PRO, 0-based, float32 = 2 × 16-bit registers)
 //
-//    Address  Telemetry key    Unit   Conversion
+//    Address  Data point key    Unit   Conversion
 //    ───────  ───────────────  ─────  ──────────
 //    19020    power_kw         W      ÷ 1000
 //    19060    import_kwh       Wh     ÷ 1000
@@ -18,7 +18,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     class JanitzaDriver : BaseModbusDriver
     {
@@ -28,13 +28,13 @@ namespace Pulswerk.Drivers.Modbus
 
         public override string DriverName => "Janitza";
 
-        public override IEnumerable<string> GetTelemetryKeys() => new[] {
-            TelemetryKeys.PowerKw,
-            TelemetryKeys.EnergyImportKwh,
-            TelemetryKeys.EnergyExportKwh
+        public override IEnumerable<string> GetDataPointKeys() => new[] {
+            DataPointKeys.PowerKw,
+            DataPointKeys.EnergyImportKwh,
+            DataPointKeys.EnergyExportKwh
         };
 
-        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -46,11 +46,11 @@ namespace Pulswerk.Drivers.Modbus
                 float importWh = ModbusConnection.ReadFloat32(master, slaveId, REG_IMPORT_SUM_WH);
                 float exportWh = ModbusConnection.ReadFloat32(master, slaveId, REG_EXPORT_SUM_WH);
 
-                return new Telemetry
+                return new DataPointValues
                 {
-                    [TelemetryKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
-                    [TelemetryKeys.EnergyImportKwh] = Math.Round(importWh / 1000.0, 3),
-                    [TelemetryKeys.EnergyExportKwh] = Math.Round(exportWh / 1000.0, 3),
+                    [DataPointKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
+                    [DataPointKeys.EnergyImportKwh] = Math.Round(importWh / 1000.0, 3),
+                    [DataPointKeys.EnergyExportKwh] = Math.Round(exportWh / 1000.0, 3),
                 };
             });
         }

@@ -22,7 +22,7 @@ namespace Pulswerk.Dashboard
     {
         public LogBuffer LogBuffer { get; }
         public AppConfig Config { get; }
-        public TelemetryStore TsStore { get; }
+        public DataPointStore DataStore { get; }
         public AlarmStore AlarmStore { get; }
         public ConcurrentDictionary<string, byte> OfflineDevices { get; }
         public ConcurrentDictionary<string, DateTime> LastPolledAtMap { get; }
@@ -44,17 +44,18 @@ namespace Pulswerk.Dashboard
         // ── Unified health history ───────────────────────────────────────────
         // Sampled every 5 minutes, kept for 24 hours (288 data points max).
         private readonly Queue<HealthSnapshot> _healthHistory = new();
+        private readonly CalculationEngine _calc;
         private readonly object _healthLock = new();
         private System.Threading.Timer? _healthTimer;
 
         public DashboardDataService(LogBuffer logBuffer, AppConfig config,
-            TelemetryStore tsStore, AlarmStore alarmStore,
+            DataPointStore dataStore, AlarmStore alarmStore,
             ConcurrentDictionary<string, byte> offlineDevices, ConcurrentDictionary<string, DateTime> lastPolledAtMap,
             Dictionary<string, IDeviceDriver> drivers)
         {
             LogBuffer = logBuffer;
             Config = config;
-            TsStore = tsStore;
+            DataStore = dataStore;
             AlarmStore = alarmStore;
             OfflineDevices = offlineDevices;
             LastPolledAtMap = lastPolledAtMap;
@@ -64,6 +65,7 @@ namespace Pulswerk.Dashboard
             // Calculation engine for consumption (kWh / m³)
             string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
             if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+            _calc = new CalculationEngine(dataDir);
 
             Log.Info($"[Dashboard] DataService initialized with {Config.Devices.Count} devices.");
 
@@ -87,7 +89,7 @@ namespace Pulswerk.Dashboard
             [JsonPropertyName("workingSetMb")] public long WorkingSetMb { get; set; }
             [JsonPropertyName("gcHeapMb")] public long GcHeapMb { get; set; }
             [JsonPropertyName("dbSizeMb")] public long DbSizeMb { get; set; }
-            [JsonPropertyName("telemetryKeys")] public long TelemetryKeys { get; set; }
+            [JsonPropertyName("dataPointKeys")] public long DataPointKeys { get; set; }
             [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
             [JsonPropertyName("connections")] public Dictionary<string, ConnSnapshotEntry> Connections { get; set; } = new();
         }
@@ -126,12 +128,12 @@ namespace Pulswerk.Dashboard
                 }
                 catch { /* non-critical */ }
 
-                // ── InfluxDB telemetry stats (key count, point count) ─────────
-                long telemetryKeys = 0, totalDataPoints = 0;
+                // ── InfluxDB data point stats (key count, point count) ─────────
+                long dataPointKeys = 0, totalDataPoints = 0;
                 try
                 {
-                    var dbStats = await TsStore.GetStatsAsync();
-                    telemetryKeys = dbStats.KeyCount;
+                    var dbStats = await DataStore.GetStatsAsync();
+                    dataPointKeys = dbStats.KeyCount;
                     totalDataPoints = dbStats.PointCount;
                     // Use InfluxDB internal stats as fallback for disk size
                     if (dbSizeBytes == 0 || dbSizeBytes < 1000)
@@ -150,7 +152,7 @@ namespace Pulswerk.Dashboard
                     WorkingSetMb = process.WorkingSet64 / (1024 * 1024),
                     GcHeapMb = GC.GetTotalMemory(false) / (1024 * 1024),
                     DbSizeMb = dbSizeBytes / (1024 * 1024),
-                    TelemetryKeys = telemetryKeys,
+                    DataPointKeys = dataPointKeys,
                     TotalDataPoints = totalDataPoints
                 };
 
@@ -206,22 +208,23 @@ namespace Pulswerk.Dashboard
             {
                 if (Drivers.TryGetValue(device.Name, out var driver))
                 {
-                    var keys = driver.GetTelemetryKeys();
-                    var units = driver.GetTelemetryUnits();
+                    var keys = driver.GetDataPointKeys();
+                    var units = driver.GetDataPointUnits();
                     foreach (var k in keys)
                     {
                         string pointKey = $"{device.Id}_{k}";
                         if (units.TryGetValue(k, out var u))
                         {
-                            // Register key for metadata purposes if needed, otherwise just skip
-                        }
+                        // Register key for metadata purposes and for calculation engine
+                        _calc.RegisterKey(pointKey, u);
                     }
                 }
             }
         }
+    }
 
 
-        public Dictionary<string, (double val, DateTime ts)> UpdateTelemetry(Dictionary<string, object> values, bool isPush = false)
+        public Dictionary<string, (double val, DateTime ts)> UpdateDataPoints(Dictionary<string, object> values, bool isPush = false)
         {
             if (values == null) return new Dictionary<string, (double val, DateTime ts)>();
 
@@ -244,6 +247,18 @@ namespace Pulswerk.Dashboard
                     if (TryToDouble(kvp.Value, out double d))
                     {
                         persistedResults[kvp.Key] = (d, now);
+
+                        // Process via Calculation Engine to generate live/persisted deltas (_hourly, _daily, etc)
+                        var (live, persisted) = _calc.Process(kvp.Key, kvp.Value, now);
+                        foreach (var l in live)
+                        {
+                            LatestValues[l.Key] = l.Value;
+                            LatestTimestamps[l.Key] = now;
+                        }
+                        foreach (var p in persisted)
+                        {
+                            persistedResults[p.Key] = p.Value;
+                        }
                     }
                 }
             }
@@ -309,38 +324,110 @@ namespace Pulswerk.Dashboard
             }
         }
 
-        public List<AssetNodeDto> GetAssetTrees()
+        public List<AssetNodeDto> GetAssetTrees(bool includeLiveValues = true)
         {
-            var root = new AssetNodeDto { Name = "Root", IsView = true };
+            var root = new AssetNodeDto { Name = "Root", Type = "Root" };
 
             foreach (var device in Config.Devices)
             {
-                if (!device.HierarchyEnabled) continue;
+                AssetNodeDto? deviceTree = null;
 
-                if (Drivers.TryGetValue(device.Name, out var driver))
+                if (device.DeviceType == "virtual")
                 {
-                    var deviceTree = driver.GetAssetHierarchy(device);
-                    if (deviceTree != null)
+                    deviceTree = new AssetNodeDto
                     {
-                        // Populate live values and consumption points
-                        PopulateTree(deviceTree);
+                        Id = device.Id,
+                        Name = device.Name,
+                        Type = "Device",
+                        IsView = true
+                    };
+                }
+                else if (device.HierarchyEnabled && Drivers.TryGetValue(device.Name, out var driver))
+                {
+                    deviceTree = driver.GetAssetHierarchy(device);
+                }
 
-                        // Merge into the global hierarchy based on the device's configured path
-                        if (device.Path != null && device.Path.Count > 0)
-                            MergeDtoIntoTree(root, deviceTree, device.Path);
-                        else
-                            root.Children.Add(deviceTree);
+                if (deviceTree == null) continue;
+
+                // Add virtual points if configured
+                if (device.DataPoints != null)
+                {
+                    foreach (var dp in device.DataPoints)
+                    {
+                        deviceTree.DataPoints.Add(new DataPointDto
+                        {
+                            Id = $"{device.Id}_{dp.Id}",
+                            Key = $"{device.Id}_{dp.Id}",
+                            Name = dp.Name,
+                            FullName = $"{device.Name} {dp.Name}",
+                            Units = dp.Units ?? "",
+                            Type = "Calculated",
+                            Description = $"Formula: {dp.Formula}",
+                            LastUpdate = "Live",
+                            Value = includeLiveValues ? GetLiveValueForFormula(dp.Formula, dp.Units, device) : "---"
+                        });
                     }
                 }
+
+                // Populate live values and consumption points
+                PopulateTree(deviceTree);
+
+                // Merge into the global hierarchy
+                if (device.Path != null && device.Path.Count > 0)
+                    MergeDtoIntoTree(root, deviceTree, device.Path);
+                else
+                    root.Children.Add(deviceTree);
             }
 
             return root.Children;
         }
 
+        private string GetLiveValueForFormula(string formula, string? units, DeviceConfig? device = null)
+        {
+            // Simple live value resolver for tree view
+            try
+            {
+                formula = ExpandFormula(formula, device);
+
+                if (formula.StartsWith("pathsum("))
+                {
+                    var keys = ResolvePathSumKeys(formula);
+                    double sum = 0;
+                    foreach (var k in keys)
+                    {
+                        if (LatestValues.TryGetValue(k, out var v) && TryToDouble(v, out double d))
+                            sum += d;
+                    }
+                    return Math.Round(sum, 2).ToString(CultureInfo.InvariantCulture);
+                }
+
+                // Handle consumption modifiers in tree (current hour/day from CalculationEngine)
+                if (formula.Contains(":consumption:"))
+                {
+                    var parts = formula.Split(":consumption:");
+                    var baseKey = parts[0];
+                    var interval = parts[1];
+                    string suffix = interval switch
+                    {
+                        "1h" => "_hourly",
+                        "1d" => "_daily",
+                        "1m" => "_monthly",
+                        "1y" => "_yearly",
+                        _ => ""
+                    };
+                    if (LatestValues.TryGetValue(baseKey + suffix, out var v))
+                        return v?.ToString() ?? "0";
+                }
+            }
+            catch { /* fallback to default */ }
+
+            return "-";
+        }
+
         private void PopulateTree(AssetNodeDto node)
         {
-            // Points at this level
-            var originalPoints = node.Points.ToList();
+            // DataPoints at this level
+            var originalPoints = node.DataPoints.ToList();
             foreach (var p in originalPoints)
             {
                 p.Value = GetLatestValue(p.Key);
@@ -360,7 +447,7 @@ namespace Pulswerk.Dashboard
                 var existing = parent.Children.FirstOrDefault(c => c.Name == node.Name);
                 if (existing != null)
                 {
-                    existing.Points.AddRange(node.Points);
+                    existing.DataPoints.AddRange(node.DataPoints);
                     foreach (var child in node.Children)
                         MergeDtoIntoTree(existing, child, new List<string>());
                 }
@@ -392,7 +479,7 @@ namespace Pulswerk.Dashboard
                 // Last segment of the path. If node name matches segment, merge.
                 if (node.Name == segment)
                 {
-                    nextNode.Points.AddRange(node.Points);
+                    nextNode.DataPoints.AddRange(node.DataPoints);
                     foreach (var child in node.Children)
                         MergeDtoIntoTree(nextNode, child, new List<string>());
                 }
@@ -432,27 +519,27 @@ namespace Pulswerk.Dashboard
         }
 
         /// <summary>
-        /// Returns telemetry history from InfluxDB for a single key within a specific time range.
+        /// Returns data point history from InfluxDB for a single key within a specific time range.
         /// </summary>
-        public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, long startTs, long endTs)
+        public async Task<List<TsPoint>> GetDataPointHistoryAsync(string key, long startTs, long endTs)
         {
             Log.Debug($"[Dashboard] History requested: {key}, range={startTs} to {endTs}");
-            return await TsStore.QueryAsync(key, startTs, endTs, limit: 5000);
+            return await DataStore.QueryAsync(key, startTs, endTs, limit: 5000);
         }
 
         /// <summary>
-        /// Returns telemetry history from InfluxDB for a single key, looking back a number of days from now.
+        /// Returns data point history from InfluxDB for a single key, looking back a number of days from now.
         /// </summary>
-        public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, double days)
+        public async Task<List<TsPoint>> GetDataPointHistoryAsync(string key, double days = 1.0)
         {
             long endTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 5000;
             long startTs = endTs - (long)(days * 24 * 60 * 60 * 1000.0) - 5000;
-            return await GetTelemetryHistoryAsync(key, startTs, endTs);
+            return await GetDataPointHistoryAsync(key, startTs, endTs);
         }
 
         public Task<bool> WriteValueAsync(string key, double value)
         {
-            var device = IdentifyDeviceFromKey(key);
+            var device = IdentifyDeviceFromDataPointKey(key);
             if (device == null) { Log.Error($"[Dashboard] Write rejected: no device found for key '{key}'"); return Task.FromResult(false); }
 
             // Extract the technical point key from the scoped key {DeviceId}_{PointKey}
@@ -490,8 +577,8 @@ namespace Pulswerk.Dashboard
                 }
 
                 // Also update InfluxDB immediately so charts show the change
-                TsStore.Insert(key, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), value);
-                TsStore.Flush();
+                DataStore.Insert(key, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), value);
+                DataStore.Flush();
 
                 return Task.FromResult(true);
             }
@@ -504,7 +591,7 @@ namespace Pulswerk.Dashboard
 
         public Task<bool> WriteComplexValueAsync(string key, object value)
         {
-            var device = IdentifyDeviceFromKey(key);
+            var device = IdentifyDeviceFromDataPointKey(key);
             if (device == null) return Task.FromResult(false);
 
             string driverKey = key.Substring(device.Id.Length + 1);
@@ -528,13 +615,14 @@ namespace Pulswerk.Dashboard
         }
 
         /// <summary>
-        /// Returns all available telemetry keys with metadata for the dashboard widget key picker.
+        /// Returns all available data point keys with metadata for the dashboard widget key picker.
         /// Flattens the asset tree into a list of selectable keys.
         /// </summary>
-        public List<AvailableKeyDto> GetAvailableKeys()
+        public List<AvailableDataPointDto> GetAvailableDataPoints()
         {
-            var keys = new List<AvailableKeyDto>();
-            var trees = GetAssetTrees();
+            var keys = new List<AvailableDataPointDto>();
+            // Break recursion: do not calculate live values when just listing keys
+            var trees = GetAssetTrees(includeLiveValues: false);
 
             void ExtractKeys(List<AssetNodeDto> nodes, string pathPrefix)
             {
@@ -544,25 +632,25 @@ namespace Pulswerk.Dashboard
                         ? node.Name
                         : $"{pathPrefix} › {node.Name}";
 
-                    foreach (var point in node.Points)
+                    foreach (var dp in node.DataPoints)
                     {
-                        var dev = IdentifyDeviceFromKey(point.Key);
-                        keys.Add(new AvailableKeyDto
+                        var dev = IdentifyDeviceFromDataPointKey(dp.Key);
+                        keys.Add(new AvailableDataPointDto
                         {
-                            Key = point.Key,
-                            Name = point.Name,
-                            FullName = point.FullName,
-                            Units = point.Units,
-                            Type = point.Type,
+                            Key = dp.Key,
+                            Name = dp.Name,
+                            FullName = dp.FullName,
+                            Units = dp.Units,
+                            Type = dp.Type,
                             Path = currentPath,
-                            Value = point.Value,
-                            LastUpdate = FormatLastUpdate(point.Key),
-                            ParentId = point.ParentId,
-                            ParentPath = point.ParentPath,
+                            Value = dp.Value,
+                            LastUpdate = FormatLastUpdate(dp.Key),
+                            ParentId = dp.ParentId,
+                            ParentPath = dp.ParentPath,
                             Device = dev?.Name ?? "System",
                             Connection = dev?.ConnectionId ?? "-",
-                            IsWritable = point.IsWritable,
-                            EnumValues = point.EnumValues
+                            IsWritable = dp.IsWritable,
+                            EnumValues = dp.EnumValues
                         });
                     }
 
@@ -576,17 +664,145 @@ namespace Pulswerk.Dashboard
         }
 
         /// <summary>
-        /// Fetches telemetry history for multiple keys within a time range.
-        /// Used by dashboard widgets with the global timewindow.
+        /// Fetches data point history for multiple keys within a time range.
+        /// Supports virtual keys: "key:consumption:1h" or "pathsum('Path', 'Unit'):consumption:1d".
         /// </summary>
-        public async Task<Dictionary<string, List<TsPoint>>> GetTelemetryHistoryForWidgetAsync(
-            List<string> telemetryKeys, long startTs, long endTs)
+        public async Task<Dictionary<string, List<TsPoint>>> GetDataPointHistoryForWidgetAsync(
+            List<string> dataPointKeys, long startTs, long endTs)
         {
-            return await TsStore.QueryMultipleAsync(telemetryKeys, startTs, endTs);
+            var result = new Dictionary<string, List<TsPoint>>();
+            var realKeys = new List<string>();
+            var realKeyMap = new Dictionary<string, string>(); // Requested Key -> Expanded Key
+
+            foreach (var key in dataPointKeys)
+            {
+                // Resolve persistent virtual point ID to formula
+                string keyWithoutModifier = key;
+                string? extraModifier = null;
+                if (key.Contains(":consumption:"))
+                {
+                    var parts = key.Split(":consumption:");
+                    keyWithoutModifier = parts[0];
+                    extraModifier = parts[1];
+                }
+
+                // Resolve calculated point within any device (physical or virtual)
+                var vdev = Config.Devices.FirstOrDefault(d => 
+                    keyWithoutModifier.StartsWith(d.Id + "_") && 
+                    d.DataPoints != null &&
+                    d.DataPoints.Any(p => p.Id == keyWithoutModifier.Substring(d.Id.Length + 1))
+                );
+                string effectiveKey = keyWithoutModifier;
+
+                if (vdev != null && vdev.DataPoints != null)
+                {
+                    string pointId = keyWithoutModifier.Substring(vdev.Id.Length + 1);
+                    var dp = vdev.DataPoints.FirstOrDefault(p => p.Id == pointId);
+                    if (dp != null) effectiveKey = ExpandFormula(dp.Formula, vdev);
+                }
+
+                effectiveKey = ExpandFormula(effectiveKey, vdev);
+
+                string baseKey = effectiveKey;
+                string? consumptionInterval = extraModifier;
+
+                if (effectiveKey.Contains(":consumption:"))
+                {
+                    var parts = effectiveKey.Split(":consumption:");
+                    baseKey = parts[0];
+                    consumptionInterval ??= parts[1];
+                }
+
+                if (baseKey.StartsWith("pathsum("))
+                {
+                    var resolvedKeys = ResolvePathSumKeys(baseKey);
+                    result[key] = await DataStore.QuerySumAsync(resolvedKeys, startTs, endTs, consumptionInterval);
+                }
+                else if (consumptionInterval != null)
+                {
+                    result[key] = await DataStore.QueryConsumptionAsync(baseKey, consumptionInterval, startTs, endTs);
+                }
+                else
+                {
+                    realKeys.Add(effectiveKey);
+                    realKeyMap[key] = effectiveKey;
+                }
+            }
+
+            if (realKeys.Count > 0)
+            {
+                var realData = await DataStore.QueryMultipleAsync(realKeys, startTs, endTs);
+                foreach (var entry in realKeyMap)
+                {
+                    if (realData.TryGetValue(entry.Value, out var data))
+                        result[entry.Key] = data;
+                }
+            }
+
+            return result;
+        }
+
+        private List<string> ResolvePathSumKeys(string pathSumExpr)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(pathSumExpr,
+                @"pathsum\s*\(\s*['""](.+?)['""]\s*,\s*['""](.+?)['""]\s*\)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (!match.Success) return new List<string>();
+
+            var fullPathExpr = match.Groups[1].Value.Replace("/", " › ");
+            var unitPattern = match.Groups[2].Value.ToLowerInvariant();
+
+            // If the path expression ends with a wildcard segment (e.g. .../*_energy_import), 
+            // we split it into a base path and a key pattern.
+            string pathPattern = fullPathExpr;
+            string? keySuffixPattern = null;
+
+            int lastIdx = fullPathExpr.LastIndexOf(" › ");
+            if (lastIdx >= 0)
+            {
+                string tail = fullPathExpr.Substring(lastIdx + 3);
+                if (tail.Contains("*"))
+                {
+                    pathPattern = fullPathExpr.Substring(0, lastIdx);
+                    keySuffixPattern = tail;
+                }
+            }
+            else if (fullPathExpr.Contains("*"))
+            {
+                pathPattern = "*";
+                keySuffixPattern = fullPathExpr;
+            }
+
+            string ToRegex(string glob) => "^" + System.Text.RegularExpressions.Regex.Escape(glob).Replace("\\*", ".*") + "$";
+
+            bool IsMatch(string pattern, string value)
+            {
+                if (pattern == "*" || pattern == "") return true;
+                if (!pattern.Contains("*")) return (value ?? "").Contains(pattern, StringComparison.OrdinalIgnoreCase);
+                return System.Text.RegularExpressions.Regex.IsMatch(value ?? "", ToRegex(pattern), System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+
+            var resolved = new List<string>();
+            var allKeys = GetAvailableDataPoints();
+            foreach (var ak in allKeys)
+            {
+                // Match the path
+                if (IsMatch(pathPattern, ak.Path ?? ""))
+                {
+                    // Match the key (if provided in path) and the unit
+                    bool keyMatch = keySuffixPattern == null || IsMatch(keySuffixPattern, ak.Key ?? "");
+                    bool unitMatch = IsMatch(unitPattern, ak.Units ?? "") || IsMatch(unitPattern, ak.Key ?? "");
+
+                    if (keyMatch && unitMatch)
+                        resolved.Add(ak.Key ?? "");
+                }
+            }
+            return resolved;
         }
 
         /// <summary>
-        /// Gets current values for a list of telemetry keys. Used by latest-values and single-value widgets.
+        /// Gets current values for a list of data point keys. Used by latest-values and single-value widgets.
         /// </summary>
         public Dictionary<string, string> GetCurrentValues(List<string> keys)
         {
@@ -605,7 +821,7 @@ namespace Pulswerk.Dashboard
 
         public async Task<List<PropertyDto>> GetPropertiesAsync(string key)
         {
-            var device = IdentifyDeviceFromKey(key);
+            var device = IdentifyDeviceFromDataPointKey(key);
             if (device == null) return new List<PropertyDto>();
 
             if (Drivers.TryGetValue(device.Name, out var driver))
@@ -620,7 +836,7 @@ namespace Pulswerk.Dashboard
             return new List<PropertyDto>();
         }
 
-        private DeviceConfig? IdentifyDeviceFromKey(string key)
+        private DeviceConfig? IdentifyDeviceFromDataPointKey(string key)
         {
             // The key format is {DeviceId}_{PointKey}. 
             // We search for the longest matching DeviceId to handle underscores in IDs correctly.
@@ -628,6 +844,36 @@ namespace Pulswerk.Dashboard
                 .Where(d => key.StartsWith(d.Id + "_"))
                 .OrderByDescending(d => d.Id.Length)
                 .FirstOrDefault();
+        }
+
+        private string ExpandFormula(string formula, DeviceConfig? device)
+        {
+            if (device == null || string.IsNullOrWhiteSpace(formula)) return formula;
+            if (formula.Contains("pathsum(", StringComparison.OrdinalIgnoreCase)) return formula;
+
+            // Prepend device ID to any token that looks like a data point key and doesn't already have a device prefix.
+            // We use a regex that matches identifiers starting with a letter.
+            return System.Text.RegularExpressions.Regex.Replace(formula, @"[a-zA-Z][a-zA-Z0-9_\-:]*", match =>
+            {
+                string token = match.Value;
+
+                // Skip known keywords and modifiers
+                if (token.Equals("consumption", StringComparison.OrdinalIgnoreCase)) return token;
+                if (token.Equals("pathsum", StringComparison.OrdinalIgnoreCase)) return token;
+
+                string baseToken = token;
+                if (token.Contains(":"))
+                {
+                    baseToken = token.Split(':')[0];
+                }
+
+                // If it already starts with a known device ID + underscore, it's already expanded.
+                if (Config.Devices.Any(d => baseToken.StartsWith(d.Id + "_")))
+                    return token;
+
+                // Otherwise, assume it's a local key and prepend the device ID.
+                return $"{device.Id}_{token}";
+            });
         }
 
         public Task<HeartbeatStatsDto> GetHeartbeatStatsAsync()
@@ -706,7 +952,7 @@ namespace Pulswerk.Dashboard
                 OnlineDevices = Config.Devices.Count - OfflineDevices.Count - staleCount,
                 StaleDevices = staleCount,
                 OfflineDevices = offlineCount,
-                TotalTelemetryKeys = latest?.TelemetryKeys ?? 0,
+                TotalDataPointKeys = latest?.DataPointKeys ?? 0,
                 TotalDataPoints = latest?.TotalDataPoints ?? 0,
                 UpdatesPerMinute = GetUpdatesPerMinute(),
                 TotalUpdates = _totalUpdates,
@@ -732,7 +978,7 @@ namespace Pulswerk.Dashboard
         [JsonPropertyName("onlineDevices")] public int OnlineDevices { get; set; }
         [JsonPropertyName("staleDevices")] public int StaleDevices { get; set; }
         [JsonPropertyName("offlineDevices")] public int OfflineDevices { get; set; }
-        [JsonPropertyName("totalTelemetryKeys")] public long TotalTelemetryKeys { get; set; }
+        [JsonPropertyName("totalDataPointKeys")] public long TotalDataPointKeys { get; set; }
         [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
         [JsonPropertyName("updatesPerMinute")] public double UpdatesPerMinute { get; set; }
         [JsonPropertyName("totalUpdates")] public long TotalUpdates { get; set; }

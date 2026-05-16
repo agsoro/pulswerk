@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace Pulswerk.Storage
 {
     /// <summary>
-    /// Processes raw accumulator telemetry (kWh, m³) and generates delta-based
+    /// Processes raw accumulator data point (kWh, m³) and generates delta-based
     /// consumption values for hourly, daily, and monthly intervals.
     /// Supports bootstrapping from InfluxDB to recover 'lost track' periods.
     /// </summary>
@@ -39,14 +39,16 @@ namespace Pulswerk.Storage
         }
 
         /// <summary>
-        /// Registers a telemetry key for consumption tracking if its units match.
+        /// Registers a data point key for consumption tracking if its units match.
         /// </summary>
         public void RegisterKey(string key, string units)
         {
             if (string.IsNullOrEmpty(units)) return;
 
             string u = units.ToLowerInvariant().Trim();
-            if (u == "kwh" || u == "wh" || u == "mwh" || u == "m³" || u == "m3" || u == "cubic meters" || u == "cubic-meters" || u == "l" || u == "liters")
+            if (u == "kwh" || u == "wh" || u == "mwh" || u == "gwh" || u == "btu" || u == "kj" || u == "j" || 
+                u == "m³" || u == "m3" || u == "cubic meters" || u == "cubic-meters" || 
+                u == "l" || u == "liters" || u == "gal" || u == "gallons" || u == "ft³" || u == "ft3")
             {
                 lock (_lock)
                 {

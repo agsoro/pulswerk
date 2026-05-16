@@ -34,13 +34,13 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(_dataService.GetCurrentValues(keyList));
         }
 
-        public JsonResult OnGetAvailableKeys() => new JsonResult(_dataService.GetAvailableKeys());
+        public JsonResult OnGetAvailableDataPoints() => new JsonResult(_dataService.GetAvailableDataPoints());
 
         public async Task<JsonResult> OnGetHistory(string key, string days)
         {
             if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
                 d = 7;
-            var data = await _dataService.GetTelemetryHistoryAsync(key, d);
+            var data = await _dataService.GetDataPointHistoryAsync(key, d);
             return new JsonResult(data);
         }
 

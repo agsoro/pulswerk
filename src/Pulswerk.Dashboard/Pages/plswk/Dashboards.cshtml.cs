@@ -81,14 +81,14 @@ namespace Pulswerk.Dashboard.Pages
 
         // ── Widget data API ──────────────────────────────────────────────────
 
-        /// <summary>Returns all available telemetry keys for the key picker.</summary>
-        public JsonResult OnGetAvailableKeys()
+        /// <summary>Returns all available data point keys for the key picker.</summary>
+        public JsonResult OnGetAvailableDataPoints()
         {
-            var keys = _data.GetAvailableKeys();
+            var keys = _data.GetAvailableDataPoints();
             return new JsonResult(keys);
         }
 
-        /// <summary>Fetches historical telemetry data for widget rendering.</summary>
+        /// <summary>Fetches historical data point data for widget rendering.</summary>
         public async Task<JsonResult> OnGetWidgetData(string keys, long startTs, long endTs)
         {
             var keyList = keys?.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
@@ -97,7 +97,7 @@ namespace Pulswerk.Dashboard.Pages
             if (keyList.Count == 0)
                 return new JsonResult(new Dictionary<string, object?>());
 
-            var data = await _data.GetTelemetryHistoryForWidgetAsync(keyList, startTs, endTs);
+            var data = await _data.GetDataPointHistoryForWidgetAsync(keyList, startTs, endTs);
             return new JsonResult(data);
         }
 
@@ -122,7 +122,7 @@ namespace Pulswerk.Dashboard.Pages
         {
             if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
                 d = 7;
-            var data = await _data.GetTelemetryHistoryAsync(key, d);
+            var data = await _data.GetDataPointHistoryAsync(key, d);
             return new JsonResult(data);
         }
 

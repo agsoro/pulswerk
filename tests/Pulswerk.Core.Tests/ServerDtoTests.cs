@@ -142,24 +142,24 @@ namespace Connector.Tests
 
             Assert.NotNull(dto.Children);
             Assert.Empty(dto.Children);
-            Assert.NotNull(dto.Points);
-            Assert.Empty(dto.Points);
+            Assert.NotNull(dto.DataPoints);
+            Assert.Empty(dto.DataPoints);
         }
 
         // ── AssetPointDto ────────────────────────────────────────────────────
 
         [Fact]
-        public void AssetPointDto_EnumValuesNullable()
+        public void DataPointDto_EnumValuesNullable()
         {
-            var dto = new AssetPointDto();
+            var dto = new DataPointDto();
 
             Assert.Null(dto.EnumValues);
         }
 
         [Fact]
-        public void AssetPointDto_ParentPathDefault()
+        public void DataPointDto_ParentPathDefault()
         {
-            var dto = new AssetPointDto();
+            var dto = new DataPointDto();
 
             Assert.NotNull(dto.ParentPath);
             Assert.Empty(dto.ParentPath);
@@ -168,9 +168,9 @@ namespace Connector.Tests
         // ── AvailableKeyDto ──────────────────────────────────────────────────
 
         [Fact]
-        public void AvailableKeyDto_AllFieldsSettable()
+        public void AvailableDataPointDto_AllFieldsSettable()
         {
-            var dto = new AvailableKeyDto
+            var dto = new AvailableDataPointDto
             {
                 Key = "dev10_ai_1_value",
                 Name = "AI 1",

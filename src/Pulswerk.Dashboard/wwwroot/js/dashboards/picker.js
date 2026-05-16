@@ -1,7 +1,7 @@
 // picker.js – Data key selection and ordering logic
 
 async function loadKeyPicker() {
-    if (!allKeys.length) { try { allKeys = await api('AvailableKeys'); } catch (e) { allKeys = []; } }
+    if (!allKeys.length) { try { allKeys = await api('AvailableDataPoints'); } catch (e) { allKeys = []; } }
     
     // Default to rendering selected keys in sorted view
     const selected = activeKeyOrder.map(key => allKeys.find(k => k.key === key)).filter(Boolean);
@@ -88,7 +88,7 @@ function renderKeyList(keys, isSortedView = false, checkedKeys = []) {
             list.innerHTML = `<div class="p-8 text-center text-slate-500 border-2 border-dashed border-white/5 rounded-lg m-3 bg-white/[0.01]">
                 <i class="fas fa-mouse-pointer mb-3 opacity-20 text-3xl block"></i>
                 <p class="text-[0.78rem] font-semibold text-slate-400 mb-1">No data keys selected</p>
-                <p class="text-[0.68rem] opacity-60">Use the <strong class="text-sky-400">SELECT KEYS</strong> button above to find and add telemetry points to this widget.</p>
+                <p class="text-[0.68rem] opacity-60">Use the <strong class="text-sky-400">SELECT KEYS</strong> button above to find and add data points to this widget.</p>
             </div>`;
         } else {
             list.innerHTML = `<div class="p-8 text-center text-slate-500">

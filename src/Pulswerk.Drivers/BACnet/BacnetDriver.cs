@@ -9,11 +9,11 @@
 //    4. Apply the filter block from config (objectTypes, instanceRange, namePattern,
 //       excludeNamePattern)
 //    5. Cache the surviving list.  On every poll, call ReadPropertyMultiple on
-//       the cached objects to read telemetry + attribute properties.
+//       the cached objects to read DataPointValues + attribute properties.
 //
 //  Standalone mode distinction:
-//    telemetry  properties  → published as time-series (ts + values)
-//    attributes properties  → published to /v1/devices/me/attributes (key-value, no timestamp)
+//    data point properties  → published as time-series (ts + values)
+//    attributes properties  → published to dashboard (key-value, no timestamp)
 //
 //  NuGet:  BACnet 3.0.2  (ela-compil / System.IO.BACnet)
 
@@ -54,26 +54,25 @@ namespace System.IO.BACnet
 namespace Pulswerk.Drivers.BACnet
 {
     using Attributes = Dictionary<string, string>;
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     /// <summary>
-    /// Conflates high-frequency telemetry updates into batches to reduce MQTT load.
-    /// Implementation of Future Development 1.2.
+    /// Conflates high-frequency data point updates into batches to reduce system load.
     /// </summary>
-    public class TelemetryConflator : IDisposable
+    public class DataPointConflator : IDisposable
     {
-        private readonly Func<Telemetry, Task> _publisher;
+        private readonly Func<DataPointValues, Task> _publisher;
         private readonly ConcurrentDictionary<string, object> _buffer = new();
         private readonly System.Threading.Timer _timer;
         private int _isFlushing = 0;
 
-        public TelemetryConflator(Func<Telemetry, Task> publisher, int intervalMs = 250)
+        public DataPointConflator(Func<DataPointValues, Task> publisher, int intervalMs = 250)
         {
             _publisher = publisher;
             _timer = new System.Threading.Timer(OnTimer, null, intervalMs, intervalMs);
         }
 
-        public void Add(Telemetry data)
+        public void Add(DataPointValues data)
         {
             foreach (var kv in data)
                 _buffer[kv.Key] = kv.Value;
@@ -88,18 +87,18 @@ namespace Pulswerk.Drivers.BACnet
 
                 // Fetch all keys currently in buffer
                 var keys = _buffer.Keys.ToList();
-                var snapshot = new Telemetry();
+                var snapshot = new DataPointValues();
 
                 foreach (var k in keys)
                 {
                     if (_buffer.TryRemove(k, out var val))
                         snapshot[k] = val;
 
-                    // Flush in chunks of 200 to keep MQTT payload small
+                    // Flush in chunks of 200
                     if (snapshot.Count >= 200)
                     {
                         var batch = snapshot;
-                        snapshot = new Telemetry();
+                        snapshot = new DataPointValues();
                         PublishBatch(batch);
                     }
                 }
@@ -119,7 +118,7 @@ namespace Pulswerk.Drivers.BACnet
             }
         }
 
-        private void PublishBatch(Telemetry batch)
+        private void PublishBatch(DataPointValues batch)
         {
             // Fire-and-forget publish with error handling
             _ = Task.Run(async () =>
@@ -133,12 +132,12 @@ namespace Pulswerk.Drivers.BACnet
     }
 
     // =========================================================================
-    //  Result returned by BacnetReader – extends the base Telemetry with
+    //  Result returned by BacnetReader – extends the base DataPointValues with
     //  an optional Attributes bag for device metadata.
     // =========================================================================
     public class BacnetReadResult
     {
-        public Telemetry Telemetry { get; } = new();
+        public DataPointValues DataPointValues { get; } = new();
         public Attributes Attributes { get; } = new();
         /// <summary>True on the first poll after a (re-)discovery. Signals the background job to re-provision the hierarchy.</summary>
         public bool HierarchyDirty { get; set; }
@@ -215,7 +214,7 @@ namespace Pulswerk.Drivers.BACnet
     public class BacnetDriver : IDeviceDriver, IDeviceWriter
     {
         public virtual string DriverName => "BACnet";
-        public IEnumerable<string> GetTelemetryKeys() => Array.Empty<string>();
+        public IEnumerable<string> GetDataPointKeys() => Array.Empty<string>();
 
         private int _busyCount = 0;
         public bool IsBusy => _busyCount > 0;
@@ -299,16 +298,16 @@ namespace Pulswerk.Drivers.BACnet
         // =====================================================================
         //  IDeviceDriver.Read  –  called by the polling loop
         // =====================================================================
-        public Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
         {
-            // BacnetReader.Read() only returns telemetry for the base interface.
-            // Call ReadFull() from Program.cs to get both telemetry and attributes.
-            return ReadFull(conn, device).Telemetry;
+            // BacnetReader.Read() only returns DataPointValues for the base interface.
+            // Call ReadFull() from Program.cs to get both DataPointValues and attributes.
+            return ReadFull(conn, device).DataPointValues;
         }
 
-        /// <summary>Returns both telemetry and attributes. Called directly from Program.cs.</summary>
+        /// <summary>Returns both DataPointValues and attributes. Called directly from Program.cs.</summary>
         public virtual BacnetReadResult ReadFull(ConnectionConfig conn, DeviceConfig device,
-            AlarmStore? alarmStore = null, TelemetryStore? tsStore = null,
+            AlarmStore? alarmStore = null, DataPointStore? dataStore = null,
             bool isRecovery = false)
         {
             if (device.DeviceId is null)
@@ -385,7 +384,7 @@ namespace Pulswerk.Drivers.BACnet
                     // Only on first startup or after device recovery from offline.
                     // Periodic rediscovery does not re-sync trend logs.
                     bool shouldSyncTrends = !state.TrendLogsSynced || isRecovery;
-                    if (tsStore != null && shouldSyncTrends)
+                    if (dataStore != null && shouldSyncTrends)
                     {
                         state.TrendLogsSynced = true;
                         Interlocked.Increment(ref _busyCount);
@@ -397,7 +396,7 @@ namespace Pulswerk.Drivers.BACnet
                         {
                             try
                             {
-                                SyncTrendLogsAsync(syncClient, syncAddress, state, tsStore, device);
+                                SyncTrendLogsAsync(syncClient, syncAddress, state, dataStore, device);
                             }
                             catch (Exception ex)
                             {
@@ -417,7 +416,7 @@ namespace Pulswerk.Drivers.BACnet
                 // ── Read properties ───────────────────────────────────────────────
 
                 var props = cfg.Properties ?? BacnetPropsConfig.Default;
-                var telPropIds = ParsePropertyIds(props.EffectiveTelemetry);
+                var telPropIds = ParsePropertyIds(props.EffectiveDataPoints);
                 var attrPropIds = !state.AttributesSent
                                   ? ParsePropertyIds(props.EffectiveAttributes)
                                   : Array.Empty<BacnetPropertyIds>();
@@ -441,9 +440,9 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         string key = $"{obj.KeyPrefix}_{PropSuffix(propId)}";
                         if (values.TryGetValue(propId, out var raw))
-                            result.Telemetry[key] = FormatValue(obj, propId, raw);
+                            result.DataPointValues[key] = FormatValue(obj, propId, raw);
                         else if (propId == BacnetPropertyIds.PROP_PRESENT_VALUE)
-                            result.Telemetry[key] = FormatValue(obj, propId, null);
+                            result.DataPointValues[key] = FormatValue(obj, propId, null);
                     }
 
                     // Attributes (only on first poll after discovery)
@@ -459,10 +458,10 @@ namespace Pulswerk.Drivers.BACnet
                         }
                     }
 
-                    // Decode status flags bit-string into separate boolean telemetry
+                    // Decode status flags bit-string into separate boolean DataPointValues
                     if (allPropIds.Contains(BacnetPropertyIds.PROP_STATUS_FLAGS) && values.TryGetValue(BacnetPropertyIds.PROP_STATUS_FLAGS, out var stRaw) && stRaw is BacnetBitString stBs)
                     {
-                        ExpandStatusFlags(result.Telemetry, obj.KeyPrefix + "_status", stBs);
+                        ExpandStatusFlags(result.DataPointValues, obj.KeyPrefix + "_status", stBs);
 
                         // ── Diagnostic Alarms ─────────────────────────────────────
                         if (alarmStore != null)
@@ -817,7 +816,8 @@ namespace Pulswerk.Drivers.BACnet
                 {
                     try
                     {
-                        var readSpecs = batch.Select(oid => {
+                        var readSpecs = batch.Select(oid =>
+                        {
                             var props = new List<BacnetPropertyReference> {
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_OBJECT_NAME, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
@@ -1485,7 +1485,7 @@ namespace Pulswerk.Drivers.BACnet
             _ => p.ToString().Replace("PROP_", "").ToLower(),
         };
 
-        private void ExpandStatusFlags(Telemetry tel, string baseKey, BacnetBitString bs)
+        private void ExpandStatusFlags(DataPointValues tel, string baseKey, BacnetBitString bs)
         {
             // Bit 0: in-alarm, 1: fault, 2: overridden, 3: out-of-service
             tel[$"{baseKey}_alarm"] = bs.GetBit(0) ? 1.0 : 0.0;
@@ -1639,7 +1639,7 @@ namespace Pulswerk.Drivers.BACnet
         // =====================================================================
         private Task SyncTrendLogsAsync(
             BacnetClient client, BacnetAddress address, DiscoveryState state,
-            TelemetryStore tsStore, DeviceConfig device)
+            DataPointStore dataStore, DeviceConfig device)
         {
             List<BacnetObjectInfo> objectsWithLogs;
             lock (_stateLock)
@@ -1674,7 +1674,7 @@ namespace Pulswerk.Drivers.BACnet
                                 {
                                     long ts = new DateTimeOffset(dt).ToUnixTimeMilliseconds();
                                     var formatted = FormatValue(obj, BacnetPropertyIds.PROP_PRESENT_VALUE, parts[1].Value);
-                                    tsStore.Insert($"{obj.KeyPrefix}_value", ts, formatted);
+                                    dataStore.Insert($"{obj.KeyPrefix}_value", ts, formatted);
                                     synced++;
                                 }
                             }
@@ -1724,7 +1724,7 @@ namespace Pulswerk.Drivers.BACnet
                                 {
                                     long ts = new DateTimeOffset(dt.Value).ToUnixTimeMilliseconds();
                                     var formatted = FormatValue(obj, BacnetPropertyIds.PROP_PRESENT_VALUE, val);
-                                    tsStore.Insert($"{obj.KeyPrefix}_value", ts, formatted);
+                                    dataStore.Insert($"{obj.KeyPrefix}_value", ts, formatted);
                                     synced++;
                                 }
                             }
@@ -1754,7 +1754,7 @@ namespace Pulswerk.Drivers.BACnet
         }
 
         // ── Value conversion – delegates to BacnetValueConverter ────────────
-        //    All telemetry paths (RPM, COV, COV-fallback) use these wrappers
+        //    All DataPointValues paths (RPM, COV, COV-fallback) use these wrappers
         //    so there is exactly one conversion implementation.
 
         static bool TryToDouble(object? v, out double result) =>
@@ -1788,15 +1788,15 @@ namespace Pulswerk.Drivers.BACnet
             /// <summary>Tracks active alarm types for this device to allow clearing.</summary>
             public HashSet<string> ActiveAlarms { get; set; } = new();
 
-            public TelemetryConflator? Conflator { get; set; }
+            public DataPointConflator? Conflator { get; set; }
 
-            public TelemetryConflator GetConflator(Func<Telemetry, Task> publisher)
+            public DataPointConflator GetConflator(Func<DataPointValues, Task> publisher)
             {
                 if (Conflator == null)
                 {
                     lock (this)
                     {
-                        Conflator ??= new TelemetryConflator(publisher);
+                        Conflator ??= new DataPointConflator(publisher);
                     }
                 }
                 return Conflator;
@@ -1835,7 +1835,7 @@ namespace Pulswerk.Drivers.BACnet
             public DateTime NextAttrPoll { get; set; } = DateTime.MinValue;
 
             // ── Async publish callbacks (set by Program.cs for COV devices) ───
-            public Func<Telemetry, Task>? PublishTelemetry { get; set; }
+            public Func<DataPointValues, Task>? PublishDataPointValues { get; set; }
             public Func<Attributes, Task>? PublishAttributes { get; set; }
 
             // ── Trend Log sync ───────────────────────────────────────────────
@@ -1897,14 +1897,14 @@ namespace Pulswerk.Drivers.BACnet
             ConnectionConfig conn,
             DeviceConfig device,
             AlarmStore alarmStore,
-            TelemetryStore tsStore,
-            Func<Telemetry, Task> publishTelemetry,
+            DataPointStore tsStore,
+            Func<DataPointValues, Task> publishDataPointValues,
             Func<Attributes, Task> publishAttributes)
         {
             var cfg = device;  // BACnet config is flat on DeviceConfig
             var state = GetOrCreateState(device.Name);
 
-            state.PublishTelemetry = publishTelemetry;
+            state.PublishDataPointValues = publishDataPointValues;
             state.PublishAttributes = publishAttributes;
 
             // Long-lived client (one UDP socket per device)
@@ -1937,7 +1937,7 @@ namespace Pulswerk.Drivers.BACnet
                                        .FirstOrDefault(o => o.ObjectId == monitoredObjId);
                     if (objInfo is null) return;
 
-                    var tel = new Telemetry();
+                    var tel = new DataPointValues();
                     foreach (var pv in values)
                     {
                         var propId = (BacnetPropertyIds)pv.property.propertyIdentifier;
@@ -1965,7 +1965,7 @@ namespace Pulswerk.Drivers.BACnet
                     if (tel.Count > 0)
                     {
                         // Use the conflator to batch updates
-                        state.GetConflator(publishTelemetry).Add(tel);
+                        state.GetConflator(publishDataPointValues).Add(tel);
 
                         // Store in InfluxDB
                         tsStore.InsertBatch(tel);
@@ -2091,11 +2091,11 @@ namespace Pulswerk.Drivers.BACnet
                                 if (TryToDouble(raw, out double d))
                                     state.CovValues[obj.ObjectId] = new CovSnapshot(d, now);
 
-                                // Also publish seed as telemetry so LatestValues is populated
+                                // Also publish seed as DataPointValues so LatestValues is populated
                                 // immediately - prevents "---" for objects that haven't changed.
                                 var formatted = FormatValue(obj, BacnetPropertyIds.PROP_PRESENT_VALUE, raw);
-                                var seedTel = new Telemetry { [$"{obj.KeyPrefix}_value"] = formatted };
-                                state.GetConflator(state.PublishTelemetry!).Add(seedTel);
+                                var seedTel = new DataPointValues { [$"{obj.KeyPrefix}_value"] = formatted };
+                                state.GetConflator(state.PublishDataPointValues!).Add(seedTel);
                             }
                         }
                     }
@@ -2115,9 +2115,9 @@ namespace Pulswerk.Drivers.BACnet
 
         /// <summary>
         /// Called every fast tick (1 s) for BACnet-COV devices.
-        /// Does NOT publish COV telemetry (that is done event-driven from OnCOVNotification).
+        /// Does NOT publish COV DataPointValues (that is done event-driven from OnCOVNotification).
         /// Returns a <see cref="BacnetReadResult"/> containing:
-        ///   • Telemetry for fallback-polled objects (those that could not subscribe COV)
+        ///   • DataPointValues for fallback-polled objects (those that could not subscribe COV)
         ///   • At most one attribute key read by the drip-poller this tick
         ///   • HierarchyDirty flag propagated as usual
         /// </summary>
@@ -2157,9 +2157,9 @@ namespace Pulswerk.Drivers.BACnet
             foreach (var kv in attrKv)
                 result.Attributes[kv.Key] = kv.Value;
 
-            var telPropIds = ParsePropertyIds(props.EffectiveTelemetry);
+            var telPropIds = ParsePropertyIds(props.EffectiveDataPoints);
 
-            // Fallback poll – objects that NAK'd COV: read telemetry at the device
+            // Fallback poll – objects that NAK'd COV: read DataPointValues at the device
             // poll interval (default 1h for BACnet), not every 1s tick.
             int fallbackIntervalSec = device.PollIntervalSeconds ?? 3600;
             bool shouldFallbackPoll = telPropIds.Length > 0
@@ -2179,9 +2179,9 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         string key = $"{obj.KeyPrefix}_{PropSuffix(p)}";
                         if (vals.TryGetValue(p, out var raw))
-                            result.Telemetry[key] = FormatValue(obj, p, raw);
+                            result.DataPointValues[key] = FormatValue(obj, p, raw);
                         else if (p == BacnetPropertyIds.PROP_PRESENT_VALUE)
-                            result.Telemetry[key] = FormatValue(obj, p, null);
+                            result.DataPointValues[key] = FormatValue(obj, p, null);
                     }
                 }
             }
@@ -2303,7 +2303,7 @@ namespace Pulswerk.Drivers.BACnet
         }
 
         /// <summary>
-        /// Finds the cached <see cref="BacnetObjectInfo"/> for a given telemetry key.
+        /// Finds the cached <see cref="BacnetObjectInfo"/> for a given DataPointValues key.
         /// Returns null if not found. Used by DashboardDataService to resolve
         /// display values through the converter after a write.
         /// </summary>
@@ -2338,7 +2338,7 @@ namespace Pulswerk.Drivers.BACnet
 
             var cfg = device;  // BACnet config is flat on DeviceConfig
 
-            // Resolve target object from the telemetry key
+            // Resolve target object from the DataPointValues key
             var state = GetOrCreateState(device.Name);
 
             var objectId = ResolveObjectIdFromKey(key, state);
@@ -2524,7 +2524,7 @@ namespace Pulswerk.Drivers.BACnet
         protected virtual BacnetObjectId? ResolveObjectIdFromKey(string key, DiscoveryState state)
         {
             // 1. Try to find the key in the discovery cache (handles modern/structured keys)
-            // Telemetry keys are stored as "device.Id_SanitisedName_value"
+            // DataPointValues keys are stored as "device.Id_SanitisedName_value"
             // The 'key' passed here might be the full key OR just the suffix after device.Id
 
             // Check full match first
@@ -2552,7 +2552,7 @@ namespace Pulswerk.Drivers.BACnet
         }
 
         /// <summary>
-        /// Legacy fallback: parses a telemetry key such as "ao_3_supply_temp_sp_value" 
+        /// Legacy fallback: parses a DataPointValues key such as "ao_3_supply_temp_sp_value" 
         /// into its BacnetObjectId by extracting type and instance.
         /// </summary>
         static bool TryParseKeyToObjectId(string key, out BacnetObjectId result)
@@ -2630,9 +2630,9 @@ namespace Pulswerk.Drivers.BACnet
                     if (orphaned.Count > 0)
                     {
                         if (shouldLog)
-                        Pulswerk.Core.Log.Info(
-                            $"[Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
-                            $"not referenced by any Structured View — adding to 'Uncategorized'.");
+                            Pulswerk.Core.Log.Info(
+                                $"[Hierarchy] {device.Name}: {orphaned.Count} orphaned object(s) " +
+                                $"not referenced by any Structured View — adding to 'Uncategorized'.");
 
                         var uncatNode = new AssetNodeDto
                         {
@@ -2649,7 +2649,7 @@ namespace Pulswerk.Drivers.BACnet
                         };
 
                         foreach (var info in orphaned)
-                            uncatNode.Points.Add(CreatePointDto(info, device.Id, uncatNode.Id, uncatPath));
+                            uncatNode.DataPoints.Add(CreatePointDto(info, device.Id, uncatNode.Id, uncatPath));
 
                         root.Children.Add(uncatNode);
                     }
@@ -2754,7 +2754,7 @@ namespace Pulswerk.Drivers.BACnet
 
                 // Create the data point under its folder
                 var pointDto = CreatePointDto(info, techDeviceId, parentNode.Id, pathAccum);
-                parentNode.Points.Add(pointDto);
+                parentNode.DataPoints.Add(pointDto);
             }
 
             // Handle objects without NamingPath
@@ -2775,7 +2775,7 @@ namespace Pulswerk.Drivers.BACnet
                 };
 
                 foreach (var info in uncategorized)
-                    uncatNode.Points.Add(CreatePointDto(info, techDeviceId, uncatNode.Id, uncatPath));
+                    uncatNode.DataPoints.Add(CreatePointDto(info, techDeviceId, uncatNode.Id, uncatPath));
 
                 root.Children.Add(uncatNode);
             }
@@ -2809,17 +2809,17 @@ namespace Pulswerk.Drivers.BACnet
                 };
 
                 foreach (var info in group)
-                    folderNode.Points.Add(CreatePointDto(info, techDeviceId, folderNode.Id, folderPath));
+                    folderNode.DataPoints.Add(CreatePointDto(info, techDeviceId, folderNode.Id, folderPath));
 
                 root.Children.Add(folderNode);
             }
         }
 
         /// <summary>
-        /// Creates an <see cref="AssetPointDto"/> from a discovered <see cref="BacnetObjectInfo"/>.
+        /// Creates an <see cref="DataPointDto"/> from a discovered <see cref="BacnetObjectInfo"/>.
         /// Used for orphaned items and the flat-hierarchy fallback.
         /// </summary>
-        private static AssetPointDto CreatePointDto(
+        private static DataPointDto CreatePointDto(
             BacnetObjectInfo info, string techDeviceId,
             string parentId, List<PathSegmentDto> parentPath)
         {
@@ -2842,7 +2842,7 @@ namespace Pulswerk.Drivers.BACnet
             if (isMultiState && info.StateText?.Count > 0) enumValues = info.StateText;
             else if (isBin && info.StateText?.Count >= 2) enumValues = info.StateText;
 
-            return new AssetPointDto
+            return new DataPointDto
             {
                 Id = $"{techDeviceId}_{info.ObjectId}",
                 Name = friendlyName,
@@ -2967,9 +2967,9 @@ namespace Pulswerk.Drivers.BACnet
                             enumValues = info.StateText;
 
                         var keyPrefix = $"{techDeviceId}_{BacnetObjectInfo.Sanitise(objectName)}";
-                        var telemetryKey = $"{keyPrefix}_value";
+                        var DataPointValuesKey = $"{keyPrefix}_value";
 
-                        dto.Points.Add(new AssetPointDto
+                        dto.DataPoints.Add(new DataPointDto
                         {
                             Id = $"{techDeviceId}_{child.ObjectId}",
                             Name = friendlyName,
@@ -2977,7 +2977,7 @@ namespace Pulswerk.Drivers.BACnet
                             Description = description,
                             Units = info.Units,
                             Type = child.ObjectId.type.ToString(),
-                            Key = telemetryKey,
+                            Key = DataPointValuesKey,
                             IsWritable = isWritable,
                             EnumValues = enumValues,
                             ParentId = uniqueId,
@@ -2999,7 +2999,7 @@ namespace Pulswerk.Drivers.BACnet
                         // Build a fallback key from ObjectId since we have no ObjectName
                         string fallbackKey = $"{techDeviceId}_{BacnetObjectInfo.ShortTypeName(child.ObjectId.type)}_{child.ObjectId.instance}_value";
 
-                        dto.Points.Add(new AssetPointDto
+                        dto.DataPoints.Add(new DataPointDto
                         {
                             Id = $"{techDeviceId}_{child.ObjectId}",
                             Name = stubName,

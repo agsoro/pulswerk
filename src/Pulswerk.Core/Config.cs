@@ -13,13 +13,20 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("server")] ServerConfig? Server
     );
 
+    public record DataPointConfig(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("formula")] string Formula,
+        [property: JsonPropertyName("units")] string? Units = null
+    );
+
     // ── InfluxDB ───────────────────────────────────────────────────────────────
 
     public record InfluxConfig(
         [property: JsonPropertyName("url")] string Url = "http://localhost:8086",
         [property: JsonPropertyName("token")] string Token = "connector-token",
         [property: JsonPropertyName("org")] string Org = "pulswerk",
-        [property: JsonPropertyName("bucket")] string Bucket = "telemetry"
+        [property: JsonPropertyName("bucket")] string Bucket = "data_points"
     );
 
     // ── Database / retention ──────────────────────────────────────────────────
@@ -45,10 +52,10 @@ namespace Pulswerk.Core
 
         /// <summary>Remote address (for Modbus Gateway). For BACnet, prefer address on device level.</summary>
         [property: JsonPropertyName("address")] string? Address = null,
-        
+
         /// <summary>Remote port (for Modbus Gateway).</summary>
         [property: JsonPropertyName("port")] int? Port = null,
-        
+
         /// <summary>Local bind address (for BACnet).</summary>
         [property: JsonPropertyName("localAddress")] string? LocalAddress = null,
 
@@ -80,8 +87,8 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("deviceType")] string DeviceType,
-        [property: JsonPropertyName("connectionId")] string ConnectionId,
-        
+        [property: JsonPropertyName("connectionId")] string? ConnectionId = null,
+
         /// <summary>Target address. For Modbus, this is the gateway; for BACnet, this is the device IP (optional fallback for Who-Is).</summary>
         [property: JsonPropertyName("address")] string? Address = null,
 
@@ -114,7 +121,12 @@ namespace Pulswerk.Core
         /// Controls how often non-COV / fallback-polled values are read from the device.
         /// Defaults: 3600s (1h) for BACnet to avoid overloading controllers, global interval for others.
         /// </summary>
-        [property: JsonPropertyName("pollIntervalSeconds")] int? PollIntervalSeconds = null
+        [property: JsonPropertyName("pollIntervalSeconds")] int? PollIntervalSeconds = null,
+
+        /// <summary>
+        /// Formula-based points for 'virtual' device types.
+        /// </summary>
+        [property: JsonPropertyName("dataPoints")] List<DataPointConfig>? DataPoints = null
     )
     {
         private static readonly string[] _bacnetTypes = { "bacnet", "deziko" };
@@ -144,7 +156,7 @@ namespace Pulswerk.Core
     /// <summary>
     /// Configures BACnet Change-of-Value subscriptions for a device.
     /// When <see cref="Enabled"/> is true the connector maintains a long-lived
-    /// BACnet client and receives push notifications instead of polling telemetry.
+    /// BACnet client and receives push notifications instead of polling data points.
     /// </summary>
     public record BacnetCovConfig(
         /// <summary>Activate COV for this device. False = unchanged polling behaviour.</summary>
@@ -232,20 +244,20 @@ namespace Pulswerk.Core
     /// </summary>
     public record BacnetPropsConfig(
         /// <summary>Published as timeseries on every poll.</summary>
-        [property: JsonPropertyName("telemetry")] List<string>? Telemetry = null,
+        [property: JsonPropertyName("dataPoints")] List<string>? DataPoints = null,
 
         /// <summary>Published as attributes once on startup (and after rediscovery).</summary>
         [property: JsonPropertyName("attributes")] List<string>? Attributes = null
     )
     {
-        public static readonly List<string> DefaultTelemetry = new() { "PROP_PRESENT_VALUE", "PROP_STATUS_FLAGS", "PROP_RELIABILITY" };
+        public static readonly List<string> DefaultDataPoints = new() { "PROP_PRESENT_VALUE", "PROP_STATUS_FLAGS", "PROP_RELIABILITY" };
         public static readonly List<string> DefaultAttributes = new()
             { "PROP_OBJECT_NAME", "PROP_DESCRIPTION", "PROP_UNITS" };
 
         /// <summary>Default properties instance used when no "properties" block is present in config.</summary>
         public static readonly BacnetPropsConfig Default = new();
 
-        public List<string> EffectiveTelemetry => Telemetry?.Count > 0 ? Telemetry : DefaultTelemetry;
+        public List<string> EffectiveDataPoints => DataPoints?.Count > 0 ? DataPoints : DefaultDataPoints;
         public List<string> EffectiveAttributes => Attributes?.Count > 0 ? Attributes : DefaultAttributes;
     }
 
@@ -335,7 +347,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("enabled")] bool Enabled = false,
 
         /// <summary>
-        /// Groups that are allowed to edit telemetry values (write-back).
+        /// Groups that are allowed to edit data point values (write-back).
         /// Matched case-insensitively against the Authelia Remote-Groups header.
         /// </summary>
         [property: JsonPropertyName("allowAssetValueEdit")] List<string>? AllowAssetValueEdit = null,
@@ -351,7 +363,7 @@ namespace Pulswerk.Core
         /// Falls back to AllowAssetValueEdit when null.
         /// </summary>
         [property: JsonPropertyName("allowDashboardEdit")] List<string>? AllowDashboardEdit = null,
-        
+
         /// <summary>
         /// Groups that are allowed to pin/unpin favorites.
         /// Falls back to AllowAssetValueEdit when null.

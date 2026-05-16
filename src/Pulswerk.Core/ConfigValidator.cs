@@ -67,13 +67,29 @@ namespace Pulswerk.Core
                     if (string.IsNullOrWhiteSpace(dev.Name))
                         errors.Add($"Device '{dev.Id}' is missing a name.");
 
-                    if (string.IsNullOrWhiteSpace(dev.ConnectionId))
-                        errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
-                    else if (!connections.ContainsKey(dev.ConnectionId))
-                        errors.Add($"Device '{dev.Id}' references unknown connectionId '{dev.ConnectionId}'.");
+                    if (dev.DeviceType != "virtual")
+                    {
+                        if (string.IsNullOrWhiteSpace(dev.ConnectionId))
+                            errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
+                        else if (!connections.ContainsKey(dev.ConnectionId))
+                            errors.Add($"Device '{dev.Id}' references unknown connectionId '{dev.ConnectionId}'.");
 
-                    if (dev.DeviceId == null)
-                        errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
+                        if (dev.DeviceId == null)
+                            errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
+                    }
+                    if (dev.DataPoints != null)
+                    {
+                        foreach (var dp in dev.DataPoints)
+                        {
+                            string context = $"Device '{dev.Id}' virtual data point '{dp.Id}'";
+                            if (string.IsNullOrWhiteSpace(dp.Id))
+                                errors.Add($"{context}: Missing 'id'.");
+                            if (string.IsNullOrWhiteSpace(dp.Formula))
+                                errors.Add($"{context}: Missing 'formula'.");
+                            else
+                                ValidateFormula(dp.Formula, cfg, dev, context, errors);
+                        }
+                    }
                 }
             }
 
@@ -85,6 +101,72 @@ namespace Pulswerk.Core
             {
                 var msg = "Configuration validation failed:\n" + string.Join("\n", errors.Select(e => $"  • {e}"));
                 throw new Exception(msg);
+            }
+        }
+
+        private static void ValidateFormula(string formula, AppConfig cfg, DeviceConfig? currentDevice, string context, List<string> errors)
+        {
+            // 1. Validate pathsum syntax
+            if (formula.Contains("pathsum", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(formula, @"pathsum\s*\(\s*['""](.+?)['""]\s*,\s*['""](.+?)['""]\s*\)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                {
+                    errors.Add($"{context}: Invalid pathsum syntax. Expected pathsum(\"path\", \"filter\").");
+                }
+            }
+
+            // 2. Validate consumption modifiers
+            if (formula.Contains(":consumption:"))
+            {
+                var parts = formula.Split(":consumption:");
+                if (parts.Length != 2 || (parts[1] != "1h" && parts[1] != "1d" && parts[1] != "1m" && parts[1] != "1y"))
+                {
+                    errors.Add($"{context}: Invalid consumption interval '{parts.LastOrDefault()}'. Supported: :1h, :1d, :1m, :1y.");
+                }
+            }
+
+            // 3. Validate point references (external to strings)
+            var allDeviceIds = cfg.Devices.Select(d => d.Id).ToHashSet();
+            
+            // Remove strings and consumption modifiers from formula before checking for variable references
+            string cleanFormula = System.Text.RegularExpressions.Regex.Replace(formula, @"(['""])(?:(?=(\\?))\2.)*?\1", "");
+            cleanFormula = System.Text.RegularExpressions.Regex.Replace(cleanFormula, @":consumption:[a-z0-9]+", "");
+            
+            var segments = System.Text.RegularExpressions.Regex.Matches(cleanFormula, @"([a-zA-Z0-9\-_]+)")
+                .Cast<System.Text.RegularExpressions.Match>()
+                .Select(m => m.Value)
+                .ToList();
+
+            foreach (var segment in segments)
+            {
+                if (double.TryParse(segment, out _) || 
+                    segment.Equals("pathsum", StringComparison.OrdinalIgnoreCase)) 
+                    continue;
+
+                // Check if segment refers to a known device
+                bool hasKnownDevice = false;
+                foreach (var devId in allDeviceIds)
+                {
+                    if (segment.StartsWith(devId + "_") || segment == devId)
+                    {
+                        hasKnownDevice = true;
+                        break;
+                    }
+                }
+
+                // If it's not an external device reference, and it contains underscores,
+                // it might be a local key (allowed) or a broken device prefix.
+                if (!hasKnownDevice && segment.Contains("_"))
+                {
+                    // Check if it's potentially a local key of the current device.
+                    // If the segment doesn't start with *any* known device ID, we assume it's local.
+                    bool startsWithOtherDevice = allDeviceIds.Any(id => segment.StartsWith(id + "_"));
+                    
+                    if (startsWithOtherDevice)
+                    {
+                        errors.Add($"{context}: Formula references unknown device in point '{segment}'.");
+                    }
+                }
             }
         }
     }

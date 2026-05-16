@@ -56,7 +56,7 @@ namespace Pulswerk.Core
         [JsonPropertyName("isView")] public bool IsView { get; set; }
         [JsonPropertyName("description")] public string Description { get; set; } = "";
         [JsonPropertyName("children")] public List<AssetNodeDto> Children { get; set; } = new();
-        [JsonPropertyName("points")] public List<AssetPointDto> Points { get; set; } = new();
+        [JsonPropertyName("dataPoints")] public List<DataPointDto> DataPoints { get; set; } = new();
 
         /// <summary>Stable, URL-safe node ID for a path segment used in the tree and ParentPath links.</summary>
         public static string PathSegmentId(string segment)
@@ -70,7 +70,7 @@ namespace Pulswerk.Core
         [JsonPropertyName("name")] public string Name { get; set; } = "";
     }
 
-    public class AssetPointDto
+    public class DataPointDto
     {
         [JsonPropertyName("id")] public string Id { get; set; } = "";
         [JsonPropertyName("name")] public string Name { get; set; } = "";
@@ -100,9 +100,9 @@ namespace Pulswerk.Core
     }
 
     /// <summary>
-    /// Represents a telemetry key available for use in custom dashboard widgets.
+    /// Represents a data point key available for use in custom dashboard widgets.
     /// </summary>
-    public class AvailableKeyDto
+    public class AvailableDataPointDto
     {
         [JsonPropertyName("key")] public string Key { get; set; } = "";
         [JsonPropertyName("name")] public string Name { get; set; } = "";

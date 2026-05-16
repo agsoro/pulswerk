@@ -2,7 +2,7 @@
 //
 //  Register map (based on provided device documentation)
 //
-//    Address  Telemetry key        Type    Objects  Divider
+//    Address  Data point key        Type    Objects  Divider
 //    ───────  ───────────────────  ──────  ───────  ───────
 //    23316    power_kw             32int   2        100000
 //    20480    energy_import_kWh    64uint  4        100
@@ -16,7 +16,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     class AbbDriver : BaseModbusDriver
     {
@@ -27,13 +27,13 @@ namespace Pulswerk.Drivers.Modbus
         public override string DriverName => "ABB";
         // public bool IsBusy => false;
 
-        public override IEnumerable<string> GetTelemetryKeys() => new[] {
-            TelemetryKeys.PowerKw,
-            TelemetryKeys.EnergyImportKwh,
-            TelemetryKeys.EnergyExportKwh
+        public override IEnumerable<string> GetDataPointKeys() => new[] {
+            DataPointKeys.PowerKw,
+            DataPointKeys.EnergyImportKwh,
+            DataPointKeys.EnergyExportKwh
         };
 
-        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -47,11 +47,11 @@ namespace Pulswerk.Drivers.Modbus
                 // These are contiguous: 20480-20483 and 20484-20487
                 var energyRegs = master.ReadHoldingRegisters(slaveId, REG_ENERGY_IMPORT_KWH, 8);
 
-                return new Telemetry
+                return new DataPointValues
                 {
-                    [TelemetryKeys.PowerKw] = Math.Round(ModbusConnection.RegsToInt32(powerRegs, 0) / 100000.0, 3),
-                    [TelemetryKeys.EnergyImportKwh] = Math.Round((double)ModbusConnection.RegsToUInt64(energyRegs, 0) / 100.0, 3),
-                    [TelemetryKeys.EnergyExportKwh] = Math.Round((double)ModbusConnection.RegsToUInt64(energyRegs, 4) / 100.0, 3),
+                    [DataPointKeys.PowerKw] = Math.Round(ModbusConnection.RegsToInt32(powerRegs, 0) / 100000.0, 3),
+                    [DataPointKeys.EnergyImportKwh] = Math.Round((double)ModbusConnection.RegsToUInt64(energyRegs, 0) / 100.0, 3),
+                    [DataPointKeys.EnergyExportKwh] = Math.Round((double)ModbusConnection.RegsToUInt64(energyRegs, 4) / 100.0, 3),
                 };
             });
         }

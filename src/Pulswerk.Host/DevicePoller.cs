@@ -16,10 +16,10 @@ using System.Collections.Concurrent;
 namespace Pulswerk.Host
 {
     using Attributes = Dictionary<string, string>;
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     /// <summary>
-    /// Reads one device per call, publishes telemetry + attributes,
+    /// Reads one device per call, publishes data points + attributes,
     /// and manages failure tracking / alarm lifecycle.
     /// </summary>
     sealed class DevicePoller
@@ -52,20 +52,20 @@ namespace Pulswerk.Host
 
         public void PollAndPublish(
             DeviceConfig device, ConnectionConfig conn,
-            TelemetryStore tsStore, AlarmStore alarmStore,
+            DataPointStore dataStore, AlarmStore alarmStore,
             int deviceIntervalMs)
         {
             try
             {
                 var reader = _drivers[device.Name];
 
-                Telemetry telemetry;
+                DataPointValues dataPointValues;
                 Attributes attributes = new();
 
                 // ── BACnet COV mode ──────────────────────────────────────
                 if (reader is BacnetDriver bacnetDrv && device.EffectiveCov is { Enabled: true })
                 {
-                    ServiceCovDevice(bacnetDrv, device, conn, tsStore, reader);
+                    ServiceCovDevice(bacnetDrv, device, conn, dataStore, reader);
                     return;
                 }
 
@@ -79,18 +79,18 @@ namespace Pulswerk.Host
 
                 if (reader is BacnetDriver br)
                 {
-                    var result = br.ReadFull(conn, device, alarmStore, tsStore,
+                    var result = br.ReadFull(conn, device, alarmStore, dataStore,
                         isRecovery: wasOffline);
-                    telemetry = result.Telemetry;
+                    dataPointValues = result.DataPointValues;
                     attributes = result.Attributes;
                 }
                 else
                 {
-                    telemetry = reader.Read(conn, device);
+                    dataPointValues = reader.Read(conn, device);
                 }
 
-                if (telemetry.Count > 0)
-                    PublishTelemetry(telemetry, tsStore, device, reader);
+                if (dataPointValues.Count > 0)
+                    PublishDataPoints(dataPointValues, dataStore, device, reader);
 
                 if (attributes.Count > 0)
                     _dataService?.UpdateAttributes(attributes);
@@ -118,21 +118,21 @@ namespace Pulswerk.Host
 
         void ServiceCovDevice(
             BacnetDriver driver, DeviceConfig device,
-            ConnectionConfig conn, TelemetryStore tsStore,
+            ConnectionConfig conn, DataPointStore dataStore,
             IDeviceDriver reader)
         {
             var result = driver.ServiceCovDevice(conn, device);
-            var telemetry = result.Telemetry;
+            var dataPointValues = result.DataPointValues;
             var attributes = result.Attributes;
 
-            if (telemetry.Count > 0)
+            if (dataPointValues.Count > 0)
             {
-                tsStore.InsertBatch(telemetry);
-                var persisted = _dataService?.UpdateTelemetry(telemetry);
+                dataStore.InsertBatch(dataPointValues);
+                var persisted = _dataService?.UpdateDataPoints(dataPointValues);
                 if (persisted != null)
                 {
                     foreach (var p in persisted)
-                        tsStore.Insert(p.Key,
+                        dataStore.Insert(p.Key,
                             new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
                             p.Value.val);
                 }
@@ -143,27 +143,27 @@ namespace Pulswerk.Host
 
             _lastPolledAt[device.Name] = DateTime.UtcNow;
 
-            if (attributes.Count > 0 || telemetry.Count > 0)
+            if (attributes.Count > 0 || dataPointValues.Count > 0)
                 Log.Debug(
                     $"[{reader.DriverName,-10}] {device.Name,-38} " +
-                    $"[COV] attrs={attributes.Count} fallback-tel={telemetry.Count}");
+                    $"[COV] attrs={attributes.Count} fallback-dp={dataPointValues.Count}");
         }
 
         // =================================================================
-        //  Publish telemetry to dashboard + InfluxDB
+        //  Publish data point to dashboard + InfluxDB
         // =================================================================
 
-        void PublishTelemetry(
-            Telemetry telemetry, TelemetryStore tsStore,
+        void PublishDataPoints(
+            DataPointValues dataPointValues, DataPointStore dataStore,
             DeviceConfig device, IDeviceDriver reader)
         {
-            tsStore.InsertBatch(telemetry);
+            dataStore.InsertBatch(dataPointValues);
 
-            var persisted = _dataService?.UpdateTelemetry(telemetry);
+            var persisted = _dataService?.UpdateDataPoints(dataPointValues);
             if (persisted != null)
             {
                 foreach (var p in persisted)
-                    tsStore.Insert(p.Key,
+                    dataStore.Insert(p.Key,
                         new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
                         p.Value.val);
             }
@@ -171,18 +171,18 @@ namespace Pulswerk.Host
             // For non-BACnet readers, also scope keys by device ID
             if (reader is not BacnetDriver)
             {
-                var scoped = telemetry.ToDictionary(
+                var scoped = dataPointValues.ToDictionary(
                     kv => $"{device.Id}_{kv.Key}",
                     kv => kv.Value);
-                var persistedScoped = _dataService?.UpdateTelemetry(scoped);
+                var persistedScoped = _dataService?.UpdateDataPoints(scoped);
                 if (persistedScoped != null)
                 {
                     foreach (var p in persistedScoped)
-                        tsStore.Insert(p.Key,
+                        dataStore.Insert(p.Key,
                             new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
                             p.Value.val);
                 }
-                tsStore.InsertBatch(scoped);
+                dataStore.InsertBatch(scoped);
             }
         }
 

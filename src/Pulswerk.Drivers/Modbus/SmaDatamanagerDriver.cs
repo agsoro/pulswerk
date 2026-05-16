@@ -2,7 +2,7 @@
 //
 //  Register map (Holding)
 //
-//    Address  Type    Telemetry key       Unit   Scaling  Notes
+//    Address  Type    Data point key       Unit   Scaling  Notes
 //    ───────  ──────  ──────────────────  ─────  ───────  ──────────────────
 //    31243    uint32  utility_limit       %      0.01     Active power limitation
 //    30775    int32   power               W      1.0      Current active power (signed, negative = feed-in)
@@ -18,7 +18,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     class SmaDatamanagerDriver : BaseModbusDriver
     {
@@ -34,13 +34,13 @@ namespace Pulswerk.Drivers.Modbus
 
         public override string DriverName => "SMADM";
 
-        public override IEnumerable<string> GetTelemetryKeys() => new[] {
-            TelemetryKeys.PowerLimitPct,
-            TelemetryKeys.PowerKw,
-            TelemetryKeys.EnergyExportKwh
+        public override IEnumerable<string> GetDataPointKeys() => new[] {
+            DataPointKeys.PowerLimitPct,
+            DataPointKeys.PowerKw,
+            DataPointKeys.EnergyExportKwh
         };
 
-        public override Telemetry Read(ConnectionConfig conn, DeviceConfig device)
+        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -57,11 +57,11 @@ namespace Pulswerk.Drivers.Modbus
                 double powerKw = (powerRaw == SMA_NAN_S32) ? 0 : Math.Round(powerRaw / 1000.0, 3);
                 double energyKwh = (energyRaw == SMA_NAN_U64) ? 0 : Math.Round(energyRaw / 1000.0, 3);
 
-                return new Telemetry
+                return new DataPointValues
                 {
-                    [TelemetryKeys.PowerLimitPct] = limitPct,
-                    [TelemetryKeys.PowerKw] = powerKw,
-                    [TelemetryKeys.EnergyExportKwh] = energyKwh
+                    [DataPointKeys.PowerLimitPct] = limitPct,
+                    [DataPointKeys.PowerKw] = powerKw,
+                    [DataPointKeys.EnergyExportKwh] = energyKwh
                 };
             });
         }

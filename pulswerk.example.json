@@ -3,7 +3,7 @@
     "url": "http://localhost:8086",
     "token": "connector-token",
     "org": "pulswerk",
-    "bucket": "telemetry"
+    "bucket": "dataPoints"
   },
   "database": {
     "retentionDays": 730,
@@ -120,6 +120,47 @@
       "connectionId": "bacnet-deziko",
       "deviceId": 20,
       "assetType": "BACnet Zone"
+    },
+    {
+      "id": "analytics-summary",
+      "name": "Analytics Summary",
+      "deviceType": "virtual",
+      "path": [
+        "Building",
+        "Analytics"
+      ],
+      "dataPoints": [
+        {
+          "id": "total-pwr",
+          "name": "Total Active Power",
+          "formula": "pathsum(\"Building\", \"kW\")",
+          "units": "kW"
+        },
+        {
+          "id": "daily-kwh",
+          "name": "Daily Consumption",
+          "formula": "pathsum(\"Building\", \"kWh\"):consumption:1d",
+          "units": "kWh/d"
+        },
+        {
+          "id": "eff-ratio",
+          "name": "Efficiency Ratio",
+          "formula": "meter-main_energy_import / analytics-summary_area_sensor_m2",
+          "units": "kWh/m2"
+        },
+        {
+          "id": "area_sensor_m2",
+          "name": "Building Area",
+          "formula": "500",
+          "units": "m2"
+        },
+        {
+          "id": "building-energy-import-total",
+          "name": "Sub Meter Total",
+          "formula": "pathsum(\"Building/Main Meter/Sub Meter\", \"*_energy_import\")",
+          "units": "kWh"
+        }
+      ]
     }
   ],
   "server": {
@@ -130,22 +171,37 @@
       // IP addresses or CIDR ranges of reverse proxies (nginx/Authelia).
       // Remote-User/Groups/Name/Email headers are ONLY trusted from these sources.
       // When disabled, auth headers are stripped from ALL requests (safe default).
-      "trustedProxies": ["10.192.30.1"],
+      "trustedProxies": [
+        "10.192.30.1"
+      ],
       // Fallback user/groups if no authentication headers are present.
       "defaultUser": "operator",
-      "defaultGroups": ["operators"]
+      "defaultGroups": [
+        "operators"
+      ]
     },
     // Role-based access control for write operations.
     "rights": {
       "enabled": true,
       // Groups allowed to change telemetry values (write-back).
-      "allowAssetValueEdit": ["users", "admins"],
+      "allowAssetValueEdit": [
+        "users",
+        "admins"
+      ],
       // Groups allowed to acknowledge alarms.
-      "allowAlarmAck": ["users", "admins"],
+      "allowAlarmAck": [
+        "users",
+        "admins"
+      ],
       // Groups allowed to edit dashboards (create, save, delete).
-      "allowDashboardEdit": ["admins"],
+      "allowDashboardEdit": [
+        "admins"
+      ],
       // Groups allowed to pin/unpin favorites.
-      "allowFavoriteEdit": ["users", "admins"]
+      "allowFavoriteEdit": [
+        "users",
+        "admins"
+      ]
     }
   }
 }

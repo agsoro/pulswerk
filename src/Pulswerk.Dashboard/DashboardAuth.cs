@@ -37,7 +37,7 @@ namespace Pulswerk.Dashboard
         }
 
         /// <summary>
-        /// Checks whether the current request is allowed to edit telemetry values.
+        /// Checks whether the current request is allowed to edit data point values.
         /// </summary>
         public static bool CanWriteValue(HttpContext ctx, ServerConfig? cfg)
         {

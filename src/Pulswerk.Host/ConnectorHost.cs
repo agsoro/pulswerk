@@ -20,7 +20,7 @@ using System.Collections.Concurrent;
 
 namespace Pulswerk.Host
 {
-    using Telemetry = Dictionary<string, object>;
+    using DataPointValues = Dictionary<string, object>;
 
     /// <summary>
     /// Hosts the full connector lifecycle: config → stores → drivers →
@@ -37,7 +37,7 @@ namespace Pulswerk.Host
 
         ConsoleLogger _logger = null!;
         DashboardDataService? _dataService;
-        TelemetryStore _tsStore = null!;
+        DataPointStore _dataStore = null!;
         AlarmStore _alarmStore = null!;
         DashboardServer? _dashboardServer;
         DevicePoller _poller = null!;
@@ -171,7 +171,7 @@ namespace Pulswerk.Host
 
             var dbCfg = _cfg.Database ?? new DatabaseConfig();
 
-            _tsStore = new TelemetryStore(
+            _dataStore = new DataPointStore(
                 influxUrl, influxToken, influxOrg, influxBucket,
                 dbCfg.RetentionDays, dbCfg.CompactionAfterDays);
 
@@ -188,6 +188,7 @@ namespace Pulswerk.Host
         {
             foreach (var d in _cfg.Devices)
             {
+                if (d.DeviceType == "virtual") continue;
                 _drivers[d.Name] = DeviceDriverFactory.Create(d.DeviceType);
                 _lastPolledAt[d.Name] = DateTime.MinValue;
             }
@@ -206,9 +207,11 @@ namespace Pulswerk.Host
             Log.Info($"Devices ({_cfg.Devices.Count}):");
             foreach (var d in _cfg.Devices)
             {
-                var conn = _connections[d.ConnectionId];
-                var addr = d.Address ?? conn.Address;
-                Log.Info($"  [{d.DeviceType,-15}] {d.Name,-38} → {addr}:{conn.Port}");
+                if (d.ConnectionId != null && _connections.TryGetValue(d.ConnectionId, out var conn))
+                {
+                    var addr = d.Address ?? conn.Address;
+                    Log.Info($"  [{d.DeviceType,-15}] {d.Name,-38} → {addr}:{conn.Port}");
+                }
             }
         }
 
@@ -220,7 +223,7 @@ namespace Pulswerk.Host
             Log.Info($"Starting dashboard on port {_cfg.Server.Port}...");
 
             var dataService = new DashboardDataService(
-                _logger.Buffer, _cfg, _tsStore, _alarmStore,
+                _logger.Buffer, _cfg, _dataStore, _alarmStore,
                 _offlineDevices, _lastPolledAt, _drivers);
             _dataService = dataService;
 
@@ -304,7 +307,11 @@ namespace Pulswerk.Host
                         }
 
                         var capturedDevice = d;
-                        var capturedConn = _connections[d.ConnectionId];
+                        if (d.ConnectionId == null || !_connections.TryGetValue(d.ConnectionId, out var capturedConn))
+                        {
+                            Log.Error($"[COV] Device '{d.Name}' has invalid connectionId '{d.ConnectionId}'");
+                            continue;
+                        }
 
                         Log.Info($"[COV] Initialising COV mode for '{d.Name}'…");
 
@@ -312,20 +319,20 @@ namespace Pulswerk.Host
                             capturedConn,
                             capturedDevice,
                             _alarmStore,
-                            _tsStore,
-                            tel =>
+                            _dataStore,
+                            dataPointValues =>
                             {
-                                var persisted = _dataService?.UpdateTelemetry(tel, isPush: true);
+                                var persisted = _dataService?.UpdateDataPoints(dataPointValues, isPush: true);
                                 if (persisted != null)
                                 {
                                     foreach (var p in persisted)
-                                        _tsStore.Insert(p.Key,
+                                        _dataStore.Insert(p.Key,
                                             new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
                                             p.Value.val);
                                 }
                                 return Task.CompletedTask;
                             },
-                            attr => { _dataService?.UpdateAttributes(attr); return Task.CompletedTask; });
+                            attributes => { _dataService?.UpdateAttributes(attributes); return Task.CompletedTask; });
 
                         _lastPolledAt[d.Name] = DateTime.UtcNow;
                     }
@@ -397,8 +404,13 @@ namespace Pulswerk.Host
             int staggerIndex = 0;
             foreach (var device in _cfg.Devices)
             {
+                if (device.DeviceType == "virtual") continue;
                 var capturedDevice = device;
-                var capturedConn = _connections[device.ConnectionId];
+                if (device.ConnectionId == null || !_connections.TryGetValue(device.ConnectionId, out var capturedConn))
+                {
+                    Log.Error($"[Loop] Device '{device.Name}' has invalid connectionId '{device.ConnectionId}'");
+                    continue;
+                }
                 var connLock = _connLocks[device.ConnectionId];
 
                 // BACnet devices default to 1h full-read interval to avoid overloading
@@ -430,7 +442,7 @@ namespace Pulswerk.Host
                             {
                                 _poller.PollAndPublish(
                                     capturedDevice, capturedConn,
-                                    _tsStore, _alarmStore, intervalMs);
+                                    _dataStore, _alarmStore, intervalMs);
                             }
                             finally
                             {
@@ -463,7 +475,7 @@ namespace Pulswerk.Host
             var dbCfg = _cfg.Database ?? new DatabaseConfig();
             _alarmStore.PurgeCleared(dbCfg.AlarmRetentionDays);
 
-            _tsStore.Dispose();
+            _dataStore.Dispose();
             _alarmStore.Dispose();
             _dashboardServer?.Dispose();
         }

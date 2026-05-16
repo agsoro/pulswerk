@@ -1,6 +1,6 @@
 // Program.cs – entry point
 //
-//  Standalone connector: reads BACnet/Modbus devices, stores telemetry
+//  Standalone connector: reads BACnet/Modbus devices, stores data point
 //  in InfluxDB, manages alarms in SQLite, serves a dashboard via Kestrel.
 
 using System.Threading.Tasks;

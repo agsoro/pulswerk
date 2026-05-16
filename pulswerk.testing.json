@@ -5,7 +5,7 @@
     "url": "http://influxdb:8086",
     "token": "connector-token",
     "org": "pulswerk",
-    "bucket": "telemetry"
+    "bucket": "dataPoints"
   },
   "database": {
     "retentionDays": 730,
@@ -88,7 +88,21 @@
         "Building A",
         "Main Meter Building A"
       ],
-      "assetType": "Meter"
+      "assetType": "Meter",
+      "dataPoints": [
+        {
+          "id": "energy_import_consumption_1h",
+          "name": "Energie Import stündlich",
+          "formula": "energy_import:consumption:1h",
+          "units": "kWh"
+        },
+        {
+          "id": "energy_import_consumption_1d",
+          "name": "Energie Import täglich",
+          "formula": "energy_import:consumption:1d",
+          "units": "kWh"
+        }
+      ]
     },
     {
       "id": "meter-sub-f2",
@@ -157,6 +171,35 @@
       "cov": {
         "enabled": true
       }
+    },
+    {
+      "id": "building_analytics",
+      "name": "Building Analytics",
+      "deviceType": "virtual",
+      "path": [
+        "Building A",
+        "Analytics"
+      ],
+      "dataPoints": [
+        {
+          "id": "total_power",
+          "name": "Total Power",
+          "formula": "pathsum(\"Building A\", \"*_power\")",
+          "units": "kW"
+        },
+        {
+          "id": "hvac_hourly_kwh",
+          "name": "HVAC Hourly Consumption",
+          "formula": "meter-hvac_energy_import:consumption:1h",
+          "units": "kWh/h"
+        },
+        {
+          "id": "building_hourly_kwh",
+          "name": "Building Hourly Total",
+          "formula": "pathsum(\"Building A\", \"*_energy_import\"):consumption:1h",
+          "units": "kWh/h"
+        }
+      ]
     }
   ]
 }

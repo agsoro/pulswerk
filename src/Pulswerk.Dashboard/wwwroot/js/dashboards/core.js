@@ -11,7 +11,7 @@ let activeKeyOrder = [], isKeySelectorOpen = false;
 let dashTw = null; // reusable TW module instance
 const pendingRenders = new Set();  // guard against overlapping async renders
 const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-const api = async (handler, opts) => { const r = await fetch(`/plswk/Dashboards?handler=${handler}`, opts); return r.json(); };
+const api = async (handler, opts) => { const r = await fetch(`${window.location.pathname}?handler=${handler}`, opts); return r.json(); };
 
 function initDashboards(initial, editMode) {
     if (initial) { dashboard = initial; showDashboard(); if (editMode) enterEditMode(); }
@@ -117,7 +117,7 @@ async function showDashboard() {
         btn.style.display = window.pwCanEditFavorites ? 'flex' : 'none';
     }
     // Pre-fetch key metadata so widgets can show friendly names
-    if (!allKeys.length) { try { allKeys = await api('AvailableKeys'); } catch (e) { allKeys = []; } }
+    if (!allKeys.length) { try { allKeys = await api('AvailableDataPoints'); } catch (e) { allKeys = []; } }
     initGrid();
     if (dashboard.widgets?.length) renderAllWidgets();
     else document.getElementById('emptyDash').style.display = 'flex';

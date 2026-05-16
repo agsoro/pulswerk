@@ -6,7 +6,7 @@
 //
 //  Write path:  numeric input     →  BacnetValue with correct application tag
 //
-//  All telemetry paths (RPM, COV, COV-fallback) route through FormatValue
+//  All data point paths (RPM, COV, COV-fallback) route through FormatValue
 //  so that value types are always consistent for a given object type.
 
 using System;
@@ -33,7 +33,7 @@ namespace Pulswerk.Drivers.BACnet
 
     /// <summary>
     /// Central, stateless value converter for BACnet data points.
-    /// Every telemetry code path in <see cref="BacnetDriver"/> delegates to this
+    /// Every data point code path in <see cref="BacnetDriver"/> delegates to this
     /// class so that type semantics (binary → int, analog → double, schedule → DTO)
     /// are enforced in exactly one place.
     /// </summary>
