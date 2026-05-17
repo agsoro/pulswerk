@@ -56,6 +56,7 @@ async function renderTimeseries(w, body, cfg) {
     pendingRenders.delete(w.id);
 
     const many = keys.length > 5;  // threshold for "dense" chart mode
+    const isStacked = !!cfg.stacked;
     const series = [], colors = [];
     keys.forEach((key, i) => {
         const color = COLORS[i % COLORS.length];
@@ -69,6 +70,19 @@ async function renderTimeseries(w, body, cfg) {
         series.push({ name: meta?.fullName || friendlyName(key), data: points });
         colors.push(color);
     });
+
+    // For stacked charts, trim all series to the common time range so
+    // missing data at edges isn't treated as 0 by ApexCharts.
+    if (isStacked && series.length > 1) {
+        const seriesWithData = series.filter(s => s.data.length > 0);
+        if (seriesWithData.length > 1) {
+            const commonEnd = Math.min(...seriesWithData.map(s => s.data[s.data.length - 1].x));
+            const commonStart = Math.max(...seriesWithData.map(s => s.data[0].x));
+            series.forEach(s => {
+                s.data = s.data.filter(p => p.x >= commonStart && p.x <= commonEnd);
+            });
+        }
+    }
 
     // Update existing chart if it still has a valid DOM element
     const existingChart = charts[w.id];
@@ -84,7 +98,7 @@ async function renderTimeseries(w, body, cfg) {
                         axisBorder: { show: false }, axisTicks: { show: false }
                     },
                     series: series
-                }, false, true);
+                }, true, false);
                 return;
             }
             // Chart container was destroyed – clean up and recreate
@@ -103,7 +117,6 @@ async function renderTimeseries(w, body, cfg) {
     // Always use 'area' for non-bar charts (ApexCharts 'line' type has
     // rendering issues with many series and with stacked mode)
     const isBar = cfg.chartType === 'bar';
-    const isStacked = !!cfg.stacked;
     const options = {
         series: series,
         chart: {
