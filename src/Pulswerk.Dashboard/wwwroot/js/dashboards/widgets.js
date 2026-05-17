@@ -83,6 +83,17 @@ async function renderTimeseries(w, body, cfg) {
         }
     }
 
+    // Compute y-axis range that always includes 0
+    let yMin = 0, yMax = 0;
+    series.forEach(s => s.data.forEach(p => {
+        if (p.y < yMin) yMin = p.y;
+        if (p.y > yMax) yMax = p.y;
+    }));
+    // Add 5% padding so lines don't touch the edges
+    const yPad = Math.max((yMax - yMin) * 0.05, 0.1);
+    yMin = yMin - yPad;
+    yMax = yMax + yPad;
+
     // Update existing chart if it still has a valid DOM element
     const existingChart = charts[w.id];
     if (existingChart) {
@@ -96,6 +107,7 @@ async function renderTimeseries(w, body, cfg) {
                         labels: { datetimeUTC: false, style: { colors: '#64748b', fontSize: '10px' } },
                         axisBorder: { show: false }, axisTicks: { show: false }
                     },
+                    yaxis: { min: yMin, max: yMax, labels: { style: { colors: '#94a3b8', fontSize: '10px' } } },
                     series: series
                 }, true, false);
                 return;
@@ -154,9 +166,7 @@ async function renderTimeseries(w, body, cfg) {
             axisTicks: { show: false },
         },
         yaxis: {
-            forceNiceScale: true,
-            min: (min) => Math.min(min, 0),
-            max: (max) => Math.max(max, 0),
+            min: yMin, max: yMax,
             labels: { style: { colors: '#94a3b8', fontSize: '10px' } }
         },
         annotations: {
