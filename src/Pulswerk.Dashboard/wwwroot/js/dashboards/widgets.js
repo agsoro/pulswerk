@@ -71,15 +71,14 @@ async function renderTimeseries(w, body, cfg) {
         colors.push(color);
     });
 
-    // For stacked charts, trim all series to the common time range so
-    // missing data at edges isn't treated as 0 by ApexCharts.
+    // For stacked charts, trim all series to the earliest endpoint so
+    // missing data at the right edge isn't treated as 0 by ApexCharts.
     if (isStacked && series.length > 1) {
         const seriesWithData = series.filter(s => s.data.length > 0);
         if (seriesWithData.length > 1) {
             const commonEnd = Math.min(...seriesWithData.map(s => s.data[s.data.length - 1].x));
-            const commonStart = Math.max(...seriesWithData.map(s => s.data[0].x));
             series.forEach(s => {
-                s.data = s.data.filter(p => p.x >= commonStart && p.x <= commonEnd);
+                s.data = s.data.filter(p => p.x <= commonEnd);
             });
         }
     }
