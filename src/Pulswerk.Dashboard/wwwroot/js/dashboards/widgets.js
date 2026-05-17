@@ -100,30 +100,33 @@ async function renderTimeseries(w, body, cfg) {
     body.innerHTML = '<div style="flex:1;min-height:0;position:relative"><div id="chart_' + w.id + '" style="width:100%;height:' + chartHeight + 'px"></div></div>';
 
     // ── Chart config adapts to series count ─────────────────────────
-    const useArea = !many && cfg.chartType !== 'bar';
+    // Always use 'area' for non-bar charts (ApexCharts 'line' type has
+    // rendering issues with many series and with stacked mode)
+    const isBar = cfg.chartType === 'bar';
+    const isStacked = !!cfg.stacked;
     const options = {
         series: series,
         chart: {
-            type: useArea ? 'area' : (cfg.chartType === 'bar' ? 'bar' : 'line'),
+            type: isBar ? 'bar' : 'area',
             height: chartHeight,
             fontFamily: 'Inter, sans-serif',
             animations: { enabled: !many, easing: 'easeinout', speed: 400 },
             toolbar: { show: false },
             sparkline: { enabled: false },
-            stacked: !!cfg.stacked,
+            stacked: isStacked,
         },
         colors: colors,
         stroke: {
             curve: 'straight',
             width: many ? 1.5 : 2,
         },
-        fill: useArea ? {
+        fill: {
             type: 'gradient',
             gradient: {
-                shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0.05,
+                shadeIntensity: 1, opacityFrom: many ? 0.08 : 0.45, opacityTo: 0.05,
                 stops: [0, 90, 100]
             }
-        } : { opacity: 0 },
+        },
         dataLabels: { enabled: false },
         grid: {
             show: true, borderColor: 'rgba(255,255,255,0.05)',
@@ -151,8 +154,6 @@ async function renderTimeseries(w, body, cfg) {
         tooltip: {
             theme: 'dark', x: { format: 'dd MMM HH:mm:ss' },
             y: { formatter: (v) => formatNumber(v, 2) },
-            shared: !many,          // individual tooltips when dense
-            intersect: many,
         }
     };
 
