@@ -96,77 +96,70 @@ namespace Pulswerk.Drivers.Modbus
             
             if (entry.Tcp != null) Log.Debug($"[Modbus] Pooled connection for '{key}' is dead. Reconnecting…");
 
-            lock (_lock)
+            // Calculate backoff based on consecutive failures
+            _consecutiveFailures.TryGetValue(key, out int failCount);
+            var cooldown = TimeSpan.FromTicks(Math.Min(
+                MaxReconnectCooldown.Ticks,
+                BaseReconnectCooldown.Ticks * (long)Math.Pow(2, Math.Min(failCount, 6)) // exponential up to ~10.6 mins, but capped at 5
+            ));
+
+            // Cooldown check — don't hammer a dead gateway
+            if (_lastConnectAttempt.TryGetValue(key, out var lastAttempt) &&
+                DateTime.UtcNow - lastAttempt < cooldown)
             {
-                // Double-check after acquiring lock
-                if (_pool.TryGetValue(key, out entry) && IsAlive(entry.Tcp))
-                    return new MasterResult { Master = entry.Master, IsNew = false };
+                Log.Debug($"[Modbus] Connection '{key}' in backoff cooldown ({cooldown.TotalSeconds:F1}s). Skipping attempt.");
+                throw new SocketException((int)SocketError.HostUnreachable);
+            }
 
-                // Calculate backoff based on consecutive failures
-                _consecutiveFailures.TryGetValue(key, out int failCount);
-                var cooldown = TimeSpan.FromTicks(Math.Min(
-                    MaxReconnectCooldown.Ticks,
-                    BaseReconnectCooldown.Ticks * (long)Math.Pow(2, Math.Min(failCount, 6)) // exponential up to ~10.6 mins, but capped at 5
-                ));
+            // Dispose old if present
+            PurgeConnection(key);
+            _lastConnectAttempt[key] = DateTime.UtcNow;
 
-                // Cooldown check — don't hammer a dead gateway
-                if (_lastConnectAttempt.TryGetValue(key, out var lastAttempt) &&
-                    DateTime.UtcNow - lastAttempt < cooldown)
-                {
-                    Log.Debug($"[Modbus] Connection '{key}' in backoff cooldown ({cooldown.TotalSeconds:F1}s). Skipping attempt.");
-                    throw new SocketException((int)SocketError.HostUnreachable);
-                }
+            string address = conn.Address
+                ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address.");
+            int port = conn.Port
+                ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port.");
 
-                // Dispose old if present
-                PurgeConnection(key);
-                _lastConnectAttempt[key] = DateTime.UtcNow;
-
-                string address = conn.Address
-                    ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing address.");
-                int port = conn.Port
-                    ?? throw new InvalidOperationException($"Connection '{conn.Id}' is missing port.");
-
-                var tcp = new TcpClient();
-                try
-                {
-                    // Use async connect with timeout
-                    var connectTask = tcp.ConnectAsync(address, port);
-                    if (!connectTask.Wait(ConnectTimeoutMs))
-                    {
-                        tcp.Dispose();
-                        throw new TimeoutException(
-                            $"TCP connect to {address}:{port} timed out after {ConnectTimeoutMs}ms.");
-                    }
-
-                    if (connectTask.IsFaulted)
-                    {
-                        tcp.Dispose();
-                        throw connectTask.Exception?.InnerException
-                            ?? new SocketException((int)SocketError.ConnectionRefused);
-                    }
-
-                    tcp.ReceiveTimeout = 5_000;
-                    tcp.SendTimeout = 5_000;
-
-                    var master = new ModbusFactory().CreateMaster(tcp);
-                    master.Transport.ReadTimeout = 3_000;
-                    master.Transport.WriteTimeout = 3_000;
-                    master.Transport.Retries = 1;
-
-                    _pool[key] = (tcp, master);
-                    _lastConnectAttempt.TryRemove(key, out _);
-                    _consecutiveFailures.TryRemove(key, out _); // Reset failures on success
-                    
-                    Log.Info($"[Modbus] Connected to '{conn.Id}' ({address}:{port}).");
-                    return new MasterResult { Master = master, IsNew = true };
-                }
-                catch (Exception ex)
+            var tcp = new TcpClient();
+            try
+            {
+                // Use async connect with timeout
+                var connectTask = tcp.ConnectAsync(address, port);
+                if (!connectTask.Wait(ConnectTimeoutMs))
                 {
                     tcp.Dispose();
-                    _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
-                    Log.Error($"[Modbus] Connection '{conn.Id}' ({address}:{port}) establishment failed: {ex.Message}");
-                    throw;
+                    throw new TimeoutException(
+                        $"TCP connect to {address}:{port} timed out after {ConnectTimeoutMs}ms.");
                 }
+
+                if (connectTask.IsFaulted)
+                {
+                    tcp.Dispose();
+                    throw connectTask.Exception?.InnerException
+                        ?? new SocketException((int)SocketError.ConnectionRefused);
+                }
+
+                tcp.ReceiveTimeout = 5_000;
+                tcp.SendTimeout = 5_000;
+
+                var master = new ModbusFactory().CreateMaster(tcp);
+                master.Transport.ReadTimeout = 3_000;
+                master.Transport.WriteTimeout = 3_000;
+                master.Transport.Retries = 1;
+
+                _pool[key] = (tcp, master);
+                _lastConnectAttempt.TryRemove(key, out _);
+                _consecutiveFailures.TryRemove(key, out _); // Reset failures on success
+                
+                Log.Info($"[Modbus] Connected to '{conn.Id}' ({address}:{port}).");
+                return new MasterResult { Master = master, IsNew = true };
+            }
+            catch (Exception ex)
+            {
+                tcp.Dispose();
+                _consecutiveFailures.AddOrUpdate(key, 1, (_, c) => c + 1);
+                Log.Error($"[Modbus] Connection '{conn.Id}' ({address}:{port}) establishment failed: {ex.Message}");
+                throw;
             }
         }
 
