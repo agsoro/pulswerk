@@ -154,7 +154,18 @@ async function renderTimeseries(w, body, cfg) {
             axisTicks: { show: false },
         },
         yaxis: {
+            forceNiceScale: true,
+            min: (min) => Math.min(min, 0),
+            max: (max) => Math.max(max, 0),
             labels: { style: { colors: '#94a3b8', fontSize: '10px' } }
+        },
+        annotations: {
+            yaxis: [{
+                y: 0,
+                borderColor: 'rgba(148,163,184,0.35)',
+                strokeDashArray: 0,
+                label: { show: false }
+            }]
         },
         legend: {
             show: cfg.showLegend !== false, position: 'top', horizontalAlign: 'right',
