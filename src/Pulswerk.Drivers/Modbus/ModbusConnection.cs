@@ -26,7 +26,7 @@ namespace Pulswerk.Drivers.Modbus
         private static readonly TimeSpan MaxReconnectCooldown = TimeSpan.FromMinutes(5);
 
         /// <summary>TCP connect timeout in milliseconds.</summary>
-        private const int ConnectTimeoutMs = 5_000;
+        private const int ConnectTimeoutMs = 10_000;
 
         public static T WithMaster<T>(ConnectionConfig conn, Func<IModbusMaster, T> action)
         {
@@ -93,6 +93,8 @@ namespace Pulswerk.Drivers.Modbus
             string key = conn.Id;
             if (_pool.TryGetValue(key, out var entry) && IsAlive(entry.Tcp))
                 return new MasterResult { Master = entry.Master, IsNew = false };
+            
+            if (entry.Tcp != null) Log.Debug($"[Modbus] Pooled connection for '{key}' is dead. Reconnecting…");
 
             lock (_lock)
             {
@@ -111,6 +113,7 @@ namespace Pulswerk.Drivers.Modbus
                 if (_lastConnectAttempt.TryGetValue(key, out var lastAttempt) &&
                     DateTime.UtcNow - lastAttempt < cooldown)
                 {
+                    Log.Debug($"[Modbus] Connection '{key}' in backoff cooldown ({cooldown.TotalSeconds:F1}s). Skipping attempt.");
                     throw new SocketException((int)SocketError.HostUnreachable);
                 }
 
