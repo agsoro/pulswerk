@@ -80,7 +80,7 @@ async function renderTimeseries(w, body, cfg) {
                 existingChart.updateOptions({
                     xaxis: {
                         type: 'datetime', min: startTs, max: endTs,
-                        labels: { style: { colors: '#64748b', fontSize: '10px' } },
+                        labels: { datetimeUTC: false, style: { colors: '#64748b', fontSize: '10px' } },
                         axisBorder: { show: false }, axisTicks: { show: false }
                     },
                     series: series
@@ -134,7 +134,7 @@ async function renderTimeseries(w, body, cfg) {
         xaxis: {
             type: 'datetime',
             min: startTs, max: endTs,
-            labels: { style: { colors: '#64748b', fontSize: '10px' } },
+            labels: { datetimeUTC: false, style: { colors: '#64748b', fontSize: '10px' } },
             axisBorder: { show: false },
             axisTicks: { show: false },
         },

@@ -120,6 +120,7 @@ function renderChart(data) {
         dataLabels: { enabled: false },
         xaxis: {
             type: 'datetime',
+            labels: { datetimeUTC: false },
             axisBorder: { show: false },
             axisTicks: { show: false }
         },

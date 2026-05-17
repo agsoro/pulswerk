@@ -289,7 +289,6 @@ namespace Pulswerk.Storage
                   |> filter(fn: (r) => r._measurement == "data_point" and ({keyFilter}))
                   |> filter(fn: (r) => r._field == "value")
                 {aggregatePipeline}  |> sort(columns: ["_time"])
-                  |> limit(n: {maxPointsPerKey})
                 """;
 
             foreach (var key in keys) result[key] = new List<TsPoint>();
@@ -367,7 +366,6 @@ namespace Pulswerk.Storage
                       |> sum()
                       |> group()
                       |> sort(columns: ["_time"])
-                      |> limit(n: {maxPoints})
                     """;
             }
 
