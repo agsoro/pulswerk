@@ -245,11 +245,13 @@ namespace Pulswerk.Host
             // ── Force connection reset for Modbus at escalation points ───
             // Purge the pooled TCP socket to force a fresh connection attempt.
             // This handles cases where the gateway is back but the old socket is dead.
+            // Reset at threshold, then every 30 failures so the connection keeps
+            // getting recycled during extended outages.
             bool isModbus = device.ConnectionId != null &&
                 !device.DeviceType.Equals("bacnet", StringComparison.OrdinalIgnoreCase) &&
                 !device.DeviceType.Equals("deziko", StringComparison.OrdinalIgnoreCase);
 
-            if (isModbus && (count == FailThreshold || count == FailThreshold * 3 || count == FailThreshold * 5))
+            if (isModbus && (count == FailThreshold || (count > FailThreshold && count % 30 == 0)))
             {
                 Log.Warning(
                     $"[{device.DeviceType,-10}] {device.Name,-38} " +

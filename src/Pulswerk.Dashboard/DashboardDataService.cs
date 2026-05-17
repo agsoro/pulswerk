@@ -342,7 +342,7 @@ namespace Pulswerk.Dashboard
                         IsView = true
                     };
                 }
-                else if (device.HierarchyEnabled && Drivers.TryGetValue(device.Name, out var driver))
+                else if (Drivers.TryGetValue(device.Name, out var driver))
                 {
                     deviceTree = driver.GetAssetHierarchy(device);
                 }

@@ -1,27 +1,46 @@
-// widgets.js – Widget rendering and data fetching
+import { DashboardStore } from './store';
+import { DashboardService } from './api';
+import { transformToChartSeries, calculateYAxisConstraints } from './transformers';
+import { COLORS } from './core';
+import { h, render } from 'preact';
+import { LatestValuesWidget } from './components/LatestValuesWidget';
+import { SingleValueWidget } from './components/SingleValueWidget';
+// widgets.ts – Widget rendering and data fetching
 // ── WIDGET RENDERING ─────────────────────────────────────────────────────
-function renderAllWidgets() {
-    grid.removeAll(); charts = {};
-    const bgLayer = document.getElementById('scadaBg'); if (bgLayer) bgLayer.innerHTML = '';
-    const ptLayer = document.getElementById('scadaPoints'); if (ptLayer) ptLayer.innerHTML = '';
-    dashboard.widgets.forEach(w => {
-        if (w.type === 'background-svg') renderBackgroundSvg(w);
-        else if (w.type === 'scada-point') renderScadaPoint(w);
-        else addWidgetToGrid(w);
-    });
+export function renderAllWidgets() {
+    if (DashboardStore.grid)
+        DashboardStore.grid.removeAll();
+    DashboardStore.charts = {};
+    const bgLayer = document.getElementById('scadaBg');
+    if (bgLayer)
+        bgLayer.innerHTML = '';
+    const ptLayer = document.getElementById('scadaPoints');
+    if (ptLayer)
+        ptLayer.innerHTML = '';
+    if (DashboardStore.dashboard && DashboardStore.dashboard.widgets) {
+        DashboardStore.dashboard.widgets.forEach((w) => {
+            if (w.type === 'background-svg')
+                window.renderBackgroundSvg(w);
+            else if (w.type === 'scada-point')
+                window.renderScadaPoint(w);
+            else
+                addWidgetToGrid(w);
+        });
+    }
 }
-
 const WTYPE_ICONS = { 'timeseries': 'fa-chart-line', 'latest-values': 'fa-table', 'single-value': 'fa-digital-tachograph', 'scada-point': 'fa-map-pin', 'background-svg': 'fa-drafting-compass' };
-function addWidgetToGrid(w) {
-    document.getElementById('emptyDash').style.display = 'none';
+export function addWidgetToGrid(w) {
+    const emptyDash = document.getElementById('emptyDash');
+    if (emptyDash)
+        emptyDash.style.display = 'none';
     const el = document.createElement('div');
     el.className = 'grid-stack-item';
     const icon = WTYPE_ICONS[w.type] || 'fa-puzzle-piece';
     el.innerHTML = `<div class="grid-stack-item-content">
         <div class="widget-header">
             <i class="fas ${icon} widget-type-icon"></i>
-            <span class="widget-title">${esc(t(w.title))}</span>
-            <div class="widget-actions" style="display:${isEditing ? 'flex' : 'none'}">
+            <span class="widget-title">${window.esc(window.t(w.title || ''))}</span>
+            <div class="widget-actions" style="display:${DashboardStore.isEditing ? 'flex' : 'none'}">
                 <button title="Configure" onclick="editWidget('${w.id}')"><i class="fas fa-cog"></i></button>
                 <button title="Duplicate" onclick="duplicateWidget('${w.id}')"><i class="fas fa-copy"></i></button>
                 <button title="Remove" onclick="removeWidget('${w.id}')"><i class="fas fa-trash"></i></button>
@@ -29,72 +48,48 @@ function addWidgetToGrid(w) {
         </div>
         <div class="widget-body" id="wb_${w.id}"></div>
     </div>`;
-    grid.addWidget(el, { id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, minW: 3, minH: 2 });
+    DashboardStore.grid.addWidget(el, { id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, minW: 3, minH: 2 });
     renderWidgetContent(w);
 }
-
-function renderWidgetContent(w) {
+export function renderWidgetContent(w) {
     const body = document.getElementById('wb_' + w.id);
-    if (!body) return;
+    if (!body)
+        return;
     const cfg = w.config || {};
-    if (w.type === 'timeseries') renderTimeseries(w, body, cfg);
-    else if (w.type === 'latest-values') renderLatestValues(w, body, cfg);
-    else if (w.type === 'single-value') renderSingleValue(w, body, cfg);
+    if (w.type === 'timeseries')
+        renderTimeseries(w, body, cfg);
+    else if (w.type === 'latest-values')
+        renderLatestValues(w, body, cfg);
+    else if (w.type === 'single-value')
+        renderSingleValue(w, body, cfg);
 }
-
-async function renderTimeseries(w, body, cfg) {
+export async function renderTimeseries(w, body, cfg) {
     const keys = cfg.keys || [];
-    if (!keys.length) { body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>'; return; }
-
+    if (!keys.length) {
+        body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>';
+        return;
+    }
     // Guard against overlapping async renders for the same widget
-    if (pendingRenders.has(w.id)) return;
-    pendingRenders.add(w.id);
-
+    if (DashboardStore.pendingRenders.has(w.id))
+        return;
+    DashboardStore.pendingRenders.add(w.id);
     const { startTs, endTs } = getTimeRange();
     let data;
-    try { data = await api(`WidgetData&keys=${keys.join(',')}&startTs=${startTs}&endTs=${endTs}`); } catch (e) { pendingRenders.delete(w.id); return; }
-    pendingRenders.delete(w.id);
-
-    const many = keys.length > 5;  // threshold for "dense" chart mode
-    const isStacked = !!cfg.stacked;
-    const series = [], colors = [];
-    keys.forEach((key, i) => {
-        const color = COLORS[i % COLORS.length];
-        const raw = data?.[key] || [];
-        const points = raw.map(p => ({
-            x: typeof p.ts === 'number' ? p.ts : new Date(p.ts).getTime(),
-            y: p.value != null ? parseFloat(parseFloat(p.value).toFixed(2)) : NaN
-        })).filter(p => !isNaN(p.y));
-
-        const meta = allKeys.find(k => k.key === key);
-        series.push({ name: meta?.fullName || friendlyName(key), data: points });
-        colors.push(color);
-    });
-
-    // For stacked charts, trim all series to the earliest endpoint so
-    // missing data at the right edge isn't treated as 0 by ApexCharts.
-    if (isStacked && series.length > 1) {
-        const seriesWithData = series.filter(s => s.data.length > 0);
-        if (seriesWithData.length > 1) {
-            const commonEnd = Math.min(...seriesWithData.map(s => s.data[s.data.length - 1].x));
-            series.forEach(s => {
-                s.data = s.data.filter(p => p.x <= commonEnd);
-            });
-        }
+    try {
+        data = await DashboardService.fetchWidgetData(keys, startTs, endTs);
     }
-
-    // Ensure y-axis always includes 0: only constrain the side that needs it
-    let yDataMin = Infinity, yDataMax = -Infinity;
-    series.forEach(s => s.data.forEach(p => {
-        if (p.y < yDataMin) yDataMin = p.y;
-        if (p.y > yDataMax) yDataMax = p.y;
-    }));
-    const yAxisOpts = { labels: { style: { colors: '#94a3b8', fontSize: '10px' } } };
-    if (yDataMin >= 0) yAxisOpts.min = 0;       // all positive → pin bottom to 0
-    else if (yDataMax <= 0) yAxisOpts.max = 0;   // all negative → pin top to 0
-
+    catch (e) {
+        DashboardStore.pendingRenders.delete(w.id);
+        return;
+    }
+    DashboardStore.pendingRenders.delete(w.id);
+    const many = keys.length > 5; // threshold for "dense" chart mode
+    const isStacked = !!cfg.stacked;
+    const allKeysMeta = window.allKeys || [];
+    const { series, usedColors } = transformToChartSeries(data, keys, allKeysMeta, COLORS, isStacked, window.friendlyName);
+    const yAxisOpts = calculateYAxisConstraints(series);
     // Update existing chart if it still has a valid DOM element
-    const existingChart = charts[w.id];
+    const existingChart = DashboardStore.charts[w.id];
     if (existingChart) {
         try {
             // Verify the chart's container is still in the DOM
@@ -113,32 +108,25 @@ async function renderTimeseries(w, body, cfg) {
             }
             // Chart container was destroyed – clean up and recreate
             existingChart.destroy();
-        } catch (e) { /* destroyed chart, ignore */ }
-        delete charts[w.id];
+        }
+        catch (e) { /* destroyed chart, ignore */ }
+        delete DashboardStore.charts[w.id];
     }
-
-    // Calculate the actual available height in pixels for reliable rendering
-    const bodyRect = body.getBoundingClientRect();
-    const chartHeight = Math.max(bodyRect.height - 10, 150);  // fallback min 150px
-
-    body.innerHTML = '<div style="flex:1;min-height:0;position:relative"><div id="chart_' + w.id + '" style="width:100%;height:' + chartHeight + 'px"></div></div>';
-
+    body.innerHTML = '<div id="chart_' + w.id + '" style="width:100%;flex:1;min-height:0"></div>';
     // ── Chart config adapts to series count ─────────────────────────
-    // Always use 'area' for non-bar charts (ApexCharts 'line' type has
-    // rendering issues with many series and with stacked mode)
     const isBar = cfg.chartType === 'bar';
     const options = {
         series: series,
         chart: {
             type: isBar ? 'bar' : 'area',
-            height: chartHeight,
+            height: '100%',
             fontFamily: 'Inter, sans-serif',
-            animations: { enabled: !many, easing: 'easeinout', speed: 400 },
+            animations: { enabled: false },
             toolbar: { show: false },
             sparkline: { enabled: false },
             stacked: isStacked,
         },
-        colors: colors,
+        colors: usedColors,
         stroke: {
             curve: 'straight',
             width: many ? 1.5 : 2,
@@ -167,11 +155,11 @@ async function renderTimeseries(w, body, cfg) {
         yaxis: yAxisOpts,
         annotations: {
             yaxis: [{
-                y: 0,
-                borderColor: 'rgba(148,163,184,0.35)',
-                strokeDashArray: 0,
-                label: { show: false }
-            }]
+                    y: 0,
+                    borderColor: 'rgba(148,163,184,0.35)',
+                    strokeDashArray: 0,
+                    label: { show: false }
+                }]
         },
         legend: {
             show: cfg.showLegend !== false, position: 'top', horizontalAlign: 'right',
@@ -182,117 +170,61 @@ async function renderTimeseries(w, body, cfg) {
         },
         tooltip: {
             theme: 'dark', x: { format: 'dd MMM HH:mm:ss' },
-            y: { formatter: (v) => formatNumber(v, 2) },
+            y: { formatter: (v) => window.formatNumber(v, 2) },
         }
     };
-
     const chartEl = document.getElementById('chart_' + w.id);
-    if (!chartEl) return;  // safety: body may have been replaced by another widget
-    const chart = new ApexCharts(chartEl, options);
-    charts[w.id] = chart;  // register BEFORE render to prevent concurrent creation
+    if (!chartEl)
+        return; // safety: body may have been replaced by another widget
+    const chart = new window.ApexCharts(chartEl, options);
+    DashboardStore.charts[w.id] = chart; // register BEFORE render to prevent concurrent creation
     chart.render().then(() => {
         setTimeout(() => chart.windowResize?.(), 200);
-    }).catch(e => {
+    }).catch((e) => {
         console.error('Chart render failed for', w.id, e);
-        delete charts[w.id];
+        delete DashboardStore.charts[w.id];
     });
 }
-
-async function renderLatestValues(w, body, cfg) {
+export async function renderLatestValues(_w, body, cfg) {
     const keys = cfg.keys || [];
-    if (!keys.length) { body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>'; return; }
-    body.innerHTML = '<div style="overflow:auto;height:100%"><table class="lv-table"><thead><tr><th>Name</th><th>Value</th><th style="width:50px">Trend</th></tr></thead><tbody id="lvt_' + w.id + '"></tbody></table></div>';
-    await updateLatestValues(w, cfg);
-}
-
-async function updateLatestValues(w, cfg) {
-    const keys = cfg.keys || [];
-    if (!keys.length) return;
-    let data;
-    try { data = await api(`LatestValues&keys=${keys.join(',')}`); } catch (e) { return; }
-    const tbody = document.getElementById('lvt_' + w.id);
-    if (!tbody) return;
-    const keyMeta = allKeys.reduce((m, k) => { m[k.key] = k; return m; }, {});
-    tbody.innerHTML = keys.map((key, i) => {
-        const val = data?.[key] || '---';
-        const meta = keyMeta[key] || {};
-        const color = COLORS[i % COLORS.length];
-        const displayVal = PulswerkValue.formatDisplay(val, meta.type);
-        updateHistoryLiveValue(key, displayVal);
-        const numVal = parseFloat(val);
-        const isNum = !isNaN(numVal);
-        return `<tr>
-            <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:0.5rem"></span>${esc(friendlyName(key))}</td>
-            <td><span class="lv-value" data-key="${key}">${esc(displayVal)}</span><span class="lv-units">${esc(meta.units || '')}</span></td>
-            <td>${isNum ? miniSparkSvg(numVal, color) : ''}</td>
-        </tr>`;
-    }).join('');
-}
-
-async function renderSingleValue(w, body, cfg) {
-    const key = cfg.key || (cfg.keys?.[0]) || '';
-    if (!key) { body.innerHTML = `<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">${t('no_key')}</p></div>`; return; }
-    const meta = allKeys.find(k => k.key === key) || {};
-    const icon = typeof getPointIcon === 'function' ? getPointIcon(meta.type || '') : '<i class="fas fa-microchip"></i>';
-    const safeName = (meta.name || friendlyName(key)).replace(/'/g, "\\'");
-    const safeFullName = (meta.fullName || '').replace(/'/g, "\\'");
-    const safeUnits = (meta.units || '').replace(/'/g, "\\'");
-
-    // Build clickable breadcrumb path from parentPath array (same as Favorites)
-    const pp = meta.parentPath || [];
-    const safePathEnc = encodeURIComponent(JSON.stringify(pp));
-    const pathHtml = pp.map((p, i) => {
-        const link = `<a href="/plswk/Assets?node=${p.id}" style="color:inherit;text-decoration:none">${esc(p.name)}</a>`;
-        const sep = i < pp.length - 1 ? '<i class="fas fa-chevron-right" style="margin:0 0.4rem;font-size:0.55rem;opacity:0.4"></i>' : '';
-        return link + sep;
-    }).join('');
-
-    const safeEnumValues = encodeURIComponent(JSON.stringify(meta.enumValues || null));
-    const keyJs = key.replace(/'/g, "\\'");
-
-    body.innerHTML = `<div class="sv-card">
-        <div class="sv-card-path">${pathHtml || '<span style="opacity:0.4">—</span>'}</div>
-        <div class="sv-card-body">
-            <div class="sv-card-icon">${icon}</div>
-            <div class="sv-card-info">
-                <a href="/plswk/Assets?node=${meta.parentId || ''}" class="sv-card-name" style="text-decoration:none;color:#fff;display:block">${esc(meta.name || friendlyName(key))}</a>
-                <div class="sv-card-fullname">${esc(meta.fullName || key)}</div>
-            </div>
-            <div class="sv-card-valbox">
-                <span class="sv-card-val" id="svv_${w.id}" data-key="${key}">---</span>
-                <span class="sv-card-units">${esc(meta.units || '')}</span>
-            </div>
-        </div>
-        <div class="sv-card-actions">
-            <button class="btn-icon" title="Trend" onclick="openHistory('${keyJs}')"><i class="fas fa-chart-area"></i></button>
-            ${meta.isWritable ? `<button class="btn-icon" title="Edit Value" onclick="openEdit('${keyJs}')"><i class="fas fa-pen"></i></button>` : ''}
-            <button class="btn-icon" title="Properties" onclick="openProperties('${keyJs}')"><i class="fas fa-cog"></i></button>
-        </div>
-    </div>`;
-    await updateSingleValue(w, cfg);
-}
-
-async function updateSingleValue(w, cfg) {
-    const key = cfg.key || (cfg.keys?.[0]) || '';
-    if (!key) return;
-    let data; try { data = await api(`LatestValues&keys=${key}`); } catch (e) { return; }
-    const el = document.getElementById('svv_' + w.id);
-    if (el) {
-        const val = data?.[key] || '---';
-        const meta = allKeys.find(k => k.key === key) || {};
-        const display = PulswerkValue.formatDisplay(val, meta.type);
-        if (el.textContent !== display) el.textContent = display;
-        updateHistoryLiveValue(key, display);
+    if (!keys.length) {
+        body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>';
+        return;
     }
+    const allKeysMeta = window.allKeys || [];
+    render(h(LatestValuesWidget, { keys, allKeysMeta }), body);
 }
-
-function miniSparkSvg(val, color) {
+export async function updateLatestValues(_w, _cfg) {
+    // No-op: Preact component handles its own polling and updates
+}
+export async function renderSingleValue(w, body, cfg) {
+    const key = cfg.key || (cfg.keys?.[0]) || '';
+    if (!key) {
+        body.innerHTML = `<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">${window.t('no_key')}</p></div>`;
+        return;
+    }
+    const allKeysMeta = window.allKeys || [];
+    render(h(SingleValueWidget, { widgetId: w.id, keyName: key, allKeysMeta }), body);
+}
+export async function updateSingleValue(_w, _cfg) {
+    // No-op: Preact component handles its own polling and updates
+}
+export function miniSparkSvg(val, color) {
     // Tiny inline spark indicator
     const h = 16, w = 32;
-    return `<svg width="${w}" height="${h}" style="vertical-align:middle"><rect x="0" y="${h / 4}" width="${w}" height="${h / 2}" rx="2" fill="${hexToRgba(color, 0.15)}"/><rect x="0" y="${h / 4}" width="${Math.min(w, Math.max(4, w * Math.abs(val % 100) / 100))}" height="${h / 2}" rx="2" fill="${color}" opacity="0.6"/></svg>`;
+    return `<svg width="${w}" height="${h}" style="vertical-align:middle"><rect x="0" y="${h / 4}" width="${w}" height="${h / 2}" rx="2" fill="${window.hexToRgba(color, 0.15)}"/><rect x="0" y="${h / 4}" width="${Math.min(w, Math.max(4, w * Math.abs(val % 100) / 100))}" height="${h / 2}" rx="2" fill="${color}" opacity="0.6"/></svg>`;
 }
-
-function getTimeRange() {
-    if (!dashTw) { const now = Date.now(); return { startTs: now - 3600000, endTs: now }; }
-    const r = dashTw.getRange(); return { startTs: r.startTs, endTs: r.endTs };
+export function getTimeRange() {
+    if (!DashboardStore.dashTw) {
+        const now = Date.now();
+        return { startTs: now - 3600000, endTs: now };
+    }
+    const r = DashboardStore.dashTw.getRange();
+    return { startTs: r.startTs, endTs: r.endTs };
 }
+// Keep exporting globally for older scripts and Razor pages until they are converted to ES Modules
+Object.assign(window, {
+    renderAllWidgets, addWidgetToGrid, renderWidgetContent, renderTimeseries,
+    renderLatestValues, updateLatestValues, renderSingleValue, updateSingleValue,
+    miniSparkSvg, getTimeRange
+});

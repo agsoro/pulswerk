@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": false,
+    "outDir": "./wwwroot/js",
+    "rootDir": "./src/frontend",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/frontend/*"]
+    }
+  },
+  "include": ["src/frontend/**/*.ts", "src/frontend/**/*.tsx"],
+  "exclude": ["node_modules", "wwwroot/dist"]
+}

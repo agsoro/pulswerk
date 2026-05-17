@@ -47,5 +47,4 @@ yarn-error.log*
 
 # Node / NPM
 node_modules/
-dist/
 .npm

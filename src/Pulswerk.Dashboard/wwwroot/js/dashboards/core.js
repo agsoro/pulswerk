@@ -1,45 +1,55 @@
+import { DashboardStore } from './store';
+import { DashboardService } from './api';
 // core.js – Custom dashboard engine (Core Initialization & Polling)
-const COLORS = [
-    '#38bdf8', '#f59e0b', '#10b981', '#a78bfa', '#f472b6',  // sky, amber, emerald, violet, pink
-    '#fb923c', '#34d399', '#60a5fa', '#e879f9', '#fbbf24',  // orange, teal, blue, fuchsia, yellow
-    '#22d3ee', '#ef4444', '#84cc16', '#c084fc', '#f97316',  // cyan, red, lime, purple, orange-deep
-    '#2dd4bf', '#818cf8', '#facc15', '#ec4899', '#14b8a6',  // teal-bright, indigo, yellow-warm, pink-hot, teal-dark
+export const COLORS = [
+    '#38bdf8', '#f59e0b', '#10b981', '#a78bfa', '#f472b6', // sky, amber, emerald, violet, pink
+    '#fb923c', '#34d399', '#60a5fa', '#e879f9', '#fbbf24', // orange, teal, blue, fuchsia, yellow
+    '#22d3ee', '#ef4444', '#84cc16', '#c084fc', '#f97316', // cyan, red, lime, purple, orange-deep
+    '#2dd4bf', '#818cf8', '#facc15', '#ec4899', '#14b8a6', // teal-bright, indigo, yellow-warm, pink-hot, teal-dark
 ];
-let grid = null, dashboard = null, isEditing = false, charts = {}, pollTimer = null, pendingSvgContent = '';
-let selectedType = 'timeseries', editingWidgetId = null;
-let activeKeyOrder = [], isKeySelectorOpen = false;
-let dashTw = null; // reusable TW module instance
-const pendingRenders = new Set();  // guard against overlapping async renders
-const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-const api = async (handler, opts) => { const r = await fetch(`${window.location.pathname}?handler=${handler}`, opts); return r.json(); };
-
-function initDashboards(initial, editMode) {
-    if (initial) { dashboard = initial; showDashboard(); if (editMode) enterEditMode(); }
-    else loadList();
+export const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+// Legacy api exported for backward compatibility with other files not yet migrated
+export const api = async (handler, opts) => { const r = await fetch(`${window.location.pathname}?handler=${handler}`, opts); return r.json(); };
+export function initDashboards(initial, editMode) {
+    if (initial) {
+        DashboardStore.dashboard = initial;
+        showDashboard();
+        if (editMode)
+            enterEditMode();
+    }
+    else
+        loadList();
     // Init TW module
     const twContainer = document.getElementById('dashTwContainer');
     if (twContainer) {
-        dashTw = createTimeWindowSelector(twContainer, {
-            mode: dashboard?.timewindow?.mode || 'realtime',
-            realtimeMs: dashboard?.timewindow?.realtimeMs || 3600000,
+        DashboardStore.dashTw = window.createTimeWindowSelector(twContainer, {
+            mode: DashboardStore.dashboard?.timewindow?.mode || 'realtime',
+            realtimeMs: DashboardStore.dashboard?.timewindow?.realtimeMs || 3600000,
             onChange: () => refreshAllWidgets()
         });
     }
     // Enter key shortcuts
-    document.getElementById('newDashName')?.addEventListener('keydown', e => { if (e.key === 'Enter') confirmCreate(); });
-    document.getElementById('widgetTitle')?.addEventListener('keydown', e => { if (e.key === 'Enter') confirmAddWidget(); });
+    document.getElementById('newDashName')?.addEventListener('keydown', e => { if (e.key === 'Enter')
+        confirmCreate(); });
+    document.getElementById('widgetTitle')?.addEventListener('keydown', e => { if (e.key === 'Enter')
+        confirmAddWidget(); });
 }
-
 // ── LIST MODE ────────────────────────────────────────────────────────────
-async function loadList() {
-    const pageHeader = document.getElementById('pageHeader'); if (pageHeader) pageHeader.style.display = '';
+export async function loadList() {
+    const pageHeader = document.getElementById('pageHeader');
+    if (pageHeader)
+        pageHeader.style.display = '';
     document.getElementById('dashMode').style.display = 'none';
     document.getElementById('listMode').style.display = '';
-    const list = await api('List');
+    const list = await DashboardService.fetchDashboardList();
     const g = document.getElementById('dashGrid'), e = document.getElementById('emptyDashboards');
-    if (!list || list.length === 0) { g.style.display = 'none'; e.style.display = 'flex'; return; }
-    const favs = pw_fav.get('pw_fav_dashboards');
-    g.innerHTML = list.map(d => {
+    if (!list || list.length === 0) {
+        g.style.display = 'none';
+        e.style.display = 'flex';
+        return;
+    }
+    const favs = window.pw_fav.get('pw_fav_dashboards');
+    g.innerHTML = list.map((d) => {
         const wc = d.widgets?.length || 0;
         const ago = timeAgo(d.updatedAt);
         const isFav = favs.includes(d.id);
@@ -48,12 +58,12 @@ async function loadList() {
                 <div style="width:36px;height:36px;border-radius:10px;background:rgba(56,189,248,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0">
                     <i class="fas fa-th-large" style="color:#38bdf8;font-size:1rem"></i>
                 </div>
-                <div style="flex:1;min-width:0"><div class="dash-card-title">${esc(d.name)}</div></div>
+                <div style="flex:1;min-width:0"><div class="dash-card-title">${window.esc(d.name)}</div></div>
                 <button class="btn-icon ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteDash('${d.id}')" title="Favorite" style="display:${window.pwCanEditFavorites ? 'flex' : 'none'}">
                     <i class="${isFav ? 'fas' : 'far'} fa-star" style="color:${isFav ? '#fbbf24' : 'inherit'}"></i>
                 </button>
             </div>
-            <div class="dash-card-desc">${esc(d.description || 'No description')}</div>
+            <div class="dash-card-desc">${window.esc(d.description || 'No description')}</div>
             <div class="dash-card-meta">
                 <span><i class="fas fa-puzzle-piece" style="margin-right:0.3rem"></i>${wc} widget${wc !== 1 ? 's' : ''} · ${ago}</span>
                 <div class="dash-card-actions" onclick="event.stopPropagation()" style="display:${window.pwCanEditDashboard ? 'flex' : 'none'}">
@@ -64,15 +74,16 @@ async function loadList() {
         </div>`;
     }).join('');
 }
-
-function toggleFavoriteDash(id) {
-    let favs = pw_fav.get('pw_fav_dashboards');
-    if (favs.includes(id)) favs = favs.filter(x => x !== id);
-    else favs.push(id);
-    pw_fav.set('pw_fav_dashboards', favs);
-    
+export function toggleFavoriteDash(id) {
+    let favs = window.pw_fav.get('pw_fav_dashboards');
+    if (favs.includes(id))
+        favs = favs.filter((x) => x !== id);
+    else
+        favs.push(id);
+    window.pw_fav.set('pw_fav_dashboards', favs);
     // Refresh UI
-    if (document.getElementById('listMode').style.display !== 'none') loadList();
+    if (document.getElementById('listMode').style.display !== 'none')
+        loadList();
     else {
         const btn = document.getElementById('btnFavDash');
         if (btn) {
@@ -83,32 +94,36 @@ function toggleFavoriteDash(id) {
         }
     }
 }
-
-function createDashboard() { document.getElementById('createModal').style.display = 'flex'; document.getElementById('newDashName').focus(); }
-async function confirmCreate() {
+export function createDashboard() { document.getElementById('createModal').style.display = 'flex'; document.getElementById('newDashName').focus(); }
+export async function confirmCreate() {
     const name = document.getElementById('newDashName').value.trim();
-    if (!name) return;
-    const d = await fetch('/plswk/Dashboards?handler=Create', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify({ name, description: document.getElementById('newDashDesc').value }) }).then(r => r.json());
+    if (!name)
+        return;
+    const desc = document.getElementById('newDashDesc').value;
+    const d = await DashboardService.createDashboard(name, desc);
     location.href = `/plswk/Dashboards/${d.id}/${slugify(d.name)}?edit=true`;
 }
-async function deleteDash(id) {
-    if (!confirm('Delete this dashboard?')) return;
-    await fetch('/plswk/Dashboards?handler=Delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify({ id }) });
+export async function deleteDash(id) {
+    if (!confirm('Delete this dashboard?'))
+        return;
+    await DashboardService.deleteDashboard(id);
     loadList();
 }
-
 // ── DASHBOARD VIEW ────────────────────────────────────────────────────────
-async function showDashboard() {
-    const pageHeader = document.getElementById('pageHeader'); if (pageHeader) pageHeader.style.display = 'none';
+export async function showDashboard() {
+    const pageHeader = document.getElementById('pageHeader');
+    if (pageHeader)
+        pageHeader.style.display = 'none';
     document.getElementById('listMode').style.display = 'none';
     document.getElementById('dashMode').style.display = '';
-    document.getElementById('dashTitleView').textContent = dashboard.name;
-    document.getElementById('dashTitle').value = dashboard.name;
-    const sep = document.getElementById('dashBreadcrumbSep'); if (sep) sep.style.display = '';
-    
+    document.getElementById('dashTitleView').textContent = DashboardStore.dashboard.name;
+    document.getElementById('dashTitle').value = DashboardStore.dashboard.name;
+    const sep = document.getElementById('dashBreadcrumbSep');
+    if (sep)
+        sep.style.display = '';
     // Init favorite star
-    const favs = pw_fav.get('pw_fav_dashboards');
-    const isFav = favs.includes(dashboard.id);
+    const favs = window.pw_fav.get('pw_fav_dashboards');
+    const isFav = favs.includes(DashboardStore.dashboard.id);
     const btn = document.getElementById('btnFavDash');
     if (btn) {
         btn.classList.toggle('active', isFav);
@@ -116,107 +131,159 @@ async function showDashboard() {
         btn.querySelector('i').style.color = isFav ? '#fbbf24' : '';
         btn.style.display = window.pwCanEditFavorites ? 'flex' : 'none';
     }
-    // Pre-fetch key metadata so widgets can show friendly names
-    if (!allKeys.length) { try { allKeys = await api('AvailableDataPoints'); } catch (e) { allKeys = []; } }
+    if (!window.allKeys?.length) {
+        try {
+            window.allKeys = await DashboardService.fetchAvailableDataPoints();
+        }
+        catch (e) {
+            window.allKeys = [];
+        }
+    }
     initGrid();
-    if (dashboard.widgets?.length) renderAllWidgets();
-    else document.getElementById('emptyDash').style.display = 'flex';
+    if (DashboardStore.dashboard.widgets?.length) {
+        window.renderAllWidgets();
+        setTimeout(() => {
+            if (window.updateAllSvgAnimations) {
+                window.updateAllSvgAnimations();
+            }
+        }, 100);
+    }
+    else
+        document.getElementById('emptyDash').style.display = 'flex';
     startPolling();
 }
-
-function initGrid() {
-    if (grid) grid.destroy(false);
-    grid = GridStack.init({ column: 12, cellHeight: 80, margin: 8, disableResize: true, disableDrag: true, float: true }, '#dashGrid2');
-    grid.on('resizestop', function (event, el) {
+export function initGrid() {
+    if (DashboardStore.grid)
+        DashboardStore.grid.destroy(false);
+    DashboardStore.grid = window.GridStack.init({ column: 12, cellHeight: 80, margin: 8, disableResize: true, disableDrag: true, float: true }, '#dashGrid2');
+    DashboardStore.grid.on('resizestop', function (_event, el) {
         const id = el.getAttribute('gs-id');
-        if (charts[id]) {
-            setTimeout(() => charts[id].windowResize(), 50);
+        if (id && DashboardStore.charts[id]) {
+            setTimeout(() => DashboardStore.charts[id].windowResize(), 50);
         }
     });
 }
-
-function enterEditMode() {
-    isEditing = true;
-    if (grid) { grid.enableMove(true); grid.enableResize(true); }
-    document.getElementById('dashTitle').style.display = ''; document.getElementById('dashTitleView').style.display = 'none';
+export function enterEditMode() {
+    DashboardStore.isEditing = true;
+    if (DashboardStore.grid) {
+        DashboardStore.grid.enableMove(true);
+        DashboardStore.grid.enableResize(true);
+    }
+    document.getElementById('dashTitle').style.display = '';
+    document.getElementById('dashTitleView').style.display = 'none';
     document.getElementById('btnEdit').style.display = 'none';
-    document.getElementById('btnSave').style.display = ''; document.getElementById('btnCancel').style.display = ''; document.getElementById('btnAddWidget').style.display = '';
+    document.getElementById('btnSave').style.display = '';
+    document.getElementById('btnCancel').style.display = '';
+    document.getElementById('btnAddWidget').style.display = '';
     document.querySelectorAll('.widget-actions').forEach(e => e.style.display = 'flex');
-    document.getElementById('emptyDash').style.display = dashboard.widgets?.length ? 'none' : 'flex';
+    document.getElementById('emptyDash').style.display = DashboardStore.dashboard.widgets?.length ? 'none' : 'flex';
     // Raise bg layer above grid so SVG widgets can be dragged
     const bgLayer = document.getElementById('scadaBg');
-    if (bgLayer) bgLayer.classList.add('edit-mode');
+    if (bgLayer)
+        bgLayer.classList.add('edit-mode');
     document.querySelectorAll('.scada-point').forEach(el => {
         el.classList.add('edit-mode');
         const wid = el.dataset.wid;
-        const w = dashboard.widgets.find(x => x.id === wid);
-        if (w) initScadaPointDrag(el, w);
+        const w = DashboardStore.dashboard.widgets.find((x) => x.id === wid);
+        if (w)
+            window.initScadaPointDrag(el, w);
     });
     document.querySelectorAll('.scada-svg-widget').forEach(el => {
         el.classList.add('edit-mode');
         const wid = el.dataset.wid;
-        const w = dashboard.widgets.find(x => x.id === wid);
-        if (w) initSvgWidgetDrag(el, w);
+        const w = DashboardStore.dashboard.widgets.find((x) => x.id === wid);
+        if (w)
+            window.initSvgWidgetDrag(el, w);
     });
 }
-
-function cancelEdit() { location.href = `/plswk/Dashboards/${dashboard.id}/${slugify(dashboard.name)}`; }
-
-async function saveDashboard() {
-    dashboard.name = document.getElementById('dashTitle').value.trim() || dashboard.name;
-    const r = dashTw ? dashTw.getRange() : {};
-    dashboard.timewindow = { mode: r.mode || 'realtime', realtimeMs: r.realtimeMs || 3600000 };
+export function cancelEdit() { location.href = `/plswk/Dashboards/${DashboardStore.dashboard.id}/${slugify(DashboardStore.dashboard.name)}`; }
+export async function saveDashboard() {
+    DashboardStore.dashboard.name = document.getElementById('dashTitle').value.trim() || DashboardStore.dashboard.name;
+    const r = DashboardStore.dashTw ? DashboardStore.dashTw.getRange() : {};
+    DashboardStore.dashboard.timewindow = { mode: r.mode || 'realtime', realtimeMs: r.realtimeMs || 3600000 };
     // Sync widget positions from grid
-    const items = grid.getGridItems();
-    items.forEach(el => {
+    const items = DashboardStore.grid.getGridItems();
+    items.forEach((el) => {
         const wid = el.getAttribute('gs-id');
-        const w = dashboard.widgets.find(x => x.id === wid);
-        if (w) { w.x = parseInt(el.getAttribute('gs-x')) || 0; w.y = parseInt(el.getAttribute('gs-y')) || 0; w.w = parseInt(el.getAttribute('gs-w')) || 6; w.h = parseInt(el.getAttribute('gs-h')) || 4; }
+        const w = DashboardStore.dashboard.widgets.find((x) => x.id === wid);
+        if (w) {
+            w.x = parseInt(el.getAttribute('gs-x') || '0') || 0;
+            w.y = parseInt(el.getAttribute('gs-y') || '0') || 0;
+            w.w = parseInt(el.getAttribute('gs-w') || '6') || 6;
+            w.h = parseInt(el.getAttribute('gs-h') || '4') || 4;
+        }
     });
     // Note: scada-point positions are already synced to config by the drag handler's onUp
-    await fetch('/plswk/Dashboards?handler=Save', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify(dashboard) });
-    location.href = `/plswk/Dashboards/${dashboard.id}/${slugify(dashboard.name)}`;
+    await DashboardService.saveDashboard(DashboardStore.dashboard);
+    location.href = `/plswk/Dashboards/${DashboardStore.dashboard.id}/${slugify(DashboardStore.dashboard.name)}`;
 }
-
 // ── POLLING ──────────────────────────────────────────────────────────────
-function startPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(refreshAllWidgets, 10000); }
-function refreshAllWidgets() {
-    if (!dashboard?.widgets) return;
-    dashboard.widgets.forEach(w => {
-        if (w.type === 'timeseries' && (!dashTw || dashTw.mode === 'realtime')) renderTimeseries(w, document.getElementById('wb_' + w.id), w.config || {});
-        else if (w.type === 'latest-values') updateLatestValues(w, w.config || {});
-        else if (w.type === 'single-value') updateSingleValue(w, w.config || {});
+export function startPolling() { if (DashboardStore.pollTimer)
+    clearInterval(DashboardStore.pollTimer); DashboardStore.pollTimer = setInterval(refreshAllWidgets, 10000); }
+export function refreshAllWidgets() {
+    if (!DashboardStore.dashboard?.widgets)
+        return;
+    DashboardStore.dashboard.widgets.forEach((w) => {
+        if (w.type === 'timeseries' && (!DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime'))
+            window.renderTimeseries(w, document.getElementById('wb_' + w.id), w.config || {});
+        else if (w.type === 'latest-values')
+            window.updateLatestValues(w, w.config || {});
+        else if (w.type === 'single-value')
+            window.updateSingleValue(w, w.config || {});
     });
-    updateAllScadaPoints();
+    window.updateAllScadaPoints();
+    window.updateAllSvgAnimations();
 }
-
 // ── HELPERS ──────────────────────────────────────────────────────────────
 // esc() and friendlyName() are provided by base.js
-function keyName(key) { const parts = key.split('_'); return parts.length > 2 ? parts.slice(1, -1).join(' ') : key; }
-function hexToRgba(hex, a) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return `rgba(${r},${g},${b},${a})`; }
-function timeAgo(isoStr) {
-    if (!isoStr) return '';
+export function keyName(key) { const parts = key.split('_'); return parts.length > 2 ? parts.slice(1, -1).join(' ') : key; }
+export function hexToRgba(hex, a) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return `rgba(${r},${g},${b},${a})`; }
+export function timeAgo(isoStr) {
+    if (!isoStr)
+        return '';
     const diff = Date.now() - new Date(isoStr).getTime();
-    if (diff < 60000) return 'just now';
-    if (diff < 3600000) return Math.floor(diff / 60000) + ' min ago';
-    if (diff < 86400000) return Math.floor(diff / 3600000) + ' hr ago';
+    if (diff < 60000)
+        return 'just now';
+    if (diff < 3600000)
+        return Math.floor(diff / 60000) + ' min ago';
+    if (diff < 86400000)
+        return Math.floor(diff / 3600000) + ' hr ago';
     return Math.floor(diff / 86400000) + ' days ago';
 }
-
-function slugify(text) {
+export function slugify(text) {
     return text.toString().toLowerCase()
-        .replace(/\s+/g, '-')           // Replace spaces with -
-        .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
-        .replace(/\-\-+/g, '-')         // Replace multiple - with single -
-        .replace(/^-+/, '')             // Trim - from start of text
-        .replace(/-+$/, '');            // Trim - from end of text
+        .replace(/\s+/g, '-') // Replace spaces with -
+        .replace(/[^\w\-]+/g, '') // Remove all non-word chars
+        .replace(/\-\-+/g, '-') // Replace multiple - with single -
+        .replace(/^-+/, '') // Trim - from start of text
+        .replace(/-+$/, ''); // Trim - from end of text
 }
-
-function updateHistoryLiveValue(key, value) {
-    if (typeof currentHistoryKey !== 'undefined' && currentHistoryKey === key) {
+export function updateHistoryLiveValue(key, value) {
+    if (typeof window.currentHistoryKey !== 'undefined' && window.currentHistoryKey === key) {
         const hlv = document.getElementById('chartLiveValue');
         if (hlv && document.getElementById('historyModal')?.style.display === 'flex') {
             hlv.textContent = value;
         }
     }
 }
+// Keep exporting globally for older scripts and Razor pages until they are converted to ES Modules
+Object.assign(window, {
+    initDashboards, loadList, toggleFavoriteDash, createDashboard, confirmCreate, deleteDash,
+    showDashboard, initGrid, enterEditMode, cancelEdit, saveDashboard, startPolling, refreshAllWidgets,
+    keyName, hexToRgba, timeAgo, slugify, updateHistoryLiveValue, api, token, COLORS, DashboardStore
+});
+// Deprecated Global Accessors (to be removed once all files use DashboardStore directly)
+Object.defineProperties(window, {
+    grid: { get: () => DashboardStore.grid, set: (v) => { DashboardStore.grid = v; }, configurable: true },
+    dashboard: { get: () => DashboardStore.dashboard, set: (v) => { DashboardStore.dashboard = v; }, configurable: true },
+    isEditing: { get: () => DashboardStore.isEditing, set: (v) => { DashboardStore.isEditing = v; }, configurable: true },
+    charts: { get: () => DashboardStore.charts, set: (v) => { DashboardStore.charts = v; }, configurable: true },
+    pollTimer: { get: () => DashboardStore.pollTimer, set: (v) => { DashboardStore.pollTimer = v; }, configurable: true },
+    pendingSvgContent: { get: () => DashboardStore.pendingSvgContent, set: (v) => { DashboardStore.pendingSvgContent = v; }, configurable: true },
+    selectedType: { get: () => DashboardStore.selectedType, set: (v) => { DashboardStore.selectedType = v; }, configurable: true },
+    editingWidgetId: { get: () => DashboardStore.editingWidgetId, set: (v) => { DashboardStore.editingWidgetId = v; }, configurable: true },
+    activeKeyOrder: { get: () => DashboardStore.activeKeyOrder, set: (v) => { DashboardStore.activeKeyOrder = v; }, configurable: true },
+    isKeySelectorOpen: { get: () => DashboardStore.isKeySelectorOpen, set: (v) => { DashboardStore.isKeySelectorOpen = v; }, configurable: true },
+    dashTw: { get: () => DashboardStore.dashTw, set: (v) => { DashboardStore.dashTw = v; }, configurable: true },
+    pendingRenders: { get: () => DashboardStore.pendingRenders, set: (_v) => { }, configurable: true }
+});

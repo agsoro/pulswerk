@@ -1,0 +1,15 @@
+# Agent Rules
+
+## WSL Docker Stack
+- Always run Docker commands using the WSL stack (e.g. prefixing commands with `wsl`, such as `wsl docker` or `wsl docker compose`).
+- Do not run bare `docker` or `docker compose` commands directly in the host PowerShell if Docker is managed via WSL.
+- Use the testing stack compose configuration as defined in the README:
+  `wsl docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d`
+
+## TypeScript Rebuilds
+- Before building or rebuilding the Docker containers (such as running `wsl docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d`), always compile the TypeScript/Vite assets first.
+- To do this, run `npm run build:js` in `src/Pulswerk.Dashboard/` so the compiled bundles in `wwwroot/` are updated and can be copied during the Docker build context.
+
+## Browser Tests & Browserless Container
+- When performing browser tasks or UI verification, strictly use/point to the local `browserless` Docker container running at `http://localhost:3000` (or `ws://localhost:3000`) instead of launching a local browser on the host.
+

@@ -24,11 +24,11 @@
         <ul class="list-none flex flex-col gap-2 w-full" data-testid="nav-links">
             <li>
                 <a href="/plswk/"
-                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Dashboard" ? "!bg-sky-400/10 !text-sky-400" : "")"
-                       data-testid="nav-dashboard">
-                    <i class="fas fa-chart-line w-5 text-xl flex-shrink-0 text-center"></i>
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Home" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                       data-testid="nav-home">
+                    <i class="fas fa-home w-5 text-xl flex-shrink-0 text-center"></i>
                     <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
-                          data-i18n="nav_dashboard">Dashboard</span>
+                          data-i18n="nav_home">Home</span>
                 </a>
             </li>
             <li>
@@ -145,12 +145,17 @@
         <script src="/plswk/lib/jquery.min.js"></script>
         <script src="/plswk/lib/flowbite.min.js"></script>
         <script src="/plswk/lib/apexcharts.js"></script>
-        <script src="/plswk/js/i18n.js"></script>
-        <script src="/plswk/js/app-utils.js"></script>
-        <script src="/plswk/js/timewindow.js"></script>
-        <script src="/plswk/js/base.js"></script>
-        <script src="/plswk/js/modals.js"></script>
-        <script>
+        <environment include="Development">
+            <script src="/plswk/js/i18n.js"></script>
+            <script src="/plswk/js/app-utils.js"></script>
+            <script src="/plswk/js/timewindow.js"></script>
+            <script src="/plswk/js/base.js"></script>
+            <script src="/plswk/js/modals.js"></script>
+        </environment>
+        <environment exclude="Development">
+            <script src="/plswk/dist/js/layout.bundle.js" type="module"></script>
+        </environment>
+        <script type="module">
             initI18n('@(DashboardData.Config.Server?.Language ?? "en")');
         </script>
         @RenderSection("Scripts", required: false)

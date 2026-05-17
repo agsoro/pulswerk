@@ -202,6 +202,26 @@
             </div>
             </div>
 
+            <!-- Animation rules (background-svg specific) -->
+            <div id="animRulesSection" style="display:none">
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-1.5">
+                        <label class="block text-[0.72rem] font-semibold text-slate-400 uppercase tracking-wide">
+                            <i class="fas fa-magic" style="margin-right:0.3rem;opacity:0.5"></i> Animation Rules
+                        </label>
+                        <div class="flex gap-1">
+                            <button class="btn-ghost btn-sm h-7 !px-2 !py-0 text-[0.65rem] font-bold" onclick="event.preventDefault();openAnimPreview()" title="Preview animations interactively">
+                                <i class="fas fa-play mr-1"></i> PREVIEW
+                            </button>
+                        </div>
+                    </div>
+                    <div id="animRuleList"></div>
+                    <button class="anim-rule-add" onclick="event.preventDefault();addAnimRule()">
+                        <i class="fas fa-plus"></i> Add Animation Rule
+                    </button>
+                </div>
+            </div>
+
             <!-- Layout option (scada-point specific) -->
             <div id="pointOptions" style="display:none">
                 <div class="mb-4">
@@ -246,18 +266,77 @@
     <div class="scada-popup-card" id="scadaPopupContent"></div>
 </div>
 
+<!-- ═══════════════════ ANIMATION PREVIEW POPUP ═══════════════════ -->
+<div id="scadaAnimPreview" class="scada-preview-popup" onclick="if(event.target===this)closeAnimPreview()">
+    <div class="scada-preview-panel">
+        <div class="scada-preview-header">
+            <h3><i class="fas fa-magic" style="margin-right:0.5rem;color:#38bdf8;opacity:0.7"></i> Animation Preview</h3>
+            <button class="close-modal" onclick="closeAnimPreview()">&times;</button>
+        </div>
+        <div class="scada-preview-body">
+            <div class="scada-preview-svg">
+                <div style="color:#64748b;font-size:0.85rem"><i class="fas fa-drafting-compass" style="margin-right:0.4rem"></i> SVG preview will load here</div>
+            </div>
+            <div class="scada-preview-controls">
+                <div style="flex:0 0 auto">
+                    <label>SVG Element</label>
+                    <select id="previewElementSelect" onchange="onPreviewElementChange()">
+                        <option value="">— Select Element —</option>
+                    </select>
+                </div>
+                <div style="flex:0 0 auto;align-self:flex-end">
+                    <button class="btn-ghost btn-sm" onclick="clearPreviewClasses()">
+                        <i class="fas fa-undo"></i> Clear All
+                    </button>
+                </div>
+            </div>
+            <div style="grid-column:1/-1">
+                <label style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;display:block;margin-bottom:0.5rem">
+                    Toggle Animation Classes
+                </label>
+                <div id="previewAnimChips" class="scada-anim-chips">
+                    <span style="color:#64748b;font-size:0.78rem">Select an element above to see available classes</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
+<!-- ═══════════════════ SVG ELEMENT ID PICKER / RENAMER ═══════════════════ -->
+<div id="scadaIdPanel" class="scada-id-panel" onclick="event.stopPropagation()">
+    <div class="scada-id-panel-header">
+        <h4>Elements (0)</h4>
+        <button class="close-modal" onclick="closeIdPicker()">&times;</button>
+    </div>
+    <div class="scada-id-panel-list"></div>
+</div>
+
+<div id="scadaRenamePopup" class="scada-rename-popup" onclick="event.stopPropagation()">
+    <label>Rename SVG Element</label>
+    <div class="scada-rename-tag">&lt;<span>g</span>&gt; id="something"</div>
+    <input type="text" class="scada-rename-input" placeholder="Enter new ID..." onkeydown="if(event.key==='Enter')confirmRenameElement();if(event.key==='Escape')cancelRenameElement()">
+    <div class="scada-rename-actions">
+        <button class="scada-rename-cancel" onclick="cancelRenameElement()">Cancel</button>
+        <button class="scada-rename-ok" onclick="confirmRenameElement()">Rename</button>
+    </div>
+</div>
 
 @Html.AntiForgeryToken()
 
 @section Scripts {
 <script src="/plswk/lib/gridstack-all.js"></script>
-<script src="/plswk/js/dashboards/core.js"></script>
-<script src="/plswk/js/dashboards/scada.js"></script>
-<script src="/plswk/js/dashboards/widgets.js"></script>
-<script src="/plswk/js/dashboards/picker.js"></script>
-<script src="/plswk/js/dashboards/editor.js"></script>
-<script>
+<environment include="Development">
+    <script src="/plswk/js/dashboards/core.js"></script>
+    <script src="/plswk/js/dashboards/scada.js"></script>
+    <script src="/plswk/js/dashboards/widgets.js"></script>
+    <script src="/plswk/js/dashboards/picker.js"></script>
+    <script src="/plswk/js/dashboards/editor.js"></script>
+    <script src="/plswk/js/main.js" type="module"></script>
+</environment>
+<environment exclude="Development">
+    <script src="/plswk/dist/js/dashboards.bundle.js" type="module"></script>
+</environment>
+<script type="module">
     // Bootstrap with server-rendered data
     const INITIAL_DASH = @Html.Raw(dashJson);
     const EDIT_MODE = @(Model.EditMode ? "true" : "false");

@@ -6,11 +6,13 @@ This document describes the internal data structures used by the Pulswerk Dashbo
 
 Pulswerk follows a strict five-layer hierarchy for data organization:
 
-**Connection** → **Device** → **Hierarchy (Assets)** → **DataPoint** → **TimeSeries**
+physical layer -> **Connection** → **Device**
+translates to
+logical layer -> **Assets** → **DataPoint** → **TimeSeries**
 
 1.  **Connection**: The physical or logical transport layer (e.g., Modbus TCP, BACnet IP).
 2.  **Device**: A specific piece of hardware defined in configuration (e.g., "Main Meter", "Deziko ASP-01").
-3.  **Hierarchy (Assets)**: The logical organization layer. These are "Nodes" in the tree that can represent physical locations (Building A / Floor 1) or structured sub-sections of a device.
+3.  **Assets**: The logical organization layer. These are "Nodes" in the hierarchytree that can represent physical locations (Building A / Floor 1) or structured sub-sections of a device.
 4.  **DataPoint**: An individual sensor, metric, or register (e.g., `power_kw`, `room_temp`).
 5.  **TimeSeries**: The historical progression of a DataPoint's value over time, stored in the database.
 

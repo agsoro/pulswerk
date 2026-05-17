@@ -1,0 +1,115 @@
+/// <reference path="../types/pulswerk.d.ts" />
+import { h, render } from 'preact';
+import { DashCard } from './components/DashCard';
+import { PointCard } from './components/PointCard';
+let allPoints = [];
+let allDashboards = [];
+export async function loadFavoriteDashboards() {
+    const favIds = window.pw_fav.get('pw_fav_dashboards');
+    const list = document.getElementById('favoriteDashList');
+    const empty = document.getElementById('emptyFavoriteDash');
+    if (!list || !empty)
+        return;
+    if (favIds.length === 0) {
+        list.style.display = 'none';
+        empty.style.display = 'flex';
+        return;
+    }
+    list.style.display = 'grid';
+    empty.style.display = 'none';
+    try {
+        const response = await fetch('/plswk/Dashboards?handler=List');
+        allDashboards = await response.json();
+        list.innerHTML = '';
+        favIds.forEach(id => {
+            const d = allDashboards.find(x => x.id === id);
+            if (d)
+                renderDashCard(d, list);
+        });
+    }
+    catch (err) {
+        console.error("Failed to load favorite dashboards:", err);
+    }
+}
+function renderDashCard(d, container) {
+    const wrapper = document.createElement('div');
+    container.appendChild(wrapper);
+    render(h(DashCard, { dashboard: d }), wrapper);
+}
+export async function loadFavorites() {
+    const favKeys = window.pw_fav.get('deziko_favorites');
+    const list = document.getElementById('favoritesList');
+    const empty = document.getElementById('emptyFavorites');
+    if (!list || !empty)
+        return;
+    if (favKeys.length === 0) {
+        list.style.display = 'none';
+        empty.style.display = 'flex';
+        return;
+    }
+    list.style.display = 'grid';
+    empty.style.display = 'none';
+    try {
+        const response = await fetch('?handler=Tree');
+        const trees = await response.json();
+        allPoints = [];
+        const extractPoints = (nodes) => {
+            nodes.forEach(n => {
+                if (n.dataPoints)
+                    allPoints.push(...n.dataPoints);
+                if (n.children)
+                    extractPoints(n.children);
+            });
+        };
+        extractPoints(trees);
+        list.innerHTML = '';
+        favKeys.forEach(key => {
+            const point = allPoints.find(p => p.key === key);
+            if (point)
+                renderPoint(point, list);
+        });
+    }
+    catch (err) {
+        console.error("Failed to load favorites:", err);
+    }
+}
+function renderPoint(point, container) {
+    const wrapper = document.createElement('div');
+    container.appendChild(wrapper);
+    render(h(PointCard, { point, variant: 'index' }), wrapper);
+}
+async function refreshValues() {
+    try {
+        const response = await fetch('?handler=Tree');
+        const newTrees = await response.json();
+        const updateValues = (nodes) => {
+            nodes.forEach(node => {
+                if (node.dataPoints) {
+                    node.dataPoints.forEach((p) => {
+                        const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
+                        if (el)
+                            el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
+                        if (window.currentHistoryKey === p.key &&
+                            document.getElementById('historyModal')?.style.display === 'flex') {
+                            const lv = document.getElementById('chartLiveValue');
+                            if (lv)
+                                lv.textContent = PulswerkValue.formatDisplay(p.value, p.type);
+                        }
+                    });
+                }
+                if (node.children)
+                    updateValues(node.children);
+            });
+        };
+        updateValues(newTrees);
+    }
+    catch (err) { /* silently ignore */ }
+}
+export function initIndexPage() {
+    loadFavorites();
+    loadFavoriteDashboards();
+    setInterval(refreshValues, 2000);
+    window.loadFavorites = loadFavorites;
+    window.loadFavoriteDashboards = loadFavoriteDashboards;
+}
+initIndexPage();

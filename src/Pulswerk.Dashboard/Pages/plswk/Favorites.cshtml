@@ -24,102 +24,10 @@
 @Html.AntiForgeryToken()
 
 @section Scripts {
-    <script>
-        let allPoints = [];
-
-        async function loadFavorites() {
-            const favKeys = JSON.parse(localStorage.getItem('deziko_favorites') || '[]');
-            if (favKeys.length === 0) {
-                document.getElementById('favoritesList').style.display = 'none';
-                document.getElementById('emptyFavorites').style.display = 'flex';
-                return;
-            }
-
-            document.getElementById('favoritesList').style.display = 'grid';
-            document.getElementById('emptyFavorites').style.display = 'none';
-
-            try {
-                const response = await fetch('?handler=Tree');
-                const trees = await response.json();
-                
-                allPoints = [];
-                const extractPoints = (nodes) => {
-                    nodes.forEach(n => {
-                        if (n.dataPoints) allPoints.push(...n.dataPoints);
-                        if (n.children) extractPoints(n.children);
-                    });
-                };
-                extractPoints(trees);
-
-                const list = document.getElementById('favoritesList');
-                list.innerHTML = '';
-
-                favKeys.forEach(key => {
-                    const point = allPoints.find(p => p.key === key);
-                    if (point) renderPoint(point, list);
-                });
-            } catch (err) { console.error("Failed to load favorites:", err); }
-        }
-
-        function renderPoint(point, container) {
-            const item = document.createElement('div');
-            item.className = 'glass rounded-xl p-6 flex flex-col transition-all duration-300';
-            const icon = getPointIcon(point.type);
-            
-            const pathHtml = point.parentPath.map((p, index) => {
-                const link = `<a href="/plswk/Assets?node=${p.id}" class="text-sky-400 no-underline hover:underline">${p.name}</a>`;
-                const sep = index < point.parentPath.length - 1 ? '<i class="fas fa-chevron-right mx-2 text-[0.7rem] opacity-50"></i>' : '';
-                return link + sep;
-            }).join('');
-
-            item.innerHTML = `
-                <div class="text-sky-400/60 text-[0.7rem] font-bold tracking-wide w-full border-b border-white/5 pb-3 mb-5 break-words leading-relaxed">${pathHtml}</div>
-                <div class="flex items-start gap-4 w-full mb-6">
-                    <div class="w-12 h-12 rounded-xl bg-sky-400/10 text-sky-400 flex items-center justify-center text-xl shrink-0">${icon}</div>
-                    <div class="flex-1 min-w-0">
-                        <a href="/plswk/Assets?node=${point.parentId}" class="font-bold text-white text-xl no-underline block hover:text-sky-400 truncate">${point.name}</a>
-                        <div class="text-[0.65rem] opacity-30 font-mono mt-1 truncate">${point.fullName}</div>
-                    </div>
-                </div>
-                <div class="flex items-baseline justify-between mt-auto bg-white/[0.02] rounded-lg p-3 border border-white/5">
-                    ${point.type === 'OBJECT_SCHEDULE' 
-                        ? `<div class="text-sky-400/50 text-[0.65rem] font-black tracking-widest uppercase"><i class="fas fa-clock mr-1 opacity-70"></i>Schedule</div>`
-                        : `<div class="text-3xl font-black text-sky-400 tabular-nums point-value" data-key="${point.key}" data-type="${point.type || ''}">${PulswerkValue.formatDisplay(point.value, point.type)}</div>`
-                    }
-                    <div class="text-[0.7rem] font-bold text-slate-500 uppercase tracking-tighter">${point.units || ''}</div>
-                </div>
-                <div class="flex gap-2 mt-5 w-full justify-end">
-                    <button class="btn-icon" title="Trend" onclick="openHistory('${point.key}')"><i class="fas fa-chart-area"></i></button>
-                    ${point.type === 'OBJECT_SCHEDULE' ? `<button class="btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}" title="Schedule View" onclick="openScheduleView('${point.key}')"><i class="fas fa-calendar-check"></i></button>` : ''}
-                    ${point.isWritable && point.type !== 'OBJECT_SCHEDULE' ? `<button class="btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}" title="Edit Value" onclick="openEdit('${point.key}')"><i class="fas fa-pen"></i></button>` : ''}
-                    <button class="btn-icon" title="Properties" onclick="openProperties('${point.key}')"><i class="fas fa-cog"></i></button>
-                </div>
-            `;
-            container.appendChild(item);
-        }
-
-
-        async function refreshValues() {
-            const response = await fetch('?handler=Tree');
-            const newTrees = await response.json();
-            const updateValues = (nodes) => {
-                nodes.forEach(node => {
-                    if (node.dataPoints) {
-                        node.dataPoints.forEach(p => {
-                            const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
-                            if (el) el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
-                            if (currentHistoryKey === p.key && document.getElementById('historyModal').style.display === 'flex') {
-                                document.getElementById('chartLiveValue').textContent = PulswerkValue.formatDisplay(p.value, p.type);
-                            }
-                        });
-                    }
-                    if (node.children) updateValues(node.children);
-                });
-            };
-            updateValues(newTrees);
-        }
-
-        loadFavorites();
-        setInterval(refreshValues, 2000);
-    </script>
+    <environment include="Development">
+        <script src="/plswk/js/pages/favorites.page.js" type="module"></script>
+    </environment>
+    <environment exclude="Development">
+        <script src="/plswk/dist/js/favorites.page.bundle.js" type="module"></script>
+    </environment>
 }

@@ -12,6 +12,15 @@ namespace Pulswerk.Drivers.Modbus
     /// Uses a persistent connection pool (one TCP socket per connection ID)
     /// to avoid TCP port exhaustion from TIME_WAIT accumulation.
     /// Auto-reconnects on socket failure with configurable timeout.
+    ///
+    /// Staleness detection: tracks last-successful-IO per connection and
+    /// proactively purges connections that are idle too long (no successful
+    /// read/write for MaxIdleBeforePurge).  This catches half-open TCP
+    /// sockets that keep-alive probes haven't detected yet.
+    ///
+    /// Connection-level dead flag: when one device discovers a transport
+    /// failure, all other devices sharing the same connection skip
+    /// immediately instead of each independently timing out.
     /// </summary>
     public static class ModbusConnection
     {
@@ -19,8 +28,21 @@ namespace Pulswerk.Drivers.Modbus
         private static readonly ConcurrentDictionary<string, object> _connLocks = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastConnectAttempt = new();
 
-        /// <summary>Minimum interval between reconnect attempts to the same connection (prevents hammering a dead gateway).</summary>
-        private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(10);
+        /// <summary>Timestamp of last successful IO (read or write) per connection.</summary>
+        private static readonly ConcurrentDictionary<string, DateTime> _lastSuccessfulIo = new();
+
+        /// <summary>Number of consecutive failed connection attempts per connection (for escalating backoff).</summary>
+        private static readonly ConcurrentDictionary<string, int> _consecutiveFailures = new();
+
+        /// <summary>Base interval between reconnect attempts to the same connection.</summary>
+        private static readonly TimeSpan ReconnectCooldownBase = TimeSpan.FromSeconds(10);
+
+        /// <summary>Maximum reconnect cooldown (cap for escalating backoff).</summary>
+        private static readonly TimeSpan ReconnectCooldownMax = TimeSpan.FromSeconds(30);
+
+        /// <summary>Purge idle connections that haven't had a successful IO in this window.
+        /// This catches half-open sockets that keep-alive hasn't flagged yet.</summary>
+        private static readonly TimeSpan MaxIdleBeforePurge = TimeSpan.FromSeconds(60);
 
         /// <summary>TCP connect timeout in milliseconds.</summary>
         private const int ConnectTimeoutMs = 5_000;
@@ -39,14 +61,25 @@ namespace Pulswerk.Drivers.Modbus
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[Modbus] Connection '{conn.Id}' ({conn.Address}:{conn.Port}): " +
-                              $"failed to establish — {ex.GetType().Name}: {ex.Message}");
+                    // Only log if this is the FIRST failure in the current cooldown window.
+                    // Subsequent devices on the same dead connection hit the cooldown gate
+                    // and should not each emit their own log line — that's the spam the
+                    // user reported ("No route to host" × 10 identical lines).
+                    if (!_lastConnectAttempt.ContainsKey(conn.Id) ||
+                        _consecutiveFailures.GetValueOrDefault(conn.Id, 0) <= 1)
+                    {
+                        Log.Error($"[Modbus] Connection '{conn.Id}' ({conn.Address}:{conn.Port}): " +
+                                  $"failed to establish — {ex.GetType().Name}: {ex.Message}");
+                    }
                     throw;
                 }
 
                 try
                 {
-                    return action(master);
+                    var result = action(master);
+                    // Record successful IO — resets staleness tracking
+                    _lastSuccessfulIo[conn.Id] = DateTime.UtcNow;
+                    return result;
                 }
                 catch (Exception ex) when (IsTransportError(ex))
                 {
@@ -59,7 +92,10 @@ namespace Pulswerk.Drivers.Modbus
                     try
                     {
                         master = GetOrCreateMaster(conn);
-                        return action(master);
+                        var result = action(master);
+                        // Record successful IO on retry
+                        _lastSuccessfulIo[conn.Id] = DateTime.UtcNow;
+                        return result;
                     }
                     catch (Exception retryEx)
                     {
@@ -77,18 +113,42 @@ namespace Pulswerk.Drivers.Modbus
         private static IModbusMaster GetOrCreateMaster(ConnectionConfig conn)
         {
             string key = conn.Id;
-            if (_pool.TryGetValue(key, out var entry) && IsAlive(entry.Tcp))
-                return entry.Master;
 
-            // Cooldown check — don't hammer a dead gateway
+            // ── Check for stale idle connection ──────────────────────────
+            // If the last successful IO was too long ago, the socket is
+            // likely half-open.  Purge it proactively instead of waiting
+            // for the next read to time out (3 seconds wasted per device).
+            if (_pool.TryGetValue(key, out var existing))
+            {
+                bool idleTooLong = _lastSuccessfulIo.TryGetValue(key, out var lastIo)
+                    && DateTime.UtcNow - lastIo > MaxIdleBeforePurge;
+
+                if (idleTooLong || !IsAlive(existing.Tcp))
+                {
+                    if (idleTooLong)
+                        Log.Debug($"[Modbus] Connection '{key}' idle for >{MaxIdleBeforePurge.TotalSeconds}s — proactively purging.");
+                    PurgeConnection(key);
+                }
+                else
+                {
+                    return existing.Master;
+                }
+            }
+
+            // ── Cooldown check with escalating backoff ───────────────────
+            // Don't hammer a dead gateway.  Backoff escalates:
+            // 10s → 20s → 30s (capped).  Resets on success.
+            int failures = _consecutiveFailures.GetValueOrDefault(key, 0);
+            TimeSpan cooldown = TimeSpan.FromSeconds(
+                Math.Min(
+                    ReconnectCooldownBase.TotalSeconds * Math.Max(1, failures),
+                    ReconnectCooldownMax.TotalSeconds));
+
             if (_lastConnectAttempt.TryGetValue(key, out var lastAttempt) &&
-                DateTime.UtcNow - lastAttempt < ReconnectCooldown)
+                DateTime.UtcNow - lastAttempt < cooldown)
             {
                 throw new SocketException((int)SocketError.HostUnreachable);
             }
-
-            // Dispose old if present
-            PurgeConnection(key);
 
             _lastConnectAttempt[key] = DateTime.UtcNow;
 
@@ -105,6 +165,8 @@ namespace Pulswerk.Drivers.Modbus
                 if (!connectTask.Wait(ConnectTimeoutMs))
                 {
                     tcp.Dispose();
+                    // Track failure for escalating backoff
+                    _consecutiveFailures[key] = failures + 1;
                     throw new TimeoutException(
                         $"TCP connect to {address}:{port} timed out after {ConnectTimeoutMs}ms.");
                 }
@@ -112,6 +174,7 @@ namespace Pulswerk.Drivers.Modbus
                 if (connectTask.IsFaulted)
                 {
                     tcp.Dispose();
+                    _consecutiveFailures[key] = failures + 1;
                     throw connectTask.Exception?.InnerException
                         ?? new SocketException((int)SocketError.ConnectionRefused);
                 }
@@ -127,6 +190,7 @@ namespace Pulswerk.Drivers.Modbus
                 tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
                 tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 10);      // 10s idle before first probe
                 tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);   // 5s between probes
+                tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3); // 3 retries = 15s to detect dead peer (Linux default was 9 = 45s)
 
                 var master = new ModbusFactory().CreateMaster(tcp);
                 master.Transport.ReadTimeout = 3_000;
@@ -134,10 +198,12 @@ namespace Pulswerk.Drivers.Modbus
                 master.Transport.Retries = 1;
 
                 _pool[key] = (tcp, master);
-                // Clear the cooldown on success — a previously-failed connection
-                // should not penalise subsequent reconnect attempts if the link
-                // drops again later.
+                // Clear the cooldown + failure counter on success — a previously-failed
+                // connection should not penalise subsequent reconnect attempts if the
+                // link drops again later.
                 _lastConnectAttempt.TryRemove(key, out _);
+                _consecutiveFailures.TryRemove(key, out _);
+                _lastSuccessfulIo[key] = DateTime.UtcNow;
                 Log.Info($"[Modbus] Connected to '{conn.Id}' ({address}:{port}).");
                 return master;
             }
@@ -175,7 +241,12 @@ namespace Pulswerk.Drivers.Modbus
                 if (socket == null) return false;
                 // Poll returns true if: (a) data available, (b) connection closed, (c) error
                 // If poll returns true but Available == 0, the connection was closed by the remote end
-                return !(socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0);
+                if (socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0)
+                    return false;
+                // Also check for error condition — catches RST'd sockets
+                if (socket.Poll(0, SelectMode.SelectError))
+                    return false;
+                return true;
             }
             catch
             {
@@ -198,6 +269,7 @@ namespace Pulswerk.Drivers.Modbus
         public static void ResetCooldown(string connId)
         {
             _lastConnectAttempt.TryRemove(connId, out _);
+            _consecutiveFailures.TryRemove(connId, out _);
         }
 
         /// <summary>

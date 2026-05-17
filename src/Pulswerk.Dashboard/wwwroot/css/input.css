@@ -668,3 +668,424 @@ aside:hover .user-name {
     background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);
     color: #10b981;
 }
+
+/* ══════════════════════════════════════════════════════════
+   SCADA SVG Animations
+   Industry-standard animations for HMI/SCADA dashboards.
+   Based on Siemens WinCC, ThingsBoard, and ISA-101 patterns.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Flow Animations (stroke-dashoffset technique) ────── */
+@keyframes scada-flow-right-kf {
+    from { stroke-dashoffset: 30; }
+    to   { stroke-dashoffset: 0; }
+}
+@keyframes scada-flow-left-kf {
+    from { stroke-dashoffset: 0; }
+    to   { stroke-dashoffset: 30; }
+}
+.scada-flow-right {
+    stroke-dasharray: 10 5 !important;
+    animation: scada-flow-right-kf 1.2s linear infinite !important;
+}
+.scada-flow-left {
+    stroke-dasharray: 10 5 !important;
+    animation: scada-flow-left-kf 1.2s linear infinite !important;
+}
+.scada-flow-fast {
+    stroke-dasharray: 6 4 !important;
+    animation: scada-flow-right-kf 0.4s linear infinite !important;
+}
+
+/* ── Color State Classes (static overrides) ───────────── */
+.scada-green  { stroke: #22c55e !important; fill: #22c55e !important; }
+.scada-red    { stroke: #ef4444 !important; fill: #ef4444 !important; }
+.scada-amber  { stroke: #f59e0b !important; fill: #f59e0b !important; }
+.scada-blue   { stroke: #3b82f6 !important; fill: #3b82f6 !important; }
+.scada-gray   { stroke: #64748b !important; fill: #64748b !important; }
+
+/* Stroke-only variants (for paths/lines — don't fill) */
+.scada-stroke-green  { stroke: #22c55e !important; }
+.scada-stroke-red    { stroke: #ef4444 !important; }
+.scada-stroke-amber  { stroke: #f59e0b !important; }
+.scada-stroke-blue   { stroke: #3b82f6 !important; }
+.scada-stroke-gray   { stroke: #64748b !important; }
+
+/* Fill-only variants (for shapes — don't change stroke) */
+.scada-fill-green  { fill: #22c55e !important; }
+.scada-fill-red    { fill: #ef4444 !important; }
+.scada-fill-amber  { fill: #f59e0b !important; }
+.scada-fill-blue   { fill: #3b82f6 !important; }
+.scada-fill-gray   { fill: #64748b !important; }
+
+/* ── Fill Level (tank/vessel, bottom-up via clip-path) ── */
+.scada-level-10  { clip-path: inset(90% 0 0 0) !important; }
+.scada-level-20  { clip-path: inset(80% 0 0 0) !important; }
+.scada-level-30  { clip-path: inset(70% 0 0 0) !important; }
+.scada-level-40  { clip-path: inset(60% 0 0 0) !important; }
+.scada-level-50  { clip-path: inset(50% 0 0 0) !important; }
+.scada-level-60  { clip-path: inset(40% 0 0 0) !important; }
+.scada-level-70  { clip-path: inset(30% 0 0 0) !important; }
+.scada-level-80  { clip-path: inset(20% 0 0 0) !important; }
+.scada-level-90  { clip-path: inset(10% 0 0 0) !important; }
+.scada-level-100 { clip-path: inset(0% 0 0 0)  !important; }
+
+/* ── Attention / Status Animations ────────────────────── */
+@keyframes scada-pulse-kf {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+}
+@keyframes scada-blink-kf {
+    0%, 49%  { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+@keyframes scada-glow-green-kf {
+    0%, 100% { filter: drop-shadow(0 0 0px rgba(34,197,94,0.2)); }
+    50%      { filter: drop-shadow(0 0 10px rgba(34,197,94,0.7)); }
+}
+@keyframes scada-glow-red-kf {
+    0%, 100% { filter: drop-shadow(0 0 0px rgba(239,68,68,0.2)); }
+    50%      { filter: drop-shadow(0 0 10px rgba(239,68,68,0.7)); }
+}
+
+.scada-pulse {
+    animation: scada-pulse-kf 1.8s ease-in-out infinite !important;
+}
+.scada-blink {
+    animation: scada-blink-kf 1s step-start infinite !important;
+}
+.scada-glow-green {
+    animation: scada-glow-green-kf 2s ease-in-out infinite !important;
+}
+.scada-glow-red {
+    animation: scada-glow-red-kf 1.5s ease-in-out infinite !important;
+}
+
+/* ── Rotation Animations ──────────────────────────────── */
+@keyframes scada-rotate-kf {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+@keyframes scada-rotate-ccw-kf {
+    from { transform: rotate(360deg); }
+    to   { transform: rotate(0deg); }
+}
+.scada-rotate {
+    animation: scada-rotate-kf 2s linear infinite !important;
+    transform-origin: center !important;
+    transform-box: fill-box !important;
+}
+.scada-rotate-ccw {
+    animation: scada-rotate-ccw-kf 2s linear infinite !important;
+    transform-origin: center !important;
+    transform-box: fill-box !important;
+}
+
+/* ── Shimmer / Gradient Sweep ─────────────────────────── */
+@keyframes scada-shimmer-kf {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+}
+.scada-shimmer {
+    background: linear-gradient(90deg, transparent 25%, rgba(56,189,248,0.15) 50%, transparent 75%) !important;
+    background-size: 200% 100% !important;
+    animation: scada-shimmer-kf 3s linear infinite !important;
+}
+
+/* ── Wandering Dots (energy flow particles along paths) ─ */
+/* These classes are applied to SVG path/line elements.
+   The JS engine (scada.js) detects them and spawns animated
+   circle elements that travel along the path using
+   getPointAtLength(). Inspired by SolarEdge/Tesla dashboards. */
+
+/* Dot element styles (spawned by JS) */
+.scada-dot {
+    fill: #38bdf8;
+    opacity: 0;
+    filter: drop-shadow(0 0 4px rgba(56,189,248,0.8));
+    transition: opacity 0.3s;
+    pointer-events: none;
+}
+.scada-dot.active {
+    opacity: 1;
+}
+.scada-dot.green {
+    fill: #22c55e;
+    filter: drop-shadow(0 0 4px rgba(34,197,94,0.8));
+}
+.scada-dot.red {
+    fill: #ef4444;
+    filter: drop-shadow(0 0 4px rgba(239,68,68,0.8));
+}
+.scada-dot.amber {
+    fill: #f59e0b;
+    filter: drop-shadow(0 0 4px rgba(245,158,11,0.8));
+}
+
+/* ── Show / Hide (conditional visibility) ─────────────── */
+.scada-hide {
+    visibility: hidden !important;
+    opacity: 0 !important;
+    transition: opacity 0.3s, visibility 0.3s !important;
+    pointer-events: none !important;
+}
+.scada-show {
+    visibility: visible !important;
+    opacity: 1 !important;
+    transition: opacity 0.3s, visibility 0.3s !important;
+}
+
+/* ── Accessibility: respect prefers-reduced-motion ────── */
+@media (prefers-reduced-motion: reduce) {
+    .scada-flow-right, .scada-flow-left, .scada-flow-fast,
+    .scada-pulse, .scada-blink, .scada-glow-green, .scada-glow-red,
+    .scada-rotate, .scada-rotate-ccw, .scada-shimmer,
+    .scada-dot { animation: none !important; opacity: 0 !important; }
+    .scada-dots-right, .scada-dots-left, .scada-dots-fast,
+    .scada-dots-green, .scada-dots-red, .scada-dots-amber {
+        /* Marker classes — no animation in reduced motion */
+    }
+}
+
+/* ── Animation Preview Popup ──────────────────────────── */
+.scada-preview-popup {
+    position: fixed; inset: 0;
+    background: rgba(15,23,42,0.92); backdrop-filter: blur(12px);
+    z-index: 2000; display: none; align-items: center; justify-content: center;
+    padding: 2rem;
+}
+.scada-preview-popup.open { display: flex; }
+.scada-preview-panel {
+    background: rgba(30,41,59,0.97); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 1.5rem; max-width: 900px; width: 100%; max-height: 85vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 50px 100px -20px rgba(0,0,0,0.8);
+}
+.scada-preview-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 1.25rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.scada-preview-header h3 {
+    font-size: 1rem; font-weight: 700; color: #e2e8f0; margin: 0;
+}
+.scada-preview-body {
+    flex: 1; overflow-y: auto; padding: 1.5rem;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+}
+.scada-preview-svg {
+    grid-column: 1 / -1;
+    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 1rem; padding: 1.5rem; min-height: 200px;
+    display: flex; align-items: center; justify-content: center;
+}
+.scada-preview-svg svg { max-width: 100%; max-height: 300px; }
+.scada-preview-controls {
+    grid-column: 1 / -1;
+    display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start;
+}
+.scada-preview-controls label {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #94a3b8; display: block; margin-bottom: 0.35rem;
+}
+.scada-preview-controls select {
+    background: rgba(255,255,255,0.05); border: 1px solid #334155;
+    color: #fff; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+    font-size: 0.82rem; outline: none; min-width: 180px; cursor: pointer;
+}
+.scada-preview-controls select:focus { border-color: #38bdf8; }
+.scada-preview-controls select option { background: #1e293b; }
+
+/* Animation class chips in preview */
+.scada-anim-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.65rem; border-radius: 0.4rem;
+    font-size: 0.72rem; font-weight: 600; cursor: pointer;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    color: #94a3b8; transition: all 0.2s; user-select: none;
+}
+.scada-anim-chip:hover { border-color: #38bdf8; color: #38bdf8; }
+.scada-anim-chip.active {
+    background: rgba(56,189,248,0.12); border-color: #38bdf8; color: #38bdf8;
+}
+.scada-anim-chips {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; max-height: 200px;
+    overflow-y: auto; padding: 0.25rem 0;
+}
+
+/* ── Animation Rule Editor (in widget modal) ─────────── */
+.anim-rule-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 2fr auto;
+    gap: 0.5rem; align-items: start;
+    padding: 0.6rem 0.75rem; margin-bottom: 0.35rem;
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 0.6rem; transition: border-color 0.2s;
+}
+.anim-rule-row:hover { border-color: rgba(255,255,255,0.1); }
+.anim-rule-row select,
+.anim-rule-row input {
+    background: rgba(255,255,255,0.05); border: 1px solid #334155;
+    color: #fff; padding: 0.4rem 0.6rem; border-radius: 0.4rem;
+    font-size: 0.78rem; outline: none; width: 100%;
+}
+.anim-rule-row select:focus,
+.anim-rule-row input:focus { border-color: #38bdf8; }
+.anim-rule-row select option { background: #1e293b; }
+.anim-rule-row .anim-rule-del {
+    background: transparent; border: 1px solid rgba(255,255,255,0.1);
+    color: #64748b; cursor: pointer; padding: 0.4rem 0.6rem;
+    border-radius: 0.4rem; font-size: 0.72rem; transition: all 0.2s;
+    white-space: nowrap;
+}
+.anim-rule-row .anim-rule-del:hover { color: #ef4444; border-color: #ef4444; }
+.anim-rule-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 2fr auto;
+    gap: 0.5rem; padding: 0 0.75rem 0.35rem;
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #64748b;
+}
+.anim-rule-styles {
+    display: flex; flex-wrap: wrap; gap: 0.25rem;
+}
+.anim-rule-style-chip {
+    display: inline-flex; align-items: center; gap: 0.2rem;
+    padding: 0.15rem 0.45rem; border-radius: 0.3rem;
+    font-size: 0.65rem; font-weight: 600; cursor: pointer;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    color: #94a3b8; transition: all 0.15s; user-select: none;
+}
+.anim-rule-style-chip:hover { border-color: #38bdf8; color: #38bdf8; }
+.anim-rule-style-chip.active {
+    background: rgba(56,189,248,0.12); border-color: rgba(56,189,248,0.4); color: #38bdf8;
+}
+.anim-rule-add {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.45rem 0.85rem; border-radius: 0.5rem;
+    font-size: 0.72rem; font-weight: 600; cursor: pointer;
+    background: transparent; border: 1px dashed rgba(255,255,255,0.12);
+    color: #64748b; transition: all 0.2s; margin-top: 0.35rem;
+}
+.anim-rule-add:hover { border-color: #38bdf8; color: #38bdf8; }
+
+/* ── SVG Element ID Picker / Renamer ─────────────────── */
+@keyframes scadaPopIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.scada-svg-widget.id-picker-mode svg {
+    pointer-events: auto !important;
+    cursor: crosshair !important;
+}
+.scada-svg-widget.id-picker-mode svg * {
+    cursor: crosshair !important;
+}
+
+/* Hover highlight injected by JS (outline on the hovered SVG element) */
+.scada-id-hover-highlight {
+    outline: 2px dashed #fbbf24 !important;
+    outline-offset: 2px;
+    cursor: pointer !important;
+}
+
+/* Selected element for renaming */
+.scada-id-selected {
+    outline: 2px solid #38bdf8 !important;
+    outline-offset: 2px;
+}
+
+/* Floating rename popup (positioned near clicked element) */
+.scada-rename-popup {
+    position: fixed; z-index: 2100;
+    background: rgba(30,41,59,0.97); backdrop-filter: blur(16px);
+    border: 1px solid rgba(56,189,248,0.4); border-radius: 0.75rem;
+    padding: 0.75rem; min-width: 240px;
+    box-shadow: 0 16px 48px -8px rgba(0,0,0,0.6), 0 0 0 1px rgba(56,189,248,0.1);
+    animation: scadaPopIn 0.15s ease-out;
+    display: none;
+}
+.scada-rename-popup.open { display: block; }
+.scada-rename-popup label {
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #64748b; display: block; margin-bottom: 0.3rem;
+}
+.scada-rename-popup .scada-rename-tag {
+    font-size: 0.6rem; color: #94a3b8; font-family: monospace;
+    margin-bottom: 0.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.scada-rename-popup .scada-rename-tag span {
+    color: #38bdf8; font-weight: 600;
+}
+.scada-rename-input {
+    width: 100%; background: rgba(255,255,255,0.06); border: 1px solid #334155;
+    color: #fff; padding: 0.45rem 0.65rem; border-radius: 0.4rem;
+    font-size: 0.82rem; font-weight: 600; outline: none;
+    font-family: 'Inter', monospace; letter-spacing: 0.02em;
+    transition: border-color 0.2s;
+}
+.scada-rename-input:focus { border-color: #38bdf8; }
+.scada-rename-actions {
+    display: flex; gap: 0.35rem; margin-top: 0.5rem; justify-content: flex-end;
+}
+.scada-rename-actions button {
+    padding: 0.3rem 0.65rem; border-radius: 0.35rem; font-size: 0.7rem;
+    font-weight: 600; cursor: pointer; border: 1px solid; transition: all 0.15s;
+}
+.scada-rename-ok {
+    background: rgba(56,189,248,0.15); border-color: rgba(56,189,248,0.3) !important;
+    color: #38bdf8;
+}
+.scada-rename-ok:hover { background: rgba(56,189,248,0.25); }
+.scada-rename-cancel {
+    background: transparent; border-color: rgba(255,255,255,0.1) !important;
+    color: #94a3b8;
+}
+.scada-rename-cancel:hover { color: #e2e8f0; border-color: rgba(255,255,255,0.2) !important; }
+
+/* Element list panel in picker mode */
+.scada-id-panel {
+    position: fixed; z-index: 2050; top: 5rem; right: 1.5rem;
+    width: 280px; max-height: calc(100vh - 10rem);
+    background: rgba(30,41,59,0.97); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem;
+    box-shadow: 0 16px 48px -8px rgba(0,0,0,0.5);
+    display: none; flex-direction: column; overflow: hidden;
+    animation: scadaPopIn 0.2s ease-out;
+}
+.scada-id-panel.open { display: flex; }
+.scada-id-panel-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.85rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+}
+.scada-id-panel-header h4 {
+    font-size: 0.82rem; font-weight: 700; color: #e2e8f0; margin: 0;
+}
+.scada-id-panel-list {
+    flex: 1; overflow-y: auto; padding: 0.4rem;
+}
+.scada-id-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.45rem 0.6rem; border-radius: 0.4rem;
+    cursor: pointer; transition: all 0.15s;
+    border: 1px solid transparent;
+}
+.scada-id-item:hover {
+    background: rgba(255,255,255,0.03); border-color: rgba(251,191,36,0.2);
+}
+.scada-id-item.active {
+    background: rgba(56,189,248,0.08); border-color: rgba(56,189,248,0.3);
+}
+.scada-id-item-tag {
+    font-size: 0.6rem; color: #64748b; font-family: monospace;
+    background: rgba(255,255,255,0.04); padding: 0.1rem 0.35rem;
+    border-radius: 0.25rem; flex-shrink: 0;
+}
+.scada-id-item-name {
+    font-size: 0.78rem; font-weight: 600; color: #e2e8f0;
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.scada-id-item-noname {
+    font-size: 0.72rem; color: #475569; font-style: italic;
+}

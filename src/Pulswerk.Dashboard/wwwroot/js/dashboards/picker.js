@@ -1,71 +1,76 @@
+"use strict";
+// @ts-nocheck
 // picker.js – Data key selection and ordering logic
-
 async function loadKeyPicker() {
-    if (!allKeys.length) { try { allKeys = await api('AvailableDataPoints'); } catch (e) { allKeys = []; } }
-    
+    if (!allKeys.length) {
+        try {
+            allKeys = await api('AvailableDataPoints');
+        }
+        catch (e) {
+            allKeys = [];
+        }
+    }
     // Default to rendering selected keys in sorted view
     const selected = activeKeyOrder.map(key => allKeys.find(k => k.key === key)).filter(Boolean);
     renderKeyList(selected, true);
 }
-
 let _initialSelection = [];
 function openKeySelector() {
     isKeySelectorOpen = true;
     const wrapper = document.getElementById('keyPickerWrapper');
     const searchWrapper = document.getElementById('keySearchWrapper');
-    
     wrapper.classList.add('key-picker-expanded');
-    if (searchWrapper) searchWrapper.classList.remove('hidden');
-    
+    if (searchWrapper)
+        searchWrapper.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
-    
     // Get current checked keys
     _initialSelection = [...document.querySelectorAll('#keyList input')].filter(i => (i.type === 'hidden' && i.name === 'wkey') || i.checked).map(i => i.value);
     renderKeyList(allKeys, false, _initialSelection);
     filterKeys();
 }
-
 function closeKeySelector(e) {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
     dismissKeySelector();
-    
     try {
         // Sync current selections into activeKeyOrder and re-render the small list
         const checkedKeys = [...document.querySelectorAll('#keyList input:checked')].map(c => c.value);
-        activeKeyOrder = checkedKeys.map(key => allKeys.find(k => k.key === key)).filter(Boolean).map(k => k.key);
+        activeKeyOrder = checkedKeys.map(key => allKeys.find(k => k.key === key)).filter(Boolean).map((k) => k.key);
         // Add any remaining keys at the end
         const others = allKeys.map(k => k.key).filter(k => !activeKeyOrder.includes(k));
         activeKeyOrder = [...activeKeyOrder, ...others];
-        
         const selectedMeta = activeKeyOrder.filter(k => checkedKeys.includes(k)).map(k => allKeys.find(x => x.key === k)).filter(Boolean);
         renderKeyList(selectedMeta, true);
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error syncing key selection:', err);
     }
 }
-
 function cancelKeySelector(e) {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
     dismissKeySelector();
-    
     // Restore initial selection in the small list
     const selectedMeta = activeKeyOrder.filter(k => _initialSelection.includes(k)).map(k => allKeys.find(x => x.key === k)).filter(Boolean);
     renderKeyList(selectedMeta, true);
 }
-
 function dismissKeySelector() {
     isKeySelectorOpen = false;
     const wrapper = document.getElementById('keyPickerWrapper');
     const searchWrapper = document.getElementById('keySearchWrapper');
-    if (wrapper) wrapper.classList.remove('key-picker-expanded');
-    if (searchWrapper) searchWrapper.classList.add('hidden');
+    if (wrapper)
+        wrapper.classList.remove('key-picker-expanded');
+    if (searchWrapper)
+        searchWrapper.classList.add('hidden');
     document.body.style.overflow = '';
 }
-
 function filterKeys() {
     const raw = document.getElementById('keySearch').value.toLowerCase();
     const terms = raw.split(/\s+/).filter(t => t.length > 0);
-    
     if (isKeySelectorOpen) {
         if (terms.length > 0) {
             document.querySelectorAll('#keyList .key-item').forEach(el => {
@@ -73,16 +78,16 @@ function filterKeys() {
                 const matchesSearch = terms.every(t => search.includes(t));
                 el.style.display = matchesSearch ? '' : 'none';
             });
-        } else {
+        }
+        else {
             document.querySelectorAll('#keyList .key-item').forEach(el => el.style.display = '');
         }
     }
 }
-
 function renderKeyList(keys, isSortedView = false, checkedKeys = []) {
     const list = document.getElementById('keyList');
-    if (!list) return;
-    
+    if (!list)
+        return;
     if (keys.length === 0) {
         if (isSortedView) {
             list.innerHTML = `<div class="p-8 text-center text-slate-500 border-2 border-dashed border-white/5 rounded-lg m-3 bg-white/[0.01]">
@@ -90,7 +95,8 @@ function renderKeyList(keys, isSortedView = false, checkedKeys = []) {
                 <p class="text-[0.78rem] font-semibold text-slate-400 mb-1">No data keys selected</p>
                 <p class="text-[0.68rem] opacity-60">Use the <strong class="text-sky-400">SELECT KEYS</strong> button above to find and add data points to this widget.</p>
             </div>`;
-        } else {
+        }
+        else {
             list.innerHTML = `<div class="p-8 text-center text-slate-500">
                 <i class="fas fa-search mb-3 opacity-20 text-3xl block"></i>
                 <p class="text-[0.78rem] font-semibold text-slate-400">No keys found</p>
@@ -98,7 +104,6 @@ function renderKeyList(keys, isSortedView = false, checkedKeys = []) {
         }
         return;
     }
-
     const multi = selectedType !== 'single-value';
     list.innerHTML = keys.map((k, idx) => {
         const isChecked = isSortedView || checkedKeys.includes(k.key);
@@ -123,13 +128,12 @@ function renderKeyList(keys, isSortedView = false, checkedKeys = []) {
                 </div>
             </div>
             <span class="key-val">${esc(k.value)} ${esc(k.units)}</span>
-        </div>`
+        </div>`;
     }).join('');
 }
-
 function removeKeyFromSelection(key) {
     const items = [...document.querySelectorAll('#keyList .key-item')];
-    const el = items.find(el => el.dataset.key === key);
+    const el = items.find((el) => el.dataset.key === key);
     if (el) {
         el.style.opacity = '0';
         el.style.transform = 'translateX(-20px)';
@@ -139,24 +143,36 @@ function removeKeyFromSelection(key) {
         }, 200);
     }
 }
-
 function moveKey(key, dir) {
     const items = [...document.querySelectorAll('#keyList .key-item')];
-    const idx = items.findIndex(el => el.dataset.key === key);
-    if (idx === -1) return;
+    const idx = items.findIndex((el) => el.dataset.key === key);
+    if (idx === -1)
+        return;
     const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= items.length) return;
-    
+    if (newIdx < 0 || newIdx >= items.length)
+        return;
     const list = document.getElementById('keyList');
-    if (dir === -1) list.insertBefore(items[idx], items[newIdx]);
-    else list.insertBefore(items[idx], items[newIdx].nextSibling);
+    if (dir === -1)
+        list.insertBefore(items[idx], items[newIdx]);
+    else
+        list.insertBefore(items[idx], items[newIdx].nextSibling);
 }
-
 function handleKeyToggle(input) {
     if (input.type === 'radio') {
         document.querySelectorAll('#keyList .key-item').forEach(el => el.classList.remove('selected'));
         input.closest('.key-item').classList.add('selected');
-    } else {
+    }
+    else {
         input.closest('.key-item').classList.toggle('selected', input.checked);
     }
 }
+window.loadKeyPicker = loadKeyPicker;
+window.openKeySelector = openKeySelector;
+window.closeKeySelector = closeKeySelector;
+window.cancelKeySelector = cancelKeySelector;
+window.dismissKeySelector = dismissKeySelector;
+window.filterKeys = filterKeys;
+window.renderKeyList = renderKeyList;
+window.removeKeyFromSelection = removeKeyFromSelection;
+window.moveKey = moveKey;
+window.handleKeyToggle = handleKeyToggle;

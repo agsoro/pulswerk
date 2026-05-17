@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "dev:js": "vite",
+    "build:js": "tsc && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build:css": "npx tailwindcss -i ./wwwroot/css/input.css -o ./wwwroot/css/pulswerk.css --minify",
     "watch:css": "npx tailwindcss -i ./wwwroot/css/input.css -o ./wwwroot/css/pulswerk.css --watch",
     "format": "dotnet format ../../"
@@ -10,10 +14,18 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Pulswerk Dashboard Frontend & SCADA Engine",
   "devDependencies": {
+    "@preact/preset-vite": "^2.10.5",
+    "@types/node": "^20.11.24",
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.14",
-    "tailwindcss": "^3.4.19"
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.4",
+    "vitest": "^1.3.1"
+  },
+  "dependencies": {
+    "preact": "^10.29.2"
   }
 }

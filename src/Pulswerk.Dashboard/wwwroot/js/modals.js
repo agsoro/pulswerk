@@ -1,22 +1,32 @@
-let currentHistoryKey = null;
-let currentEditKey = null;
-let currentPropsKey = null;
-let historyChart = null;
-let historyRefreshTimer = null;
-let historyTw = null; // reusable TW selector instance
-
+"use strict";
+// @ts-nocheck
+let _currentHistoryKey = null;
+let _currentEditKey = null;
+let _currentPropsKey = null;
+let _historyChart = null;
+let _historyRefreshTimer = null;
+let _historyTw = null; // reusable TW selector instance
+Object.defineProperties(window, {
+    currentHistoryKey: { get: () => _currentHistoryKey, set: (v) => { _currentHistoryKey = v; }, configurable: true },
+    currentEditKey: { get: () => _currentEditKey, set: (v) => { _currentEditKey = v; }, configurable: true },
+    currentPropsKey: { get: () => _currentPropsKey, set: (v) => { _currentPropsKey = v; }, configurable: true },
+    historyChart: { get: () => _historyChart, set: (v) => { _historyChart = v; }, configurable: true },
+    historyRefreshTimer: { get: () => _historyRefreshTimer, set: (v) => { _historyRefreshTimer = v; }, configurable: true },
+    historyTw: { get: () => _historyTw, set: (v) => { _historyTw = v; }, configurable: true }
+});
 // Initialize TW module for history modal (once)
 function ensureHistoryTw() {
-    if (historyTw) return;
+    if (historyTw)
+        return;
     const container = document.getElementById('historyTwContainer');
-    if (!container) return;
+    if (!container)
+        return;
     historyTw = createTimeWindowSelector(container, {
         mode: 'realtime',
         realtimeMs: 3600000,
         onChange: () => reloadHistory()
     });
 }
-
 // --- History Modal ---
 async function openHistory(key) {
     currentHistoryKey = key;
@@ -24,29 +34,25 @@ async function openHistory(key) {
     await ensureKeysMeta();
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
-    
     document.getElementById('chartTitle').textContent = meta.name || key;
     document.getElementById('chartUnit').textContent = meta.units || '';
     document.getElementById('chartMeta').textContent = key;
     renderModalBreadcrumb('chartPath', path);
-    
     document.getElementById('historyModal').style.display = 'flex';
-    
     // Fetch live value from API
     document.getElementById('chartLiveValue').textContent = '---';
     try {
         const data = await fetchLatestValues(key);
         const raw = data?.[key];
         if (raw != null) {
-            document.getElementById('chartLiveValue').textContent = 
+            document.getElementById('chartLiveValue').textContent =
                 typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
         }
-    } catch(e) { /* non-critical */ }
-    
+    }
+    catch (e) { /* non-critical */ }
     await reloadHistory();
     startHistoryRefresh();
 }
-
 function closeHistory() {
     stopHistoryRefresh();
     document.getElementById('historyModal').style.display = 'none';
@@ -56,48 +62,48 @@ function closeHistory() {
         historyChart = null;
     }
     const container = document.getElementById('historyChart');
-    if (container) container.innerHTML = '';
+    if (container)
+        container.innerHTML = '';
     document.getElementById('chartTitle').textContent = '';
     document.getElementById('chartUnit').textContent = '';
     document.getElementById('chartMeta').textContent = '';
     document.getElementById('chartLiveValue').textContent = '---';
     const pathEl = document.getElementById('chartPath');
-    if (pathEl) pathEl.innerHTML = '';
+    if (pathEl)
+        pathEl.innerHTML = '';
 }
-
 async function reloadHistory() {
-    const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now() };
+    const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now(), mode: 'realtime' };
     const days = (range.endTs - range.startTs) / 86400000;
     const loader = document.getElementById('chartLoading');
     loader.classList.remove('hidden');
     loader.classList.add('flex');
-    
     try {
         let url = `?handler=History&key=${currentHistoryKey}`;
         if (range.mode === 'history') {
             url += `&startTs=${range.startTs}&endTs=${range.endTs}`;
-        } else {
+        }
+        else {
             url += `&days=${days}`;
         }
-        
         const response = await fetch(url);
         const data = await response.json();
-        
         renderChart(data);
-    } catch (e) {
+    }
+    catch (e) {
         console.error("History load failed", e);
-    } finally {
+    }
+    finally {
         loader.classList.remove('flex');
         loader.classList.add('hidden');
     }
 }
-
 function renderChart(data) {
     const options = {
         series: [{
-            name: document.getElementById('chartTitle').textContent,
-            data: data.map(d => ({ x: new Date(d.ts).getTime(), y: d.value }))
-        }],
+                name: document.getElementById('chartTitle').textContent,
+                data: data.map(d => ({ x: new Date(d.ts).getTime(), y: d.value }))
+            }],
         chart: {
             type: 'area',
             height: '100%',
@@ -138,64 +144,58 @@ function renderChart(data) {
             strokeDashArray: 4
         }
     };
-
     const container = document.getElementById('historyChart');
     container.innerHTML = '';
     historyChart = new ApexCharts(container, options);
     historyChart.render();
 }
-
 // --- History auto-refresh (10s) ---
 function startHistoryRefresh() {
     stopHistoryRefresh();
     historyRefreshTimer = setInterval(refreshHistoryData, 10_000);
 }
-
 function stopHistoryRefresh() {
     if (historyRefreshTimer) {
         clearInterval(historyRefreshTimer);
         historyRefreshTimer = null;
     }
 }
-
 async function refreshHistoryData() {
-    if (!currentHistoryKey) return;
-    if (document.getElementById('historyModal')?.style.display !== 'flex') return;
-    const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now() };
-    
+    if (!currentHistoryKey)
+        return;
+    if (document.getElementById('historyModal')?.style.display !== 'flex')
+        return;
+    const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now(), mode: 'realtime' };
     // In history mode, we don't auto-refresh because the data is static
-    if (range.mode === 'history') return;
-
+    if (range.mode === 'history')
+        return;
     const days = (range.endTs - range.startTs) / 86400000;
-
     try {
         // Fetch updated history + current value in parallel
         const [histRes, valRes] = await Promise.all([
             fetch(`?handler=History&key=${currentHistoryKey}&days=${days}`),
             fetch(`/plswk/api/latest-value/${encodeURIComponent(currentHistoryKey)}`)
         ]);
-
         const data = await histRes.json();
         const vals = await valRes.json();
-
         // Update live value display
         const raw = vals?.[currentHistoryKey];
         if (raw != null) {
             const meta = resolveKeyMeta(currentHistoryKey);
             const lvEl = document.getElementById('chartLiveValue');
-            if (lvEl) lvEl.textContent = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
+            if (lvEl)
+                lvEl.textContent = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
         }
-
         // Update chart series without full redraw
         if (historyChart) {
-            const points = data.map(d => ({ x: new Date(d.ts).getTime(), y: d.value }));
+            const points = data.map((d) => ({ x: new Date(d.ts).getTime(), y: d.value }));
             historyChart.updateSeries([{ data: points }]);
         }
-    } catch (e) {
+    }
+    catch (e) {
         console.error('History refresh failed:', e);
     }
 }
-
 // --- Edit Modal ---
 async function openEdit(key) {
     currentEditKey = key;
@@ -204,12 +204,10 @@ async function openEdit(key) {
     const path = meta.parentPath || [];
     const enums = meta.enumValues || null;
     const type = meta.type || '';
-    
     document.getElementById('editTitle').textContent = meta.name || key;
     document.getElementById('editMeta').textContent = meta.fullName || key;
     document.getElementById('editUnitLabel').textContent = meta.units || '';
     renderModalBreadcrumb('editPath', path);
-    
     // Hide all groups
     document.getElementById('stepperGroup').style.display = 'none';
     document.getElementById('enumGroup').style.display = 'none';
@@ -217,7 +215,6 @@ async function openEdit(key) {
     const status = document.getElementById('editStatus');
     status.textContent = '';
     status.className = 'status-msg';
-    
     // Fetch current value from API
     let currentVal = '---';
     try {
@@ -226,9 +223,9 @@ async function openEdit(key) {
         if (raw != null) {
             currentVal = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
         }
-    } catch(e) { /* use fallback */ }
+    }
+    catch (e) { /* use fallback */ }
     document.getElementById('currentVal').textContent = currentVal;
-
     if (enums && Object.keys(enums).length > 0) {
         const sel = document.getElementById('enumSelect');
         sel.innerHTML = '';
@@ -240,22 +237,24 @@ async function openEdit(key) {
         }
         // Match by label text (state text), not by value index
         const matchOpt = Array.from(sel.options).find(o => o.textContent === currentVal);
-        if (matchOpt) sel.value = matchOpt.value;
-        else sel.value = currentVal; // fallback to numeric match
+        if (matchOpt)
+            sel.value = matchOpt.value;
+        else
+            sel.value = currentVal; // fallback to numeric match
         document.getElementById('enumGroup').style.display = 'block';
-    } else if (type && PulswerkValue.isBinary(type)) {
+    }
+    else if (type && PulswerkValue.isBinary(type)) {
         const input = document.getElementById('boolInput');
         input.checked = PulswerkValue.parseDisplay(currentVal, type) !== 0;
         updateBoolLabel();
         document.getElementById('boolGroup').style.display = 'block';
-    } else {
-        document.getElementById('editValue').value = parseFloat(currentVal) || 0;
+    }
+    else {
+        document.getElementById('editValue').value = String(parseFloat(currentVal) || 0);
         document.getElementById('stepperGroup').style.display = 'block';
     }
-    
     document.getElementById('editModal').style.display = 'flex';
 }
-
 function closeEdit() {
     document.getElementById('editModal').style.display = 'none';
     currentEditKey = null;
@@ -266,45 +265,43 @@ function closeEdit() {
     document.getElementById('editMeta').textContent = '';
     document.getElementById('editUnitLabel').textContent = '';
     document.getElementById('currentVal').textContent = '---';
-    document.getElementById('editValue').value = 0;
+    document.getElementById('editValue').value = '0';
     const status = document.getElementById('editStatus');
     status.textContent = '';
     status.className = 'status-msg';
     const pathEl = document.getElementById('editPath');
-    if (pathEl) pathEl.innerHTML = '';
+    if (pathEl)
+        pathEl.innerHTML = '';
 }
-
 function step(n) {
     const input = document.getElementById('editValue');
-    input.value = (parseFloat(input.value) || 0) + n;
+    input.value = String((parseFloat(input.value) || 0) + n);
 }
-
 function updateBoolLabel() {
     const input = document.getElementById('boolInput');
     document.getElementById('boolLabel').textContent = input.checked ? 'ON' : 'OFF';
     document.getElementById('boolLabel').className = 'bool-toggle-label ' + (input.checked ? 'text-sky-400' : 'text-slate-500');
 }
-
 async function submitEdit(e) {
-    if (e) e.preventDefault();
+    if (e)
+        e.preventDefault();
     const btn = document.getElementById('saveBtn');
     const status = document.getElementById('editStatus');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Sending...</span>';
     status.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Sending update to device...';
     status.className = 'status-msg info';
-    
     let value = 0;
     if (document.getElementById('stepperGroup').style.display !== 'none') {
         value = parseFloat(document.getElementById('editValue').value) || 0;
-    } else if (document.getElementById('enumGroup').style.display !== 'none') {
+    }
+    else if (document.getElementById('enumGroup').style.display !== 'none') {
         value = parseInt(document.getElementById('enumSelect').value, 10) || 0;
-    } else {
+    }
+    else {
         value = document.getElementById('boolInput').checked ? 1 : 0;
     }
-    
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-    
     try {
         const response = await fetch('?handler=Write', {
             method: 'POST',
@@ -314,69 +311,62 @@ async function submitEdit(e) {
             },
             body: JSON.stringify({ key: currentEditKey, value: value })
         });
-        
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
                 status.innerHTML = '<i class="fas fa-check-circle"></i> Success! Value updated.';
                 status.className = 'status-msg success';
                 btn.innerHTML = '<i class="fas fa-check"></i> <span>Updated</span>';
-                
                 // If this is the current history key, reload the chart with a delay
                 // to ensure InfluxDB has indexed the new point.
                 if (currentHistoryKey === currentEditKey && historyChart) {
                     setTimeout(reloadHistory, 1000);
                 }
-                
                 setTimeout(closeEdit, 1200);
-            } else {
+            }
+            else {
                 status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
                 status.className = 'status-msg error';
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
             }
-        } else {
+        }
+        else {
             const err = await response.text();
             status.innerHTML = '<i class="fas fa-bug"></i> Error: ' + err;
             status.className = 'status-msg error';
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
         }
-    } catch (e) {
+    }
+    catch (e) {
         status.innerHTML = '<i class="fas fa-wifi"></i> Failed to connect';
         status.className = 'status-msg error';
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
     }
 }
-
 // --- Properties Modal ---
 async function openProperties(key) {
     currentPropsKey = key;
     await ensureKeysMeta();
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
-    
     document.getElementById('propsTitle').textContent = meta.name || key;
     document.getElementById('propsMeta').textContent = key;
     renderModalBreadcrumb('propsPath', path);
-    
     const loader = document.getElementById('propsLoading');
     const table = document.getElementById('propsTable');
     const empty = document.getElementById('propsEmpty');
     const body = document.getElementById('propsBody');
-    
     loader.classList.remove('hidden');
     table.classList.add('hidden');
     empty.classList.add('hidden');
     body.innerHTML = '';
-    
     document.getElementById('propsModal').style.display = 'flex';
-    
     try {
         const response = await fetch(`?handler=Properties&key=${key}`);
         const props = await response.json();
-        
         if (Array.isArray(props) && props.length > 0) {
             props.forEach(p => {
                 const tr = document.createElement('tr');
@@ -384,17 +374,19 @@ async function openProperties(key) {
                 body.appendChild(tr);
             });
             table.classList.remove('hidden');
-        } else {
+        }
+        else {
             empty.classList.remove('hidden');
         }
-    } catch (e) {
+    }
+    catch (e) {
         empty.classList.remove('hidden');
         console.error("Props load failed", e);
-    } finally {
+    }
+    finally {
         loader.classList.add('hidden');
     }
 }
-
 function closeProperties() {
     document.getElementById('propsModal').style.display = 'none';
     currentPropsKey = null;
@@ -404,20 +396,19 @@ function closeProperties() {
     document.getElementById('propsTable').classList.add('hidden');
     document.getElementById('propsEmpty').classList.add('hidden');
     const pathEl = document.getElementById('propsPath');
-    if (pathEl) pathEl.innerHTML = '';
+    if (pathEl)
+        pathEl.innerHTML = '';
 }
-
 // --- Utils ---
 function renderModalBreadcrumb(id, path) {
     const container = document.getElementById(id);
-    if (!container) return;
+    if (!container)
+        return;
     container.innerHTML = '';
-    
     path.forEach((p, index) => {
         const span = document.createElement('span');
         span.textContent = p.name;
         container.appendChild(span);
-        
         if (index < path.length - 1) {
             const sep = document.createElement('span');
             sep.className = 'sep';
@@ -426,87 +417,84 @@ function renderModalBreadcrumb(id, path) {
         }
     });
 }
-
 // --- Schedule Modal ---
-let currentScheduleData = [];
-let isEditingSchedule = false;
-let currentScheduleKey = null;
-let scheduleValueType = 'real';    // 'boolean' | 'enumerated' | 'real'
-let scheduleStates = null;         // ['Off','On'] or ['State1','State2',...]
-
+let _currentScheduleData = [];
+let _isEditingSchedule = false;
+let _currentScheduleKey = null;
+let _scheduleValueType = 'real'; // 'boolean' | 'enumerated' | 'real'
+let _scheduleStates = null; // ['Off','On'] or ['State1','State2',...]
+Object.defineProperties(window, {
+    currentScheduleData: { get: () => _currentScheduleData, set: (v) => { _currentScheduleData = v; }, configurable: true },
+    isEditingSchedule: { get: () => _isEditingSchedule, set: (v) => { _isEditingSchedule = v; }, configurable: true },
+    currentScheduleKey: { get: () => _currentScheduleKey, set: (v) => { _currentScheduleKey = v; }, configurable: true },
+    scheduleValueType: { get: () => _scheduleValueType, set: (v) => { _scheduleValueType = v; }, configurable: true },
+    scheduleStates: { get: () => _scheduleStates, set: (v) => { _scheduleStates = v; }, configurable: true }
+});
 async function openScheduleView(key) {
     const modal = document.getElementById('scheduleModal');
     const grid = document.getElementById('scheduleGrid');
     const loading = document.getElementById('scheduleLoading');
     const view = document.getElementById('scheduleView');
-    
     await ensureKeysMeta();
     const meta = resolveKeyMeta(key);
-    
     currentScheduleKey = key;
     isEditingSchedule = false;
     scheduleValueType = 'real';
     scheduleStates = null;
     toggleScheduleEdit(false);
-
     const path = meta.parentPath || [];
     document.getElementById('schedulePath').textContent = path.map(p => p.name).join(' › ');
     document.getElementById('scheduleMeta').textContent = key;
-    
     modal.style.display = 'flex';
     loading.classList.remove('hidden');
     view.classList.add('hidden');
     grid.innerHTML = '';
-    
     try {
         const response = await fetch(`?handler=Properties&key=${key}`);
         const props = await response.json();
-        const schedProp = props.find(p => p.name === 'Weekly Schedule');
-        
+        const schedProp = props.find((p) => p.name === 'Weekly Schedule');
         // Read schedule metadata from backend
-        const typeProp = props.find(p => p.name === '_scheduleValueType');
-        if (typeProp) scheduleValueType = typeProp.value;
-        
-        const statesProp = props.find(p => p.name === '_scheduleStates');
+        const typeProp = props.find((p) => p.name === '_scheduleValueType');
+        if (typeProp)
+            scheduleValueType = typeProp.value;
+        const statesProp = props.find((p) => p.name === '_scheduleStates');
         if (statesProp) {
-            try { scheduleStates = JSON.parse(statesProp.value); } catch(e) {}
+            try {
+                scheduleStates = JSON.parse(statesProp.value);
+            }
+            catch (e) { }
         }
-        
         // For boolean without explicit states, use defaults
         if (scheduleValueType === 'boolean' && !scheduleStates) {
             scheduleStates = ['Off', 'On'];
         }
-        
         loading.classList.add('hidden');
         view.classList.remove('hidden');
-        
-        currentScheduleData = [0,1,2,3,4,5,6].map(i => ({ dayIndex: i, entries: [] }));
-        
+        currentScheduleData = [0, 1, 2, 3, 4, 5, 6].map(i => ({ dayIndex: i, entries: [] }));
         if (schedProp && schedProp.value && schedProp.value !== 'Empty Schedule' && schedProp.value !== 'None') {
             const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
             const days = schedProp.value.split(' | ');
-            days.forEach(dayStr => {
+            days.forEach((dayStr) => {
                 const parts = dayStr.split(': ');
-                if (parts.length < 2) return;
+                if (parts.length < 2)
+                    return;
                 const dayIdx = dayNames.indexOf(parts[0]);
-                if (dayIdx === -1) return;
-                
+                if (dayIdx === -1)
+                    return;
                 const timesStr = parts[1];
-                currentScheduleData[dayIdx].entries = timesStr.split(', ').map(t => {
+                currentScheduleData[dayIdx].entries = timesStr.split(', ').map((t) => {
                     const [time, val] = t.split('➔');
                     return { time, value: parseFloat(val) };
                 });
             });
         }
-        
         renderSchedule();
-        
-    } catch (error) {
+    }
+    catch (error) {
         console.error("Schedule load error:", error);
         grid.innerHTML = '<div class="text-center p-8 text-red-400">Failed to load schedule from device.</div>';
     }
 }
-
 function closeSchedule() {
     document.getElementById('scheduleModal').style.display = 'none';
     currentScheduleKey = null;
@@ -516,51 +504,44 @@ function closeSchedule() {
     scheduleStates = null;
     document.getElementById('scheduleGrid').innerHTML = '';
     const pathEl = document.getElementById('schedulePath');
-    if (pathEl) pathEl.textContent = '';
+    if (pathEl)
+        pathEl.textContent = '';
     document.getElementById('scheduleMeta').textContent = '';
     const status = document.getElementById('scheduleStatus');
-    if (status) { status.textContent = ''; status.className = 'status-msg'; }
+    if (status) {
+        status.textContent = '';
+        status.className = 'status-msg';
+    }
 }
-
 function formatScheduleValue(val) {
     if (scheduleStates && val >= 0 && val < scheduleStates.length) {
         return scheduleStates[val];
     }
     return val;
 }
-
 function renderScheduleValueInput(dayIndex, entryIndex, value) {
     if (scheduleValueType === 'boolean') {
-        const opts = (scheduleStates || ['Off', 'On']).map((s, i) => 
-            `<option value="${i}" ${i === value ? 'selected' : ''}>${s}</option>`
-        ).join('');
+        const opts = (scheduleStates || ['Off', 'On']).map((s, i) => `<option value="${i}" ${i === value ? 'selected' : ''}>${s}</option>`).join('');
         const col = value ? '#38bdf8' : '#94a3b8';
         return `<select style="background:#1e293b;color:${col};font-weight:700;font-size:0.7rem;border:1px solid #475569;border-radius:4px;padding:2px 4px;outline:none"
                         onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseInt(this.value))">${opts}</select>`;
     }
-    
     if (scheduleValueType === 'enumerated' && scheduleStates) {
-        const options = scheduleStates.map((s, i) => 
-            `<option value="${i}" ${i === value ? 'selected' : ''}>${s}</option>`
-        ).join('');
+        const options = scheduleStates.map((s, i) => `<option value="${i}" ${i === value ? 'selected' : ''}>${s}</option>`).join('');
         return `<select style="background:#1e293b;color:#38bdf8;font-weight:700;font-size:0.7rem;border:1px solid #475569;border-radius:4px;padding:2px 4px;outline:none"
                         onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseInt(this.value))">${options}</select>`;
     }
-    
     // Default: number input for real values
     return `<input type="number" step="0.1" class="bg-transparent text-sky-400 font-bold text-[0.7rem] border-none focus:ring-0 w-10 p-0 text-center" 
                    value="${value}" onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseFloat(this.value))">`;
 }
-
 function renderSchedule() {
     const grid = document.getElementById('scheduleGrid');
     grid.innerHTML = '';
-    
     currentScheduleData.forEach(day => {
         const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const dayRow = document.createElement('div');
         dayRow.className = 'sched-day-row';
-        
         let entriesHtml = day.entries.map((e, idx) => {
             if (isEditingSchedule) {
                 return `
@@ -571,7 +552,8 @@ function renderSchedule() {
                         <button class="text-red-400 hover:text-red-300 px-1 text-sm leading-none" onclick="removeScheduleEntry(${day.dayIndex}, ${idx})">&times;</button>
                     </div>
                 `;
-            } else {
+            }
+            else {
                 return `
                     <div class="sched-entry-view">
                         <span class="text-slate-400"><i class="far fa-clock mr-1 opacity-70"></i>${e.time}</span>
@@ -580,7 +562,6 @@ function renderSchedule() {
                 `;
             }
         }).join('');
-        
         if (isEditingSchedule) {
             entriesHtml += `
                 <button class="sched-add-btn" onclick="addScheduleEntry(${day.dayIndex})">
@@ -588,7 +569,6 @@ function renderSchedule() {
                 </button>
             `;
         }
-
         dayRow.innerHTML = `
             <div class="w-14 font-bold text-slate-300 pt-1.5 border-r border-slate-700 pr-2 shrink-0">${dayNames[day.dayIndex]}</div>
             <div class="flex-1 flex flex-wrap gap-2 items-center">
@@ -598,26 +578,33 @@ function renderSchedule() {
         grid.appendChild(dayRow);
     });
 }
-
 function toggleScheduleEdit(edit) {
     isEditingSchedule = edit;
     const btnEdit = document.getElementById('btnEditSchedule');
     const btnActions = document.getElementById('editScheduleActions');
     const status = document.getElementById('scheduleStatus');
     const saveBtn = document.getElementById('scheduleSaveBtn');
-    if (btnEdit) btnEdit.classList.toggle('hidden', edit);
-    if (btnActions) btnActions.classList.toggle('hidden', !edit);
-    if (status) { status.textContent = ''; status.className = 'status-msg'; }
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>'; }
+    if (btnEdit)
+        btnEdit.classList.toggle('hidden', edit);
+    if (btnActions)
+        btnActions.classList.toggle('hidden', !edit);
+    if (status) {
+        status.textContent = '';
+        status.className = 'status-msg';
+    }
+    if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
+    }
     renderSchedule();
 }
-
 function updateScheduleEntry(dayIdx, entryIdx, field, value) {
-    if (field === 'value') value = (scheduleValueType === 'real') ? parseFloat(value) : parseInt(value);
+    if (field === 'value')
+        value = (scheduleValueType === 'real') ? parseFloat(value) : parseInt(value);
     currentScheduleData[dayIdx].entries[entryIdx][field] = value;
-    if (field === 'value') renderSchedule(); // re-render to update toggle/select state
+    if (field === 'value')
+        renderSchedule(); // re-render to update toggle/select state
 }
-
 function addScheduleEntry(dayIdx) {
     const lastEntry = currentScheduleData[dayIdx].entries[currentScheduleData[dayIdx].entries.length - 1];
     const defaultValue = (scheduleValueType === 'boolean') ? 1 : (lastEntry ? lastEntry.value : 0);
@@ -625,31 +612,27 @@ function addScheduleEntry(dayIdx) {
     currentScheduleData[dayIdx].entries.push({ time: newTime, value: defaultValue });
     renderSchedule();
 }
-
 function removeScheduleEntry(dayIdx, entryIdx) {
     currentScheduleData[dayIdx].entries.splice(entryIdx, 1);
     renderSchedule();
 }
-
 async function saveSchedule() {
     const btn = document.getElementById('scheduleSaveBtn');
     const status = document.getElementById('scheduleStatus');
-    if (!btn) return;
-
+    if (!btn || !status)
+        return;
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> <span>Sending...</span>';
     status.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Sending schedule to device...';
     status.className = 'status-msg info';
-
     try {
         currentScheduleData.forEach(day => {
             day.entries.sort((a, b) => a.time.localeCompare(b.time));
         });
-
         const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
         const response = await fetch('?handler=WriteComplex', {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
@@ -658,7 +641,6 @@ async function saveSchedule() {
                 value: JSON.stringify(currentScheduleData)
             })
         });
-
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
@@ -670,20 +652,23 @@ async function saveSchedule() {
                     status.textContent = '';
                     status.className = 'status-msg';
                 }, 1200);
-            } else {
+            }
+            else {
                 status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
                 status.className = 'status-msg error';
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
             }
-        } else {
+        }
+        else {
             const err = await response.text();
             status.innerHTML = '<i class="fas fa-bug"></i> Error: ' + err;
             status.className = 'status-msg error';
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
         }
-    } catch (error) {
+    }
+    catch (error) {
         console.error("Save error:", error);
         status.innerHTML = '<i class="fas fa-wifi"></i> Failed to connect';
         status.className = 'status-msg error';
@@ -691,3 +676,23 @@ async function saveSchedule() {
         btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
     }
 }
+window.openHistory = openHistory;
+window.closeHistory = closeHistory;
+window.reloadHistory = reloadHistory;
+window.startHistoryRefresh = startHistoryRefresh;
+window.stopHistoryRefresh = stopHistoryRefresh;
+window.refreshHistoryData = refreshHistoryData;
+window.openEdit = openEdit;
+window.closeEdit = closeEdit;
+window.step = step;
+window.updateBoolLabel = updateBoolLabel;
+window.submitEdit = submitEdit;
+window.openProperties = openProperties;
+window.closeProperties = closeProperties;
+window.openScheduleView = openScheduleView;
+window.closeSchedule = closeSchedule;
+window.toggleScheduleEdit = toggleScheduleEdit;
+window.updateScheduleEntry = updateScheduleEntry;
+window.addScheduleEntry = addScheduleEntry;
+window.removeScheduleEntry = removeScheduleEntry;
+window.saveSchedule = saveSchedule;

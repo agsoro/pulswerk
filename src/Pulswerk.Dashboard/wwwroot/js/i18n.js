@@ -1,6 +1,8 @@
+"use strict";
+// @ts-nocheck
 const TRANSLATIONS = {
     'en': {
-        'nav_dashboard': 'Dashboard',
+        'nav_home': 'Home',
         'nav_dashboards': 'Dashboards',
         'nav_assets': 'Assets',
         'nav_datapoints': 'Data Points',
@@ -106,7 +108,7 @@ const TRANSLATIONS = {
         'save': 'Save'
     },
     'de': {
-        'nav_dashboard': 'Übersicht',
+        'nav_home': 'Übersicht',
         'nav_dashboards': 'Dashboards',
         'nav_assets': 'Anlagen',
         'nav_datapoints': 'Datenpunkte',
@@ -212,50 +214,58 @@ const TRANSLATIONS = {
         'save': 'Speichern'
     }
 };
-
 let currentLang = 'en';
-
 function initI18n(lang) {
     const saved = localStorage.getItem('plswk_lang');
     if (saved && TRANSLATIONS[saved]) {
         currentLang = saved;
-    } else if (lang && TRANSLATIONS[lang]) {
+    }
+    else if (lang && TRANSLATIONS[lang]) {
         currentLang = lang;
-    } else {
+    }
+    else {
         const browserLang = navigator.language.split('-')[0];
-        if (TRANSLATIONS[browserLang]) currentLang = browserLang;
+        if (TRANSLATIONS[browserLang])
+            currentLang = browserLang;
     }
     applyTranslations();
 }
-
 function setLanguage(lang) {
-    if (!TRANSLATIONS[lang]) return;
+    if (!TRANSLATIONS[lang])
+        return;
     currentLang = lang;
     localStorage.setItem('plswk_lang', lang);
     applyTranslations();
 }
-
 function t(key) {
-    if (!key) return '';
+    if (!key)
+        return '';
     return (TRANSLATIONS[currentLang] && TRANSLATIONS[currentLang][key]) || key;
 }
-
 function applyTranslations() {
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.dataset.i18n;
+        if (!key)
+            return;
         if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'search')) {
             el.placeholder = t(key);
-        } else {
+        }
+        else {
             el.textContent = t(key);
         }
     });
     document.querySelectorAll('[data-i18n-title]').forEach(el => {
-        el.title = t(el.dataset.i18nTitle);
+        const titleKey = el.dataset.i18nTitle;
+        if (titleKey)
+            el.title = t(titleKey);
     });
-
     // Highlight active language button
     document.querySelectorAll('[id^="lang-"]').forEach(btn => {
         const lang = btn.id.replace('lang-', '');
         btn.classList.toggle('active', lang === currentLang);
     });
 }
+window.initI18n = initI18n;
+window.setLanguage = setLanguage;
+window.t = t;
+window.applyTranslations = applyTranslations;
