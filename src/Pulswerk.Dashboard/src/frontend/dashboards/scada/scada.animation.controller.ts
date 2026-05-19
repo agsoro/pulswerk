@@ -31,6 +31,24 @@ export class ScadaAnimationController {
         if (!rules?.length || !svgWidgetEl) return;
         const svg = svgWidgetEl.querySelector('svg');
         if (!svg) return;
+        
+        // Find all target elements and clear previous classes
+        const targets = new Set<Element>();
+        for (const rule of rules) {
+            if (!rule.elementId) continue;
+            const elementIds = rule.elementId.split(',').map((s: string) => s.trim()).filter(Boolean);
+            elementIds.forEach((id: string) => {
+                const target = svg.querySelector('#' + (window as any).CSS.escape(id)) || 
+                               svg.querySelector(`[data-cell-id="${(window as any).CSS.escape(id)}"]`);
+                if (target) targets.add(target);
+            });
+        }
+        
+        targets.forEach(target => {
+            ScadaAnimationController.allClasses.forEach(c => target.classList.remove(c));
+        });
+
+        // Apply new classes based on conditions
         for (const rule of rules) {
             if (!rule.elementId) continue;
             const elementIds = rule.elementId.split(',').map((s: string) => s.trim()).filter(Boolean);
@@ -38,22 +56,21 @@ export class ScadaAnimationController {
             const dataKeys = rule.dataKeys || (rule.dataKey ? [rule.dataKey] : []);
             const values = dataKeys.map((k: string) => data?.[k]);
             
-            elementIds.forEach((id: string) => {
-                const target = svg.querySelector('#' + (window as any).CSS.escape(id)) || 
-                               svg.querySelector(`[data-cell-id="${(window as any).CSS.escape(id)}"]`);
-                if (!target) return;
-                ScadaAnimationController.allClasses.forEach(c => target.classList.remove(c));
-                
-                // If there are keys required but none are present in data, skip applying styles
-                if (dataKeys.length > 0 && values.every((v: any) => v == null)) return;
-                
-                if (!rule.formula || ScadaAnimationController.evaluateCondition(values, rule.formula)) {
-                    const styles = rule.styles || [];
-                    styles.forEach((cls: string) => { 
-                        if (ScadaAnimationController.allClasses.includes(cls)) target.classList.add(cls); 
-                    });
-                }
-            });
+            // If there are keys required but none are present in data, skip applying styles
+            if (dataKeys.length > 0 && values.every((v: any) => v == null)) continue;
+            
+            if (!rule.formula || ScadaAnimationController.evaluateCondition(values, rule.formula)) {
+                const styles = rule.styles || [];
+                elementIds.forEach((id: string) => {
+                    const target = svg.querySelector('#' + (window as any).CSS.escape(id)) || 
+                                   svg.querySelector(`[data-cell-id="${(window as any).CSS.escape(id)}"]`);
+                    if (target) {
+                        styles.forEach((cls: string) => { 
+                            if (ScadaAnimationController.allClasses.includes(cls)) target.classList.add(cls); 
+                        });
+                    }
+                });
+            }
         }
     }
 
