@@ -13,7 +13,7 @@ interface ITimeWindowConfig {
 }
 
 interface IAnimationRule {
-    dataKey: string;
+    telemetryKey: string;
     elementId: string;
     formula: string;
     styles: string[];
@@ -65,7 +65,7 @@ interface IDashboard {
     widgets?: IWidget[];
 }
 
-interface IDataPointMeta {
+interface ITelemetryMeta {
     key: string;
     name: string;
     fullName?: string;
@@ -116,7 +116,7 @@ declare var ApexCharts: any;
 declare var $: any;
 
 declare var currentLang: string;
-declare var allKeys: IDataPointMeta[];
+declare var allKeys: ITelemetryMeta[];
 declare var pw_fav: {
     get: (key: string) => any;
     set: (key: string, val: any) => void;
@@ -170,7 +170,7 @@ declare function updateStarState(key: string, btn?: HTMLElement): void;
 
 declare function createTimeWindowSelector(container: HTMLElement, opts?: any): ITimeWindowSelector;
 
-declare function resolveKeyMeta(key: string): IDataPointMeta;
+declare function resolveKeyMeta(key: string): ITelemetryMeta;
 declare function ensureKeysMeta(): Promise<void>;
 declare function fetchLatestValues(keys: string | string[]): Promise<Record<string, any>>;
 declare function esc(s: string | null | undefined): string;
@@ -243,7 +243,7 @@ declare function closeKeySelector(e?: Event): void;
 declare function cancelKeySelector(e?: Event): void;
 declare function dismissKeySelector(): void;
 declare function filterKeys(): void;
-declare function renderKeyList(keys: IDataPointMeta[], isSortedView?: boolean, checkedKeys?: string[]): void;
+declare function renderKeyList(keys: ITelemetryMeta[], isSortedView?: boolean, checkedKeys?: string[]): void;
 declare function removeKeyFromSelection(key: string): void;
 declare function moveKey(key: string, dir: number): void;
 declare function handleKeyToggle(input: HTMLInputElement): void;

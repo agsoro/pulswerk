@@ -82,9 +82,9 @@ namespace Pulswerk.Dashboard.Pages
         // ── Widget data API ──────────────────────────────────────────────────
 
         /// <summary>Returns all available data point keys for the key picker.</summary>
-        public JsonResult OnGetAvailableDataPoints()
+        public JsonResult OnGetAvailableTelemetries()
         {
-            var keys = _data.GetAvailableDataPoints();
+            var keys = _data.GetAvailableTelemetries();
             return new JsonResult(keys);
         }
 
@@ -97,7 +97,7 @@ namespace Pulswerk.Dashboard.Pages
             if (keyList.Count == 0)
                 return new JsonResult(new Dictionary<string, object?>());
 
-            var data = await _data.GetDataPointHistoryForWidgetAsync(keyList, startTs, endTs);
+            var data = await _data.GetTelemetryHistoryForWidgetAsync(keyList, startTs, endTs);
             return new JsonResult(data);
         }
 
@@ -122,7 +122,7 @@ namespace Pulswerk.Dashboard.Pages
         {
             if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
                 d = 7;
-            var data = await _data.GetDataPointHistoryAsync(key, d);
+            var data = await _data.GetTelemetryHistoryAsync(key, d);
             return new JsonResult(data);
         }
 

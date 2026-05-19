@@ -3,7 +3,7 @@
     "url": "http://localhost:8086",
     "token": "connector-token",
     "org": "pulswerk",
-    "bucket": "dataPoints"
+    "bucket": "telemetries"
   },
   "database": {
     "retentionDays": 730,
@@ -129,7 +129,7 @@
         "Building",
         "Analytics"
       ],
-      "dataPoints": [
+      "telemetries": [
         {
           "id": "total-pwr",
           "name": "Total Active Power",

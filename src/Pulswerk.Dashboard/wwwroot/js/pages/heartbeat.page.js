@@ -86,7 +86,7 @@ async function updateStats() {
         const res = await fetch('?handler=Stats');
         const data = await res.json();
         document.getElementById('upm').textContent = data.updatesPerMinute.toFixed(1);
-        document.getElementById('points').textContent = data.totalDataPoints.toLocaleString();
+        document.getElementById('points').textContent = data.totalTelemetries.toLocaleString();
         const badge = document.getElementById('statusBadge');
         if (data.isScanning) {
             badge.innerHTML = '<div class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></div><span class="text-sm font-medium text-amber-400 uppercase tracking-wider">Scanning Discovery/History...</span>';

@@ -1,6 +1,6 @@
 export interface IAnimationRule {
-    dataKey?: string;
-    dataKeys?: string[];
+    telemetryKey?: string;
+    telemetryKeys?: string[];
     elementId: string;
     formula: string;
     styles: string[];

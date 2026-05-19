@@ -14,18 +14,18 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     class SunSpecDriver : BaseModbusDriver
     {
         public override string DriverName => "SunSpec";
         // public bool IsBusy => false;
 
-        public override IEnumerable<string> GetDataPointKeys() => new[] {
-            DataPointKeys.PowerKw,
-            DataPointKeys.EnergyImportKwh,
-            DataPointKeys.EnergyExportKwh,
-            DataPointKeys.PowerLimitPct
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
+            TelemetryKeys.PowerKw,
+            TelemetryKeys.EnergyImportKwh,
+            TelemetryKeys.EnergyExportKwh,
+            TelemetryKeys.PowerLimitPct
         };
 
         // Cache discovery results per device to avoid walking the model chain on every poll
@@ -35,22 +35,22 @@ namespace Pulswerk.Drivers.Modbus
         private record ModelInfo(ushort Address, ushort Length);
         private record SunSpecState(ushort BaseAddr, Dictionary<ushort, ModelInfo> Models);
 
-        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
+        public override TelemetryValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
 
             return ModbusConnection.WithMaster(conn, master =>
             {
-                var dataPointValues = new DataPointValues();
+                var telemetryValues = new TelemetryValues();
                 var state = GetOrDiscoverState(master, slaveId, device.Name);
 
                 foreach (var (modelId, info) in state.Models)
                 {
-                    ProcessModel(master, slaveId, info.Address, modelId, info.Length, dataPointValues);
+                    ProcessModel(master, slaveId, info.Address, modelId, info.Length, telemetryValues);
                 }
 
-                return dataPointValues;
+                return telemetryValues;
             });
         }
 
@@ -112,24 +112,24 @@ namespace Pulswerk.Drivers.Modbus
             return null;
         }
 
-        private void ProcessModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort modelId, ushort length, DataPointValues dataPointValues)
+        private void ProcessModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort modelId, ushort length, TelemetryValues telemetryValues)
         {
             // We care about Inverter (101, 102, 103) and Meter (201, 202, 203, 204)
             if (modelId >= 101 && modelId <= 103)
             {
-                ReadInverterModel(master, slaveId, startAddr, length, dataPointValues);
+                ReadInverterModel(master, slaveId, startAddr, length, telemetryValues);
             }
             else if (modelId >= 201 && modelId <= 204)
             {
-                ReadMeterModel(master, slaveId, startAddr, length, dataPointValues);
+                ReadMeterModel(master, slaveId, startAddr, length, telemetryValues);
             }
             else if (modelId == 123)
             {
-                ReadControlsModel(master, slaveId, startAddr, length, dataPointValues);
+                ReadControlsModel(master, slaveId, startAddr, length, telemetryValues);
             }
         }
 
-        private void ReadInverterModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort length, DataPointValues dataPointValues)
+        private void ReadInverterModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort length, TelemetryValues telemetryValues)
         {
             // Model 101/103 relative offsets (after 2-reg header):
             //   W (Watts): 14
@@ -143,7 +143,7 @@ namespace Pulswerk.Drivers.Modbus
                 short w = (short)data[14];
                 short w_sf = (short)data[15];
                 if (w != -32768) // SunSpec "Not Implemented" value
-                    dataPointValues[DataPointKeys.PowerKw] = Math.Round(w * Math.Pow(10, w_sf) / 1000.0, 3);
+                    telemetryValues[TelemetryKeys.PowerKw] = Math.Round(w * Math.Pow(10, w_sf) / 1000.0, 3);
             }
 
             if (data.Length >= 27)
@@ -151,11 +151,11 @@ namespace Pulswerk.Drivers.Modbus
                 uint wh = (uint)(data[24] << 16 | data[25]);
                 short wh_sf = (short)data[26];
                 if (wh != 0xFFFFFFFF)
-                    dataPointValues[DataPointKeys.EnergyExportKwh] = Math.Round(wh * Math.Pow(10, wh_sf) / 1000.0, 3);
+                    telemetryValues[TelemetryKeys.EnergyExportKwh] = Math.Round(wh * Math.Pow(10, wh_sf) / 1000.0, 3);
             }
         }
 
-        private void ReadMeterModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort length, DataPointValues dataPointValues)
+        private void ReadMeterModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort length, TelemetryValues telemetryValues)
         {
             // Model 201-204 (Meter) relative offsets (after 2-reg header):
             //   W: 18
@@ -170,7 +170,7 @@ namespace Pulswerk.Drivers.Modbus
                 short w = (short)data[18];
                 short w_sf = (short)data[19];
                 if (w != -32768)
-                    dataPointValues[DataPointKeys.PowerKw] = Math.Round(w * Math.Pow(10, w_sf) / 1000.0, 3);
+                    telemetryValues[TelemetryKeys.PowerKw] = Math.Round(w * Math.Pow(10, w_sf) / 1000.0, 3);
             }
 
             if (data.Length >= 49)
@@ -180,13 +180,13 @@ namespace Pulswerk.Drivers.Modbus
                 short wh_sf = (short)data[48];
 
                 if (whImp != 0xFFFFFFFF)
-                    dataPointValues[DataPointKeys.EnergyImportKwh] = Math.Round(whImp * Math.Pow(10, wh_sf) / 1000.0, 3);
+                    telemetryValues[TelemetryKeys.EnergyImportKwh] = Math.Round(whImp * Math.Pow(10, wh_sf) / 1000.0, 3);
                 if (whExp != 0xFFFFFFFF)
-                    dataPointValues[DataPointKeys.EnergyExportKwh] = Math.Round(whExp * Math.Pow(10, wh_sf) / 1000.0, 3);
+                    telemetryValues[TelemetryKeys.EnergyExportKwh] = Math.Round(whExp * Math.Pow(10, wh_sf) / 1000.0, 3);
             }
         }
 
-        private void ReadControlsModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort length, DataPointValues dataPointValues)
+        private void ReadControlsModel(IModbusMaster master, byte slaveId, ushort startAddr, ushort length, TelemetryValues telemetryValues)
         {
             // Model 123 (Immediate Controls) relative offsets:
             //   WMaxLim_Ena: 1
@@ -206,7 +206,7 @@ namespace Pulswerk.Drivers.Modbus
                     // but we report what's in the register if requested.
                     // Usually we want to know the active limit.
                     double pct = pctRaw * Math.Pow(10, pct_sf);
-                    dataPointValues[DataPointKeys.PowerLimitPct] = Math.Round(pct, 2);
+                    telemetryValues[TelemetryKeys.PowerLimitPct] = Math.Round(pct, 2);
                 }
             }
         }

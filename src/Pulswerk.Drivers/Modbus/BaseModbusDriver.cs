@@ -6,22 +6,22 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     public abstract class BaseModbusDriver : IDeviceDriver
     {
         public abstract string DriverName { get; }
         public virtual bool IsBusy => false;
 
-        public abstract IEnumerable<string> GetDataPointKeys();
-        public virtual IReadOnlyDictionary<string, string> GetDataPointUnits() => new Dictionary<string, string>();
+        public abstract IEnumerable<string> GetTelemetryKeys();
+        public virtual IReadOnlyDictionary<string, string> GetTelemetryUnits() => new Dictionary<string, string>();
 
-        public abstract DataPointValues Read(ConnectionConfig connection, DeviceConfig device);
+        public abstract TelemetryValues Read(ConnectionConfig connection, DeviceConfig device);
 
         public virtual AssetNodeDto GetAssetHierarchy(DeviceConfig device)
         {
-            var units = GetDataPointUnits();
-            var keys = GetDataPointKeys();
+            var units = GetTelemetryUnits();
+            var keys = GetTelemetryKeys();
 
             // Build the ParentPath (favorites back-link needs stable IDs)
             var parentPath = (device.Path ?? new List<string>())
@@ -39,13 +39,13 @@ namespace Pulswerk.Drivers.Modbus
             foreach (var key in keys)
             {
                 string pointKey = $"{device.Id}_{key}";   // globally unique
-                string niceName = DataPointKeys.GetFriendlyName(key);
+                string niceName = TelemetryKeys.GetFriendlyName(key);
                 if (niceName == key) niceName = key.Replace("_", " "); // Fallback formatting
 
-                string unit = DataPointKeys.GetFriendlyUnit(key);
+                string unit = TelemetryKeys.GetFriendlyUnit(key);
                 if (string.IsNullOrEmpty(unit) && units.TryGetValue(key, out var u)) unit = u;
 
-                var pDto = new DataPointDto
+                var pDto = new TelemetryDto
                 {
                     Id = pointKey,
                     Name = niceName,
@@ -63,7 +63,7 @@ namespace Pulswerk.Drivers.Modbus
                     pDto.ParentId = AssetNodeDto.PathSegmentId(device.Path.Last());
                 }
 
-                deviceNode.DataPoints.Add(pDto);
+                deviceNode.Telemetries.Add(pDto);
             }
 
             return deviceNode;

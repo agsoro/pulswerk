@@ -2,11 +2,11 @@
 // picker.js – Data key selection and ordering logic
 
 async function loadKeyPicker(): Promise<void> {
-    if (!allKeys.length) { try { allKeys = await api('AvailableDataPoints'); } catch (e) { allKeys = []; } }
+    if (!allKeys.length) { try { allKeys = await api('AvailableTelemetries'); } catch (e) { allKeys = []; } }
     
     // Default to rendering selected keys in sorted view
     const selected = activeKeyOrder.map(key => allKeys.find(k => k.key === key)).filter(Boolean);
-    renderKeyList(selected as IDataPointMeta[], true);
+    renderKeyList(selected as ITelemetryMeta[], true);
 }
 
 let _initialSelection: string[] = [];
@@ -39,7 +39,7 @@ function closeKeySelector(e?: Event): void {
         activeKeyOrder = [...activeKeyOrder, ...others];
         
         const selectedMeta = activeKeyOrder.filter(k => checkedKeys.includes(k)).map(k => allKeys.find(x => x.key === k)).filter(Boolean);
-        renderKeyList(selectedMeta as IDataPointMeta[], true);
+        renderKeyList(selectedMeta as ITelemetryMeta[], true);
     } catch (err) {
         console.error('Error syncing key selection:', err);
     }
@@ -51,7 +51,7 @@ function cancelKeySelector(e?: Event): void {
     
     // Restore initial selection in the small list
     const selectedMeta = activeKeyOrder.filter(k => _initialSelection.includes(k)).map(k => allKeys.find(x => x.key === k)).filter(Boolean);
-    renderKeyList(selectedMeta as IDataPointMeta[], true);
+    renderKeyList(selectedMeta as ITelemetryMeta[], true);
 }
 
 function dismissKeySelector(): void {
@@ -80,7 +80,7 @@ function filterKeys(): void {
     }
 }
 
-function renderKeyList(keys: IDataPointMeta[], isSortedView: boolean = false, checkedKeys: string[] = []): void {
+function renderKeyList(keys: ITelemetryMeta[], isSortedView: boolean = false, checkedKeys: string[] = []): void {
     const list = document.getElementById('keyList');
     if (!list) return;
     

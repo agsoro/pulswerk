@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 
 namespace Pulswerk.Dashboard.Pages
 {
-    public class DataPointsListModel : PageModel
+    public class TelemetryListModel : PageModel
     {
         private readonly DashboardDataService _dataService;
 
-        public DataPointsListModel(DashboardDataService dataService)
+        public TelemetryListModel(DashboardDataService dataService)
         {
             _dataService = dataService;
         }
@@ -28,7 +28,7 @@ namespace Pulswerk.Dashboard.Pages
 
         public IActionResult OnGetPoints()
         {
-            return new JsonResult(_dataService.GetAvailableDataPoints());
+            return new JsonResult(_dataService.GetAvailableTelemetries());
         }
 
         public JsonResult OnGetLatestValues(string keys)
@@ -37,20 +37,20 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(_dataService.GetCurrentValues(keyList));
         }
 
-        public JsonResult OnGetAvailableDataPoints() => new JsonResult(_dataService.GetAvailableDataPoints());
+        public JsonResult OnGetAvailableTelemetries() => new JsonResult(_dataService.GetAvailableTelemetries());
 
         public async Task<IActionResult> OnGetHistoryAsync(string key, string? days, long? startTs, long? endTs)
         {
             if (startTs.HasValue && endTs.HasValue)
             {
-                var historyRange = await _dataService.GetDataPointHistoryAsync(key, startTs.Value, endTs.Value);
+                var historyRange = await _dataService.GetTelemetryHistoryAsync(key, startTs.Value, endTs.Value);
                 return new JsonResult(historyRange);
             }
 
             if (!double.TryParse(days, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
                 d = 0.166; // fallback to ~4 hours if nothing provided
 
-            var history = await _dataService.GetDataPointHistoryAsync(key, d);
+            var history = await _dataService.GetTelemetryHistoryAsync(key, d);
             return new JsonResult(history);
         }
 

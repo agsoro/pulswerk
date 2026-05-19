@@ -51,7 +51,7 @@
             </div>
             <span class="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest" data-i18n="points">Total Points</span>
         </div>
-        <div class="text-3xl font-bold text-white tracking-tight" id="points">@Model.Stats.TotalDataPoints.ToString("N0")</div>
+        <div class="text-3xl font-bold text-white tracking-tight" id="points">@Model.Stats.TotalTelemetries.ToString("N0")</div>
     </div>
 
     <!-- DB Size -->
@@ -100,7 +100,7 @@
             </div>
             <div class="flex justify-between">
                 <span class="text-slate-400" data-i18n="data_point_keys">Data Point Keys</span>
-                <span class="text-white font-medium">@Model.Stats.TotalDataPointKeys.ToString("N0")</span>
+                <span class="text-white font-medium">@Model.Stats.TotalTelemetryKeys.ToString("N0")</span>
             </div>
             <div class="flex justify-between border-t border-white/5 pt-4">
                 <span class="text-slate-400">Memory (RSS / GC)</span>

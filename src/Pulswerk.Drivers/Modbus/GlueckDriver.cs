@@ -18,7 +18,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     class GlueckDriver : BaseModbusDriver, IDeviceWriter
     {
@@ -35,10 +35,10 @@ namespace Pulswerk.Drivers.Modbus
         public override string DriverName => "Glueck";
         // public bool IsBusy => false;
 
-        public override IEnumerable<string> GetDataPointKeys() => new[] {
-            DataPointKeys.UtilityLimitPct,
-            DataPointKeys.PowerLimitPct,
-            DataPointKeys.PowerKw
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
+            TelemetryKeys.UtilityLimitPct,
+            TelemetryKeys.PowerLimitPct,
+            TelemetryKeys.PowerKw
         };
 
 
@@ -46,7 +46,7 @@ namespace Pulswerk.Drivers.Modbus
         // =====================================================================
         //  IDeviceDriver.Read
         // =====================================================================
-        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
+        public override TelemetryValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -73,11 +73,11 @@ namespace Pulswerk.Drivers.Modbus
                     }
                 }
 
-                return new DataPointValues
+                return new TelemetryValues
                 {
-                    [DataPointKeys.UtilityLimitPct] = (double)utilLimitRaw,
-                    [DataPointKeys.PowerLimitPct] = (double)feedbackLimitRaw,
-                    [DataPointKeys.PowerKw] = (double)powerRaw
+                    [TelemetryKeys.UtilityLimitPct] = (double)utilLimitRaw,
+                    [TelemetryKeys.PowerLimitPct] = (double)feedbackLimitRaw,
+                    [TelemetryKeys.PowerKw] = (double)powerRaw
                 };
             });
         }
@@ -106,6 +106,6 @@ namespace Pulswerk.Drivers.Modbus
             throw new NotSupportedException("Complex writes are not supported for Glueck Modbus devices.");
         }
 
-        public bool IsWritable(string key) => key == DataPointKeys.PowerLimitPct;
+        public bool IsWritable(string key) => key == TelemetryKeys.PowerLimitPct;
     }
 }

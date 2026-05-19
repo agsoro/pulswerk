@@ -13,7 +13,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("server")] ServerConfig? Server
     );
 
-    public record DataPointConfig(
+    public record TelemetryConfig(
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("formula")] string Formula,
@@ -26,7 +26,7 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("url")] string Url = "http://localhost:8086",
         [property: JsonPropertyName("token")] string Token = "connector-token",
         [property: JsonPropertyName("org")] string Org = "pulswerk",
-        [property: JsonPropertyName("bucket")] string Bucket = "data_points"
+        [property: JsonPropertyName("bucket")] string Bucket = "telemetries"
     );
 
     // ── Database / retention ──────────────────────────────────────────────────
@@ -126,7 +126,7 @@ namespace Pulswerk.Core
         /// <summary>
         /// Formula-based points for 'virtual' device types.
         /// </summary>
-        [property: JsonPropertyName("dataPoints")] List<DataPointConfig>? DataPoints = null
+        [property: JsonPropertyName("telemetries")] List<TelemetryConfig>? Telemetries = null
     )
     {
         private static readonly string[] _bacnetTypes = { "bacnet", "deziko" };
@@ -244,20 +244,20 @@ namespace Pulswerk.Core
     /// </summary>
     public record BacnetPropsConfig(
         /// <summary>Published as timeseries on every poll.</summary>
-        [property: JsonPropertyName("dataPoints")] List<string>? DataPoints = null,
+        [property: JsonPropertyName("telemetries")] List<string>? Telemetries = null,
 
         /// <summary>Published as attributes once on startup (and after rediscovery).</summary>
         [property: JsonPropertyName("attributes")] List<string>? Attributes = null
     )
     {
-        public static readonly List<string> DefaultDataPoints = new() { "PROP_PRESENT_VALUE", "PROP_STATUS_FLAGS", "PROP_RELIABILITY" };
+        public static readonly List<string> DefaultTelemetries = new() { "PROP_PRESENT_VALUE", "PROP_STATUS_FLAGS", "PROP_RELIABILITY" };
         public static readonly List<string> DefaultAttributes = new()
             { "PROP_OBJECT_NAME", "PROP_DESCRIPTION", "PROP_UNITS" };
 
         /// <summary>Default properties instance used when no "properties" block is present in config.</summary>
         public static readonly BacnetPropsConfig Default = new();
 
-        public List<string> EffectiveDataPoints => DataPoints?.Count > 0 ? DataPoints : DefaultDataPoints;
+        public List<string> EffectiveTelemetries => Telemetries?.Count > 0 ? Telemetries : DefaultTelemetries;
         public List<string> EffectiveAttributes => Attributes?.Count > 0 ? Attributes : DefaultAttributes;
     }
 

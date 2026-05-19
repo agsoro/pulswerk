@@ -1,10 +1,10 @@
-// DataPointStore.cs – InfluxDB-backed time-series persistence
+// TelemetryStore.cs – InfluxDB-backed time-series persistence
 //
 //  Stores all data points (BACnet + Modbus) in InfluxDB 2.x.
 //  Provides query methods for the dashboard (trend charts, widget data).
 //
 //  InfluxDB data model:
-//    Measurement: "data_point"
+//    Measurement: "telemetry"
 //    Tag:   key   (the data point key, e.g. "dev10_ai_1_value")
 //    Field: value (numeric) or value_str (string for enum labels)
 //    Time:  nanosecond precision Unix timestamp
@@ -23,7 +23,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Storage
 {
-    public sealed class DataPointStore : IDisposable
+    public sealed class TelemetryStore : IDisposable
     {
         private readonly InfluxDBClient _client;
         private readonly WriteApi _writeApi;
@@ -33,7 +33,7 @@ namespace Pulswerk.Storage
         private bool _disposed;
 
         /// <summary>
-        /// Creates a new DataPointStore backed by InfluxDB 2.x.
+        /// Creates a new TelemetryStore backed by InfluxDB 2.x.
         /// Auto-creates buckets and compaction task if they don't exist.
         /// </summary>
         /// <param name="url">InfluxDB URL, e.g. "http://localhost:8086"</param>
@@ -42,7 +42,7 @@ namespace Pulswerk.Storage
         /// <param name="bucket">Bucket name for data</param>
         /// <param name="retentionDays">Data retention in days (0 = infinite)</param>
         /// <param name="compactionAfterDays">Downsample to 15-min intervals after this many days</param>
-        public DataPointStore(string url, string token, string org, string bucket,
+        public TelemetryStore(string url, string token, string org, string bucket,
             int retentionDays = 730, int compactionAfterDays = 700)
         {
             _org = org;
@@ -181,7 +181,7 @@ namespace Pulswerk.Storage
 
         private static PointData BuildPoint(string key, long tsMs, object value)
         {
-            var point = PointData.Measurement("data_point")
+            var point = PointData.Measurement("telemetry")
                 .Tag("key", key)
                 .Timestamp(DateTimeOffset.FromUnixTimeMilliseconds(tsMs), WritePrecision.Ms);
 
@@ -230,7 +230,7 @@ namespace Pulswerk.Storage
                 var dsFlux = $"""
                     from(bucket: "{dsName}")
                       |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(dsEnd)})
-                      |> filter(fn: (r) => r._measurement == "data_point" and r.key == "{EscapeFlux(key)}")
+                      |> filter(fn: (r) => r._measurement == "telemetry" and r.key == "{EscapeFlux(key)}")
                       |> sort(columns: ["_time"], {sortDir})
                       |> limit(n: {limit})
                     """;
@@ -245,7 +245,7 @@ namespace Pulswerk.Storage
                 var rawFlux = $"""
                     from(bucket: "{_bucket}")
                       |> range(start: {ToInfluxTime(rawStart)}, stop: {ToInfluxTime(endTs)})
-                      |> filter(fn: (r) => r._measurement == "data_point" and r.key == "{EscapeFlux(key)}")
+                      |> filter(fn: (r) => r._measurement == "telemetry" and r.key == "{EscapeFlux(key)}")
                       |> sort(columns: ["_time"], {sortDir})
                       |> limit(n: {remaining})
                     """;
@@ -286,7 +286,7 @@ namespace Pulswerk.Storage
             var flux = $"""
                 from(bucket: "{_bucket}")
                   |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(endTs)})
-                  |> filter(fn: (r) => r._measurement == "data_point" and ({keyFilter}))
+                  |> filter(fn: (r) => r._measurement == "telemetry" and ({keyFilter}))
                   |> filter(fn: (r) => r._field == "value")
                 {aggregatePipeline}  |> sort(columns: ["_time"])
                 """;
@@ -341,7 +341,7 @@ namespace Pulswerk.Storage
                 flux = $"""
                     from(bucket: "{_bucket}")
                       |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(endTs)})
-                      |> filter(fn: (r) => r._measurement == "data_point" and ({keyFilter}))
+                      |> filter(fn: (r) => r._measurement == "telemetry" and ({keyFilter}))
                       |> filter(fn: (r) => r._field == "value")
                       |> difference(nonNegative: true)
                       |> aggregateWindow(every: {windowDur}, fn: sum, createEmpty: true)
@@ -358,7 +358,7 @@ namespace Pulswerk.Storage
                 flux = $"""
                     from(bucket: "{_bucket}")
                       |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(endTs)})
-                      |> filter(fn: (r) => r._measurement == "data_point" and ({keyFilter}))
+                      |> filter(fn: (r) => r._measurement == "telemetry" and ({keyFilter}))
                       |> filter(fn: (r) => r._field == "value")
                       |> aggregateWindow(every: {windowDur}, fn: mean, createEmpty: true)
                       |> fill(value: 0.0)
@@ -381,7 +381,7 @@ namespace Pulswerk.Storage
             var flux = $"""
                 from(bucket: "{_bucket}")
                   |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(endTs)})
-                  |> filter(fn: (r) => r._measurement == "data_point" and r.key == "{EscapeFlux(key)}")
+                  |> filter(fn: (r) => r._measurement == "telemetry" and r.key == "{EscapeFlux(key)}")
                   |> filter(fn: (r) => r._field == "value")
                   |> difference(nonNegative: true)
                   |> aggregateWindow(every: {interval}, fn: sum, createEmpty: false)
@@ -442,16 +442,16 @@ namespace Pulswerk.Storage
         /// <summary>Basic escaping for Flux string literals.</summary>
         private static string EscapeFlux(string s) => s.Replace("\"", "\\\"").Replace("\\", "\\\\");
 
-        private DataPointStats? _cachedStats;
+        private TelemetryStats? _cachedStats;
         private DateTime _cachedStatsExpiry;
 
-        public async Task<DataPointStats> GetStatsAsync()
+        public async Task<TelemetryStats> GetStatsAsync()
         {
             // Cache stats for 5 minutes — the underlying Flux queries scan the entire bucket
             if (_cachedStats != null && DateTime.UtcNow < _cachedStatsExpiry)
                 return _cachedStats;
 
-            var stats = new DataPointStats();
+            var stats = new TelemetryStats();
             try
             {
                 var queryApi = _client.GetQueryApi();
@@ -460,7 +460,7 @@ namespace Pulswerk.Storage
                 string keysFlux = $"""
                     from(bucket: "{_bucket}")
                       |> range(start: -30d)
-                      |> filter(fn: (r) => r._measurement == "data_point")
+                      |> filter(fn: (r) => r._measurement == "telemetry")
                       |> keep(columns: ["key"])
                       |> group()
                       |> distinct(column: "key")
@@ -474,7 +474,7 @@ namespace Pulswerk.Storage
                 string pointsFlux = $"""
                     from(bucket: "{_bucket}")
                       |> range(start: -30d)
-                      |> filter(fn: (r) => r._measurement == "data_point" and r._field == "value")
+                      |> filter(fn: (r) => r._measurement == "telemetry" and r._field == "value")
                       |> count()
                       |> group()
                       |> sum()
@@ -525,7 +525,7 @@ namespace Pulswerk.Storage
         [property: JsonPropertyName("value")] double? Value,
         [property: JsonPropertyName("valueStr")] string? ValueStr);
 
-    public class DataPointStats
+    public class TelemetryStats
     {
         [JsonPropertyName("keyCount")] public long KeyCount { get; set; }
         [JsonPropertyName("pointCount")] public long PointCount { get; set; }

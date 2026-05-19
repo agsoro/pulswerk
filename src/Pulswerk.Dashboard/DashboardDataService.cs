@@ -22,7 +22,7 @@ namespace Pulswerk.Dashboard
     {
         public LogBuffer LogBuffer { get; }
         public AppConfig Config { get; }
-        public DataPointStore DataStore { get; }
+        public TelemetryStore DataStore { get; }
         public AlarmStore AlarmStore { get; }
         public ConcurrentDictionary<string, byte> OfflineDevices { get; }
         public ConcurrentDictionary<string, DateTime> LastPolledAtMap { get; }
@@ -49,7 +49,7 @@ namespace Pulswerk.Dashboard
         private System.Threading.Timer? _healthTimer;
 
         public DashboardDataService(LogBuffer logBuffer, AppConfig config,
-            DataPointStore dataStore, AlarmStore alarmStore,
+            TelemetryStore dataStore, AlarmStore alarmStore,
             ConcurrentDictionary<string, byte> offlineDevices, ConcurrentDictionary<string, DateTime> lastPolledAtMap,
             Dictionary<string, IDeviceDriver> drivers)
         {
@@ -89,8 +89,8 @@ namespace Pulswerk.Dashboard
             [JsonPropertyName("workingSetMb")] public long WorkingSetMb { get; set; }
             [JsonPropertyName("gcHeapMb")] public long GcHeapMb { get; set; }
             [JsonPropertyName("dbSizeMb")] public long DbSizeMb { get; set; }
-            [JsonPropertyName("dataPointKeys")] public long DataPointKeys { get; set; }
-            [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
+            [JsonPropertyName("telemetryKeys")] public long TelemetryKeys { get; set; }
+            [JsonPropertyName("totalTelemetries")] public long TotalTelemetries { get; set; }
             [JsonPropertyName("connections")] public Dictionary<string, ConnSnapshotEntry> Connections { get; set; } = new();
         }
 
@@ -129,12 +129,12 @@ namespace Pulswerk.Dashboard
                 catch { /* non-critical */ }
 
                 // ── InfluxDB data point stats (key count, point count) ─────────
-                long dataPointKeys = 0, totalDataPoints = 0;
+                long telemetryKeys = 0, totalTelemetries = 0;
                 try
                 {
                     var dbStats = await DataStore.GetStatsAsync();
-                    dataPointKeys = dbStats.KeyCount;
-                    totalDataPoints = dbStats.PointCount;
+                    telemetryKeys = dbStats.KeyCount;
+                    totalTelemetries = dbStats.PointCount;
                     // Use InfluxDB internal stats as fallback for disk size
                     if (dbSizeBytes == 0 || dbSizeBytes < 1000)
                         dbSizeBytes = dbStats.DiskSizeBytes;
@@ -152,8 +152,8 @@ namespace Pulswerk.Dashboard
                     WorkingSetMb = process.WorkingSet64 / (1024 * 1024),
                     GcHeapMb = GC.GetTotalMemory(false) / (1024 * 1024),
                     DbSizeMb = dbSizeBytes / (1024 * 1024),
-                    DataPointKeys = dataPointKeys,
-                    TotalDataPoints = totalDataPoints
+                    TelemetryKeys = telemetryKeys,
+                    TotalTelemetries = totalTelemetries
                 };
 
                 foreach (var conn in Config.Connections)
@@ -208,8 +208,8 @@ namespace Pulswerk.Dashboard
             {
                 if (Drivers.TryGetValue(device.Name, out var driver))
                 {
-                    var keys = driver.GetDataPointKeys();
-                    var units = driver.GetDataPointUnits();
+                    var keys = driver.GetTelemetryKeys();
+                    var units = driver.GetTelemetryUnits();
                     foreach (var k in keys)
                     {
                         string pointKey = $"{device.Id}_{k}";
@@ -224,7 +224,7 @@ namespace Pulswerk.Dashboard
     }
 
 
-        public Dictionary<string, (double val, DateTime ts)> UpdateDataPoints(Dictionary<string, object> values, bool isPush = false)
+        public Dictionary<string, (double val, DateTime ts)> UpdateTelemetries(Dictionary<string, object> values, bool isPush = false)
         {
             if (values == null) return new Dictionary<string, (double val, DateTime ts)>();
 
@@ -350,11 +350,11 @@ namespace Pulswerk.Dashboard
                 if (deviceTree == null) continue;
 
                 // Add virtual points if configured
-                if (device.DataPoints != null)
+                if (device.Telemetries != null)
                 {
-                    foreach (var dp in device.DataPoints)
+                    foreach (var dp in device.Telemetries)
                     {
-                        deviceTree.DataPoints.Add(new DataPointDto
+                        deviceTree.Telemetries.Add(new TelemetryDto
                         {
                             Id = $"{device.Id}_{dp.Id}",
                             Key = $"{device.Id}_{dp.Id}",
@@ -426,8 +426,8 @@ namespace Pulswerk.Dashboard
 
         private void PopulateTree(AssetNodeDto node)
         {
-            // DataPoints at this level
-            var originalPoints = node.DataPoints.ToList();
+            // Telemetries at this level
+            var originalPoints = node.Telemetries.ToList();
             foreach (var p in originalPoints)
             {
                 p.Value = GetLatestValue(p.Key);
@@ -447,7 +447,7 @@ namespace Pulswerk.Dashboard
                 var existing = parent.Children.FirstOrDefault(c => c.Name == node.Name);
                 if (existing != null)
                 {
-                    existing.DataPoints.AddRange(node.DataPoints);
+                    existing.Telemetries.AddRange(node.Telemetries);
                     foreach (var child in node.Children)
                         MergeDtoIntoTree(existing, child, new List<string>());
                 }
@@ -479,7 +479,7 @@ namespace Pulswerk.Dashboard
                 // Last segment of the path. If node name matches segment, merge.
                 if (node.Name == segment)
                 {
-                    nextNode.DataPoints.AddRange(node.DataPoints);
+                    nextNode.Telemetries.AddRange(node.Telemetries);
                     foreach (var child in node.Children)
                         MergeDtoIntoTree(nextNode, child, new List<string>());
                 }
@@ -521,7 +521,7 @@ namespace Pulswerk.Dashboard
         /// <summary>
         /// Returns data point history from InfluxDB for a single key within a specific time range.
         /// </summary>
-        public async Task<List<TsPoint>> GetDataPointHistoryAsync(string key, long startTs, long endTs)
+        public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, long startTs, long endTs)
         {
             Log.Debug($"[Dashboard] History requested: {key}, range={startTs} to {endTs}");
             return await DataStore.QueryAsync(key, startTs, endTs, limit: 5000);
@@ -530,16 +530,16 @@ namespace Pulswerk.Dashboard
         /// <summary>
         /// Returns data point history from InfluxDB for a single key, looking back a number of days from now.
         /// </summary>
-        public async Task<List<TsPoint>> GetDataPointHistoryAsync(string key, double days = 1.0)
+        public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, double days = 1.0)
         {
             long endTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 5000;
             long startTs = endTs - (long)(days * 24 * 60 * 60 * 1000.0) - 5000;
-            return await GetDataPointHistoryAsync(key, startTs, endTs);
+            return await GetTelemetryHistoryAsync(key, startTs, endTs);
         }
 
         public Task<bool> WriteValueAsync(string key, double value)
         {
-            var device = IdentifyDeviceFromDataPointKey(key);
+            var device = IdentifyDeviceFromTelemetryKey(key);
             if (device == null) { Log.Error($"[Dashboard] Write rejected: no device found for key '{key}'"); return Task.FromResult(false); }
 
             // Extract the technical point key from the scoped key {DeviceId}_{PointKey}
@@ -591,7 +591,7 @@ namespace Pulswerk.Dashboard
 
         public Task<bool> WriteComplexValueAsync(string key, object value)
         {
-            var device = IdentifyDeviceFromDataPointKey(key);
+            var device = IdentifyDeviceFromTelemetryKey(key);
             if (device == null) return Task.FromResult(false);
 
             string driverKey = key.Substring(device.Id.Length + 1);
@@ -618,9 +618,9 @@ namespace Pulswerk.Dashboard
         /// Returns all available data point keys with metadata for the dashboard widget key picker.
         /// Flattens the asset tree into a list of selectable keys.
         /// </summary>
-        public List<AvailableDataPointDto> GetAvailableDataPoints()
+        public List<AvailableTelemetryDto> GetAvailableTelemetries()
         {
-            var keys = new List<AvailableDataPointDto>();
+            var keys = new List<AvailableTelemetryDto>();
             // Break recursion: do not calculate live values when just listing keys
             var trees = GetAssetTrees(includeLiveValues: false);
 
@@ -632,10 +632,10 @@ namespace Pulswerk.Dashboard
                         ? node.Name
                         : $"{pathPrefix} › {node.Name}";
 
-                    foreach (var dp in node.DataPoints)
+                    foreach (var dp in node.Telemetries)
                     {
-                        var dev = IdentifyDeviceFromDataPointKey(dp.Key);
-                        keys.Add(new AvailableDataPointDto
+                        var dev = IdentifyDeviceFromTelemetryKey(dp.Key);
+                        keys.Add(new AvailableTelemetryDto
                         {
                             Key = dp.Key,
                             Name = dp.Name,
@@ -667,14 +667,14 @@ namespace Pulswerk.Dashboard
         /// Fetches data point history for multiple keys within a time range.
         /// Supports virtual keys: "key:consumption:1h" or "pathsum('Path', 'Unit'):consumption:1d".
         /// </summary>
-        public async Task<Dictionary<string, List<TsPoint>>> GetDataPointHistoryForWidgetAsync(
-            List<string> dataPointKeys, long startTs, long endTs)
+        public async Task<Dictionary<string, List<TsPoint>>> GetTelemetryHistoryForWidgetAsync(
+            List<string> telemetryKeys, long startTs, long endTs)
         {
             var result = new Dictionary<string, List<TsPoint>>();
             var realKeys = new List<string>();
             var realKeyMap = new Dictionary<string, string>(); // Requested Key -> Expanded Key
 
-            foreach (var key in dataPointKeys)
+            foreach (var key in telemetryKeys)
             {
                 // Resolve persistent virtual point ID to formula
                 string keyWithoutModifier = key;
@@ -689,15 +689,15 @@ namespace Pulswerk.Dashboard
                 // Resolve calculated point within any device (physical or virtual)
                 var vdev = Config.Devices.FirstOrDefault(d => 
                     keyWithoutModifier.StartsWith(d.Id + "_") && 
-                    d.DataPoints != null &&
-                    d.DataPoints.Any(p => p.Id == keyWithoutModifier.Substring(d.Id.Length + 1))
+                    d.Telemetries != null &&
+                    d.Telemetries.Any(p => p.Id == keyWithoutModifier.Substring(d.Id.Length + 1))
                 );
                 string effectiveKey = keyWithoutModifier;
 
-                if (vdev != null && vdev.DataPoints != null)
+                if (vdev != null && vdev.Telemetries != null)
                 {
                     string pointId = keyWithoutModifier.Substring(vdev.Id.Length + 1);
-                    var dp = vdev.DataPoints.FirstOrDefault(p => p.Id == pointId);
+                    var dp = vdev.Telemetries.FirstOrDefault(p => p.Id == pointId);
                     if (dp != null) effectiveKey = ExpandFormula(dp.Formula, vdev);
                 }
 
@@ -784,7 +784,7 @@ namespace Pulswerk.Dashboard
             }
 
             var resolved = new List<string>();
-            var allKeys = GetAvailableDataPoints();
+            var allKeys = GetAvailableTelemetries();
             foreach (var ak in allKeys)
             {
                 // Match the path
@@ -821,7 +821,7 @@ namespace Pulswerk.Dashboard
 
         public async Task<List<PropertyDto>> GetPropertiesAsync(string key)
         {
-            var device = IdentifyDeviceFromDataPointKey(key);
+            var device = IdentifyDeviceFromTelemetryKey(key);
             if (device == null) return new List<PropertyDto>();
 
             if (Drivers.TryGetValue(device.Name, out var driver))
@@ -836,7 +836,7 @@ namespace Pulswerk.Dashboard
             return new List<PropertyDto>();
         }
 
-        private DeviceConfig? IdentifyDeviceFromDataPointKey(string key)
+        private DeviceConfig? IdentifyDeviceFromTelemetryKey(string key)
         {
             // The key format is {DeviceId}_{PointKey}. 
             // We search for the longest matching DeviceId to handle underscores in IDs correctly.
@@ -952,8 +952,8 @@ namespace Pulswerk.Dashboard
                 OnlineDevices = Config.Devices.Count - OfflineDevices.Count - staleCount,
                 StaleDevices = staleCount,
                 OfflineDevices = offlineCount,
-                TotalDataPointKeys = latest?.DataPointKeys ?? 0,
-                TotalDataPoints = latest?.TotalDataPoints ?? 0,
+                TotalTelemetryKeys = latest?.TelemetryKeys ?? 0,
+                TotalTelemetries = latest?.TotalTelemetries ?? 0,
                 UpdatesPerMinute = GetUpdatesPerMinute(),
                 TotalUpdates = _totalUpdates,
                 TotalPushUpdates = _totalPushUpdates,
@@ -978,8 +978,8 @@ namespace Pulswerk.Dashboard
         [JsonPropertyName("onlineDevices")] public int OnlineDevices { get; set; }
         [JsonPropertyName("staleDevices")] public int StaleDevices { get; set; }
         [JsonPropertyName("offlineDevices")] public int OfflineDevices { get; set; }
-        [JsonPropertyName("totalDataPointKeys")] public long TotalDataPointKeys { get; set; }
-        [JsonPropertyName("totalDataPoints")] public long TotalDataPoints { get; set; }
+        [JsonPropertyName("totalTelemetryKeys")] public long TotalTelemetryKeys { get; set; }
+        [JsonPropertyName("totalTelemetries")] public long TotalTelemetries { get; set; }
         [JsonPropertyName("updatesPerMinute")] public double UpdatesPerMinute { get; set; }
         [JsonPropertyName("totalUpdates")] public long TotalUpdates { get; set; }
         [JsonPropertyName("totalPushUpdates")] public long TotalPushUpdates { get; set; }

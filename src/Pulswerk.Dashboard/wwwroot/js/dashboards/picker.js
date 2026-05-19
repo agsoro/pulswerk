@@ -4,7 +4,7 @@
 async function loadKeyPicker() {
     if (!allKeys.length) {
         try {
-            allKeys = await api('AvailableDataPoints');
+            allKeys = await api('AvailableTelemetries');
         }
         catch (e) {
             allKeys = [];

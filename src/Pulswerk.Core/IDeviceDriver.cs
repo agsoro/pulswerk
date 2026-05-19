@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Pulswerk.Core
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     /// <summary>
     /// Implement one class per device type.
@@ -17,16 +17,16 @@ namespace Pulswerk.Core
         /// <summary>Returns true if the driver is currently busy with background tasks like discovery or history sync.</summary>
         bool IsBusy { get; }
 
-        DataPointValues Read(ConnectionConfig connection, DeviceConfig device);
+        TelemetryValues Read(ConnectionConfig connection, DeviceConfig device);
 
         /// <summary>Returns the list of data point keys this driver produces.</summary>
-        IEnumerable<string> GetDataPointKeys();
+        IEnumerable<string> GetTelemetryKeys();
 
         /// <summary>
         /// Returns a key → unit string map for display purposes.
         /// Drivers that know their units override this; the default returns an empty dict.
         /// </summary>
-        IReadOnlyDictionary<string, string> GetDataPointUnits()
+        IReadOnlyDictionary<string, string> GetTelemetryUnits()
             => new Dictionary<string, string>();
 
         /// <summary>Returns the hierarchical tree of assets/points for this device.</summary>

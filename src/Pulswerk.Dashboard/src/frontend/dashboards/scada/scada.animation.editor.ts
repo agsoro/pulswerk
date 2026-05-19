@@ -8,7 +8,7 @@ let currentPreviewRuleIdx: number | null = null;
 
 export function initAnimRuleEditor(rules: IAnimationRule[]): void {
     currentRules = JSON.parse(JSON.stringify(rules || [])).map((r: any) => {
-        if (r.dataKey && !r.dataKeys) r.dataKeys = [r.dataKey];
+        if (r.telemetryKey && !r.telemetryKeys) r.telemetryKeys = [r.telemetryKey];
         return r;
     });
     renderAnimRules();
@@ -20,7 +20,7 @@ export function getAnimRules(): IAnimationRule[] {
 
 export function addAnimRule(): void {
     currentRules.push({
-        dataKeys: [],
+        telemetryKeys: [],
         elementId: '',
         formula: '',
         styles: []
@@ -58,20 +58,20 @@ export function addAnimRuleElementId(idx: number, id: string): void {
     }
 }
 
-export function addAnimRuleDataKey(idx: number, key: string): void {
+export function addAnimRuleTelemetryKey(idx: number, key: string): void {
     if (!key || !key.trim()) return;
-    const current = currentRules[idx].dataKeys || [];
+    const current = currentRules[idx].telemetryKeys || [];
     if (!current.includes(key)) {
         current.push(key);
-        updateAnimRule(idx, 'dataKeys', current);
+        updateAnimRule(idx, 'telemetryKeys', current);
         renderAnimRules();
     }
 }
 
-export function removeAnimRuleDataKey(idx: number, key: string): void {
-    const current = currentRules[idx].dataKeys || [];
+export function removeAnimRuleTelemetryKey(idx: number, key: string): void {
+    const current = currentRules[idx].telemetryKeys || [];
     const filtered = current.filter(x => x !== key);
-    updateAnimRule(idx, 'dataKeys', filtered);
+    updateAnimRule(idx, 'telemetryKeys', filtered);
     renderAnimRules();
 }
 
@@ -126,19 +126,19 @@ function renderAnimRules(): void {
                     <div>
                         <label style="font-size:0.65rem; color:#64748b; display:block; margin-bottom:0.2rem;">Data Keys</label>
                         <div style="display:flex; flex-wrap:wrap; gap:0.25rem; min-height: 28px; padding:0.25rem; background:rgba(0,0,0,0.2); border:1px solid #334155; border-radius:0.3rem; align-items:center;">
-                            ${(rule.dataKeys || []).map((key, kIdx) => `
+                            ${(rule.telemetryKeys || []).map((key, kIdx) => `
                                 <span style="background:#0f172a; color:#e2e8f0; font-size:0.65rem; padding:0.1rem 0.4rem; border-radius:0.2rem; display:inline-flex; align-items:center; gap:0.3rem;" title="Use v${kIdx} in formula">
                                     <span style="opacity:0.5;margin-right:2px;">v${kIdx}:</span>${(window as any).esc ? (window as any).esc(key) : key}
-                                    <i class="fas fa-times" style="cursor:pointer; color:#ef4444;" onclick="event.preventDefault();removeAnimRuleDataKey(${idx}, '${(window as any).esc ? (window as any).esc(key) : key}')"></i>
+                                    <i class="fas fa-times" style="cursor:pointer; color:#ef4444;" onclick="event.preventDefault();removeAnimRuleTelemetryKey(${idx}, '${(window as any).esc ? (window as any).esc(key) : key}')"></i>
                                 </span>
                             `).join('')}
                             
                             <div style="position:relative; display:inline-block;">
                                 <button class="btn-ghost btn-sm h-5 !py-0 !px-1.5" style="font-size:0.6rem; opacity:0.7; border-radius:0.2rem;" onclick="event.preventDefault(); const p = this.nextElementSibling; p.style.display = p.style.display === 'none' ? 'block' : 'none'; if(p.style.display==='block') { const inp = p.querySelector('input'); if(inp) inp.focus(); }"><i class="fas fa-plus"></i></button>
                                 <div style="display:none; position:absolute; top:100%; left:0; z-index:100; margin-top:0.2rem; background:#1e293b; border:1px solid #334155; border-radius:0.3rem; padding:0.3rem; width:200px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.5);">
-                                    <input type="text" list="dl_keys_${idx}" class="form-input" style="padding:0.25rem 0.5rem; font-size:0.75rem; width:100%;" placeholder="Select or type..." onkeydown="if(event.key==='Enter') { event.preventDefault(); addAnimRuleDataKey(${idx}, this.value); }">
+                                    <input type="text" list="dl_keys_${idx}" class="form-input" style="padding:0.25rem 0.5rem; font-size:0.75rem; width:100%;" placeholder="Select or type..." onkeydown="if(event.key==='Enter') { event.preventDefault(); addAnimRuleTelemetryKey(${idx}, this.value); }">
                                     <datalist id="dl_keys_${idx}">
-                                        ${availableKeys.filter(k => !(rule.dataKeys || []).includes(k)).map(k => `<option value="${(window as any).esc ? (window as any).esc(k) : k}">`).join('')}
+                                        ${availableKeys.filter(k => !(rule.telemetryKeys || []).includes(k)).map(k => `<option value="${(window as any).esc ? (window as any).esc(k) : k}">`).join('')}
                                     </datalist>
                                 </div>
                             </div>
@@ -431,7 +431,7 @@ Object.assign(window, {
     updateAnimRuleElementIds,
     addAnimRuleElementId,
     removeAnimRuleElementId,
-    addAnimRuleDataKey,
-    removeAnimRuleDataKey,
+    addAnimRuleTelemetryKey,
+    removeAnimRuleTelemetryKey,
     applyPreviewClasses
 });

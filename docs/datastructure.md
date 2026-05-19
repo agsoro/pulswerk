@@ -8,13 +8,13 @@ Pulswerk follows a strict five-layer hierarchy for data organization:
 
 physical layer -> **Connection** → **Device**
 translates to
-logical layer -> **Assets** → **DataPoint** → **TimeSeries**
+logical layer -> **Assets** → **Telemetry** → **TimeSeries**
 
 1.  **Connection**: The physical or logical transport layer (e.g., Modbus TCP, BACnet IP).
 2.  **Device**: A specific piece of hardware defined in configuration (e.g., "Main Meter", "Deziko ASP-01").
 3.  **Assets**: The logical organization layer. These are "Nodes" in the hierarchytree that can represent physical locations (Building A / Floor 1) or structured sub-sections of a device.
-4.  **DataPoint**: An individual sensor, metric, or register (e.g., `power_kw`, `room_temp`).
-5.  **TimeSeries**: The historical progression of a DataPoint's value over time, stored in the database.
+4.  **Telemetry**: An individual sensor, metric, or register (e.g., `power_kw`, `room_temp`).
+5.  **TimeSeries**: The historical progression of a Telemetry's value over time, stored in the database.
 
 ---
 
@@ -31,7 +31,7 @@ The dashboard represents the inventory as a unified tree of **Nodes** (`AssetNod
 ### ID Uniqueness
 To prevent collisions, IDs are globally unique:
 - **Manual Folders**: Prefixed with `path_` followed by a slugified name (e.g., `path_building_a`).
-- **DataPoints**: Prefixed with the internal Device ID (e.g., `meter-01_energy_import`).
+- **Telemetries**: Prefixed with the internal Device ID (e.g., `meter-01_energy_import`).
 
 ---
 
@@ -46,9 +46,9 @@ Represents a folder or device in the navigation tree.
 | `Type` | string | "Folder", "Device", "Structured View", etc. |
 | `IsView` | bool | `true` if it acts as a container/folder. |
 | `Children` | List | Sub-nodes of type `AssetNodeDto`. |
-| `DataPoints` | List | List of `DataPointDto` belonging to this specific node. |
+| `Telemetries` | List | List of `TelemetryDto` belonging to this specific node. |
 
-### DataPointDto (The "DataPoint" Layer)
+### TelemetryDto (The "Telemetry" Layer)
 Represents a single point of data (sensor, setpoint, or calculated metric).
 | Property | Type | Description |
 | :--- | :--- | :--- |
@@ -66,4 +66,4 @@ Represents a single point of data (sensor, setpoint, or calculated metric).
 ## 4. Storage & History
 
 Historical data is stored as a **TimeSeries**. 
-Each DataPoint is mapped to a series in the database (InfluxDB) where the full `Key` is used as a tag to retrieve history.
+Each Telemetry is mapped to a series in the database (InfluxDB) where the full `Key` is used as a tag to retrieve history.

@@ -15,7 +15,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     class Sdm630Driver : BaseModbusDriver
     {
@@ -26,13 +26,13 @@ namespace Pulswerk.Drivers.Modbus
         public override string DriverName => "SDM630";
         // public bool IsBusy => false;
 
-        public override IEnumerable<string> GetDataPointKeys() => new[] {
-            DataPointKeys.PowerKw,
-            DataPointKeys.EnergyImportKwh,
-            DataPointKeys.EnergyExportKwh
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
+            TelemetryKeys.PowerKw,
+            TelemetryKeys.EnergyImportKwh,
+            TelemetryKeys.EnergyExportKwh
         };
 
-        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
+        public override TelemetryValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -44,11 +44,11 @@ namespace Pulswerk.Drivers.Modbus
                 float importKwh = ModbusConnection.ReadFloat32(master, slaveId, REG_IMPORT_KWH, input: true);
                 float exportKwh = ModbusConnection.ReadFloat32(master, slaveId, REG_EXPORT_KWH, input: true);
 
-                return new DataPointValues
+                return new TelemetryValues
                 {
-                    [DataPointKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
-                    [DataPointKeys.EnergyImportKwh] = Math.Round((double)importKwh, 3),
-                    [DataPointKeys.EnergyExportKwh] = Math.Round((double)exportKwh, 3)
+                    [TelemetryKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
+                    [TelemetryKeys.EnergyImportKwh] = Math.Round((double)importKwh, 3),
+                    [TelemetryKeys.EnergyExportKwh] = Math.Round((double)exportKwh, 3)
                 };
             });
         }

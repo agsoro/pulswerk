@@ -133,7 +133,7 @@ export async function showDashboard() {
     }
     if (!window.allKeys?.length) {
         try {
-            window.allKeys = await DashboardService.fetchAvailableDataPoints();
+            window.allKeys = await DashboardService.fetchAvailableTelemetries();
         }
         catch (e) {
             window.allKeys = [];

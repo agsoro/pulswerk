@@ -22,8 +22,8 @@ export class DashboardService {
         return await apiCall(`LatestValues&keys=${keysStr}`);
     }
 
-    static async fetchAvailableDataPoints(): Promise<any> {
-        return await apiCall('AvailableDataPoints');
+    static async fetchAvailableTelemetries(): Promise<any> {
+        return await apiCall('AvailableTelemetries');
     }
     
     static async fetchDashboardList(): Promise<any[]> {

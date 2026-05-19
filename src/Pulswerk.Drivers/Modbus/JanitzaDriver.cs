@@ -18,7 +18,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     class JanitzaDriver : BaseModbusDriver
     {
@@ -28,13 +28,13 @@ namespace Pulswerk.Drivers.Modbus
 
         public override string DriverName => "Janitza";
 
-        public override IEnumerable<string> GetDataPointKeys() => new[] {
-            DataPointKeys.PowerKw,
-            DataPointKeys.EnergyImportKwh,
-            DataPointKeys.EnergyExportKwh
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
+            TelemetryKeys.PowerKw,
+            TelemetryKeys.EnergyImportKwh,
+            TelemetryKeys.EnergyExportKwh
         };
 
-        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
+        public override TelemetryValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -46,11 +46,11 @@ namespace Pulswerk.Drivers.Modbus
                 float importWh = ModbusConnection.ReadFloat32(master, slaveId, REG_IMPORT_SUM_WH);
                 float exportWh = ModbusConnection.ReadFloat32(master, slaveId, REG_EXPORT_SUM_WH);
 
-                return new DataPointValues
+                return new TelemetryValues
                 {
-                    [DataPointKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
-                    [DataPointKeys.EnergyImportKwh] = Math.Round(importWh / 1000.0, 3),
-                    [DataPointKeys.EnergyExportKwh] = Math.Round(exportWh / 1000.0, 3),
+                    [TelemetryKeys.PowerKw] = Math.Round(powerW / 1000.0, 3),
+                    [TelemetryKeys.EnergyImportKwh] = Math.Round(importWh / 1000.0, 3),
+                    [TelemetryKeys.EnergyExportKwh] = Math.Round(exportWh / 1000.0, 3),
                 };
             });
         }

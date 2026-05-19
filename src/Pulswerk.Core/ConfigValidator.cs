@@ -77,9 +77,9 @@ namespace Pulswerk.Core
                         if (dev.DeviceId == null)
                             errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
                     }
-                    if (dev.DataPoints != null)
+                    if (dev.Telemetries != null)
                     {
-                        foreach (var dp in dev.DataPoints)
+                        foreach (var dp in dev.Telemetries)
                         {
                             string context = $"Device '{dev.Id}' virtual data point '{dp.Id}'";
                             if (string.IsNullOrWhiteSpace(dp.Id))

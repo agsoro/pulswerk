@@ -4,14 +4,14 @@ Virtual devices allow you to create "Calculated" data points that are derived fr
 
 ## Virtual Device Definition
 
-A virtual device is defined in the configuration with `"deviceType": "virtual"`. It contains a list of `dataPoints`, each with a `formula`.
+A virtual device is defined in the configuration with `"deviceType": "virtual"`. It contains a list of `telemetries`, each with a `formula`.
 
 ```json
 {
   "id": "building-analytics",
   "name": "Building Analytics",
   "deviceType": "virtual",
-  "dataPoints": [
+  "telemetries": [
     {
       "id": "total-energy",
       "name": "Total Building Energy",

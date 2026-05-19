@@ -18,7 +18,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Drivers.Modbus
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     class SmaDatamanagerDriver : BaseModbusDriver
     {
@@ -34,13 +34,13 @@ namespace Pulswerk.Drivers.Modbus
 
         public override string DriverName => "SMADM";
 
-        public override IEnumerable<string> GetDataPointKeys() => new[] {
-            DataPointKeys.PowerLimitPct,
-            DataPointKeys.PowerKw,
-            DataPointKeys.EnergyExportKwh
+        public override IEnumerable<string> GetTelemetryKeys() => new[] {
+            TelemetryKeys.PowerLimitPct,
+            TelemetryKeys.PowerKw,
+            TelemetryKeys.EnergyExportKwh
         };
 
-        public override DataPointValues Read(ConnectionConfig conn, DeviceConfig device)
+        public override TelemetryValues Read(ConnectionConfig conn, DeviceConfig device)
         {
             byte slaveId = (byte)(device.DeviceId
                 ?? throw new InvalidOperationException($"Device '{device.Name}' is missing deviceId."));
@@ -57,11 +57,11 @@ namespace Pulswerk.Drivers.Modbus
                 double powerKw = (powerRaw == SMA_NAN_S32) ? 0 : Math.Round(powerRaw / 1000.0, 3);
                 double energyKwh = (energyRaw == SMA_NAN_U64) ? 0 : Math.Round(energyRaw / 1000.0, 3);
 
-                return new DataPointValues
+                return new TelemetryValues
                 {
-                    [DataPointKeys.PowerLimitPct] = limitPct,
-                    [DataPointKeys.PowerKw] = powerKw,
-                    [DataPointKeys.EnergyExportKwh] = energyKwh
+                    [TelemetryKeys.PowerLimitPct] = limitPct,
+                    [TelemetryKeys.PowerKw] = powerKw,
+                    [TelemetryKeys.EnergyExportKwh] = energyKwh
                 };
             });
         }

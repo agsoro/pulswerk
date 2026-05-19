@@ -93,7 +93,7 @@ async function updateStats(): Promise<void> {
         const data = await res.json();
         
         document.getElementById('upm')!.textContent = data.updatesPerMinute.toFixed(1);
-        document.getElementById('points')!.textContent = data.totalDataPoints.toLocaleString();
+        document.getElementById('points')!.textContent = data.totalTelemetries.toLocaleString();
 
         const badge = document.getElementById('statusBadge')!;
         if (data.isScanning) {

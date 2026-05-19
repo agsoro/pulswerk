@@ -192,11 +192,11 @@ function showNode(node, path = []) {
     });
     const list = document.getElementById('pointList');
     list.innerHTML = '';
-    if (!node.dataPoints || node.dataPoints.length === 0) {
+    if (!node.telemetries || node.telemetries.length === 0) {
         list.innerHTML = '<div class="h-full flex flex-col items-center justify-center text-slate-400 opacity-50"><i class="fas fa-info-circle text-5xl mb-4"></i><p>No data points in this view</p></div>';
         return;
     }
-    node.dataPoints.forEach((point) => {
+    node.telemetries.forEach((point) => {
         const item = document.createElement('div');
         item.className = 'glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-sky-400 hover:translate-x-1';
         const icon = getPointIcon(point.type || '');
@@ -233,8 +233,8 @@ async function refreshValues() {
         const newTrees = await response.json();
         const updateValues = (nodes) => {
             nodes.forEach(node => {
-                if (node.dataPoints) {
-                    node.dataPoints.forEach((p) => {
+                if (node.telemetries) {
+                    node.telemetries.forEach((p) => {
                         const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
                         if (el)
                             el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);

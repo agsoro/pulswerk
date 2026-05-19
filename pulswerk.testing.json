@@ -5,7 +5,7 @@
     "url": "http://influxdb:8086",
     "token": "connector-token",
     "org": "pulswerk",
-    "bucket": "dataPoints"
+    "bucket": "telemetries"
   },
   "database": {
     "retentionDays": 730,
@@ -89,7 +89,7 @@
         "Main Meter Building A"
       ],
       "assetType": "Meter",
-      "dataPoints": [
+      "telemetries": [
         {
           "id": "energy_import_consumption_1h",
           "name": "Energie Import stündlich",
@@ -180,7 +180,7 @@
         "Building A",
         "Analytics"
       ],
-      "dataPoints": [
+      "telemetries": [
         {
           "id": "total_power",
           "name": "Total Power",

@@ -17,8 +17,8 @@ export class DashboardService {
         const keysStr = Array.isArray(keys) ? keys.join(',') : keys;
         return await apiCall(`LatestValues&keys=${keysStr}`);
     }
-    static async fetchAvailableDataPoints() {
-        return await apiCall('AvailableDataPoints');
+    static async fetchAvailableTelemetries() {
+        return await apiCall('AvailableTelemetries');
     }
     static async fetchDashboardList() {
         return await apiCall('List');

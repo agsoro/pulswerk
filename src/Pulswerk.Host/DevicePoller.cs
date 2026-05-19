@@ -16,7 +16,7 @@ using System.Collections.Concurrent;
 namespace Pulswerk.Host
 {
     using Attributes = Dictionary<string, string>;
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     /// <summary>
     /// Reads one device per call, publishes data points + attributes,
@@ -52,14 +52,14 @@ namespace Pulswerk.Host
 
         public void PollAndPublish(
             DeviceConfig device, ConnectionConfig conn,
-            DataPointStore dataStore, AlarmStore alarmStore,
+            TelemetryStore dataStore, AlarmStore alarmStore,
             int deviceIntervalMs)
         {
             try
             {
                 var reader = _drivers[device.Name];
 
-                DataPointValues dataPointValues;
+                TelemetryValues telemetryValues;
                 Attributes attributes = new();
 
                 // ── BACnet COV mode ──────────────────────────────────────
@@ -81,16 +81,16 @@ namespace Pulswerk.Host
                 {
                     var result = br.ReadFull(conn, device, alarmStore, dataStore,
                         isRecovery: wasOffline);
-                    dataPointValues = result.DataPointValues;
+                    telemetryValues = result.TelemetryValues;
                     attributes = result.Attributes;
                 }
                 else
                 {
-                    dataPointValues = reader.Read(conn, device);
+                    telemetryValues = reader.Read(conn, device);
                 }
 
-                if (dataPointValues.Count > 0)
-                    PublishDataPoints(dataPointValues, dataStore, device, reader);
+                if (telemetryValues.Count > 0)
+                    PublishTelemetries(telemetryValues, dataStore, device, reader);
 
                 if (attributes.Count > 0)
                     _dataService?.UpdateAttributes(attributes);
@@ -118,17 +118,17 @@ namespace Pulswerk.Host
 
         void ServiceCovDevice(
             BacnetDriver driver, DeviceConfig device,
-            ConnectionConfig conn, DataPointStore dataStore,
+            ConnectionConfig conn, TelemetryStore dataStore,
             IDeviceDriver reader)
         {
             var result = driver.ServiceCovDevice(conn, device);
-            var dataPointValues = result.DataPointValues;
+            var telemetryValues = result.TelemetryValues;
             var attributes = result.Attributes;
 
-            if (dataPointValues.Count > 0)
+            if (telemetryValues.Count > 0)
             {
-                dataStore.InsertBatch(dataPointValues);
-                var persisted = _dataService?.UpdateDataPoints(dataPointValues);
+                dataStore.InsertBatch(telemetryValues);
+                var persisted = _dataService?.UpdateTelemetries(telemetryValues);
                 if (persisted != null)
                 {
                     foreach (var p in persisted)
@@ -143,23 +143,23 @@ namespace Pulswerk.Host
 
             _lastPolledAt[device.Name] = DateTime.UtcNow;
 
-            if (attributes.Count > 0 || dataPointValues.Count > 0)
+            if (attributes.Count > 0 || telemetryValues.Count > 0)
                 Log.Debug(
                     $"[{reader.DriverName,-10}] {device.Name,-38} " +
-                    $"[COV] attrs={attributes.Count} fallback-dp={dataPointValues.Count}");
+                    $"[COV] attrs={attributes.Count} fallback-dp={telemetryValues.Count}");
         }
 
         // =================================================================
         //  Publish data point to dashboard + InfluxDB
         // =================================================================
 
-        void PublishDataPoints(
-            DataPointValues dataPointValues, DataPointStore dataStore,
+        void PublishTelemetries(
+            TelemetryValues telemetryValues, TelemetryStore dataStore,
             DeviceConfig device, IDeviceDriver reader)
         {
-            dataStore.InsertBatch(dataPointValues);
+            dataStore.InsertBatch(telemetryValues);
 
-            var persisted = _dataService?.UpdateDataPoints(dataPointValues);
+            var persisted = _dataService?.UpdateTelemetries(telemetryValues);
             if (persisted != null)
             {
                 foreach (var p in persisted)
@@ -171,10 +171,10 @@ namespace Pulswerk.Host
             // For non-BACnet readers, also scope keys by device ID
             if (reader is not BacnetDriver)
             {
-                var scoped = dataPointValues.ToDictionary(
+                var scoped = telemetryValues.ToDictionary(
                     kv => $"{device.Id}_{kv.Key}",
                     kv => kv.Value);
-                var persistedScoped = _dataService?.UpdateDataPoints(scoped);
+                var persistedScoped = _dataService?.UpdateTelemetries(scoped);
                 if (persistedScoped != null)
                 {
                     foreach (var p in persistedScoped)

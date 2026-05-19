@@ -118,7 +118,7 @@ export async function showDashboard(): Promise<void> {
         btn.querySelector('i')!.style.color = isFav ? '#fbbf24' : '';
         btn.style.display = (window as any).pwCanEditFavorites ? 'flex' : 'none';
     }
-    if (!(window as any).allKeys?.length) { try { (window as any).allKeys = await DashboardService.fetchAvailableDataPoints(); } catch (e) { (window as any).allKeys = []; } }
+    if (!(window as any).allKeys?.length) { try { (window as any).allKeys = await DashboardService.fetchAvailableTelemetries(); } catch (e) { (window as any).allKeys = []; } }
     initGrid();
     if (DashboardStore.dashboard!.widgets?.length) {
         (window as any).renderAllWidgets();

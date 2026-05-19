@@ -20,7 +20,7 @@ using System.Collections.Concurrent;
 
 namespace Pulswerk.Host
 {
-    using DataPointValues = Dictionary<string, object>;
+    using TelemetryValues = Dictionary<string, object>;
 
     /// <summary>
     /// Hosts the full connector lifecycle: config → stores → drivers →
@@ -37,7 +37,7 @@ namespace Pulswerk.Host
 
         ConsoleLogger _logger = null!;
         DashboardDataService? _dataService;
-        DataPointStore _dataStore = null!;
+        TelemetryStore _dataStore = null!;
         AlarmStore _alarmStore = null!;
         DashboardServer? _dashboardServer;
         DevicePoller _poller = null!;
@@ -171,7 +171,7 @@ namespace Pulswerk.Host
 
             var dbCfg = _cfg.Database ?? new DatabaseConfig();
 
-            _dataStore = new DataPointStore(
+            _dataStore = new TelemetryStore(
                 influxUrl, influxToken, influxOrg, influxBucket,
                 dbCfg.RetentionDays, dbCfg.CompactionAfterDays);
 
@@ -320,9 +320,9 @@ namespace Pulswerk.Host
                             capturedDevice,
                             _alarmStore,
                             _dataStore,
-                            dataPointValues =>
+                            telemetryValues =>
                             {
-                                var persisted = _dataService?.UpdateDataPoints(dataPointValues, isPush: true);
+                                var persisted = _dataService?.UpdateTelemetries(telemetryValues, isPush: true);
                                 if (persisted != null)
                                 {
                                     foreach (var p in persisted)

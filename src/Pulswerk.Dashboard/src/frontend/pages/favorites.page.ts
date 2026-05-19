@@ -26,7 +26,7 @@ export async function loadFavorites(): Promise<void> {
         allPoints = [];
         const extractPoints = (nodes: any[]) => {
             nodes.forEach(n => {
-                if (n.dataPoints) allPoints.push(...n.dataPoints);
+                if (n.telemetries) allPoints.push(...n.telemetries);
                 if (n.children) extractPoints(n.children);
             });
         };
@@ -53,8 +53,8 @@ async function refreshValues(): Promise<void> {
         const newTrees = await response.json();
         const updateValues = (nodes: any[]) => {
             nodes.forEach(node => {
-                if (node.dataPoints) {
-                    node.dataPoints.forEach((p: any) => {
+                if (node.telemetries) {
+                    node.telemetries.forEach((p: any) => {
                         const el = document.querySelector(`.point-value[data-key="${p.key}"]`) as HTMLElement;
                         if (el) el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
                         if (window.currentHistoryKey === p.key && document.getElementById('historyModal')?.style.display === 'flex') {

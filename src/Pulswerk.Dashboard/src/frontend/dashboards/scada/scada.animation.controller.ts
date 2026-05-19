@@ -53,11 +53,11 @@ export class ScadaAnimationController {
             if (!rule.elementId) continue;
             const elementIds = rule.elementId.split(',').map((s: string) => s.trim()).filter(Boolean);
             
-            const dataKeys = rule.dataKeys || (rule.dataKey ? [rule.dataKey] : []);
-            const values = dataKeys.map((k: string) => data?.[k]);
+            const telemetryKeys = rule.telemetryKeys || (rule.telemetryKey ? [rule.telemetryKey] : []);
+            const values = telemetryKeys.map((k: string) => data?.[k]);
             
             // If there are keys required but none are present in data, skip applying styles
-            if (dataKeys.length > 0 && values.every((v: any) => v == null)) continue;
+            if (telemetryKeys.length > 0 && values.every((v: any) => v == null)) continue;
             
             if (!rule.formula || ScadaAnimationController.evaluateCondition(values, rule.formula)) {
                 const styles = rule.styles || [];
@@ -82,7 +82,7 @@ export class ScadaAnimationController {
         if (!svgWidgets.length) return;
         
         const allAnimKeys = [...new Set(svgWidgets.flatMap((w: any) => 
-            w.config!.animationRules!.flatMap((r: any) => r.dataKeys || (r.dataKey ? [r.dataKey] : []))
+            w.config!.animationRules!.flatMap((r: any) => r.telemetryKeys || (r.telemetryKey ? [r.telemetryKey] : []))
         ).filter(Boolean))];
         
         if (!allAnimKeys.length) return;

@@ -7,7 +7,7 @@
 // ── Global key metadata cache ─────────────────────────────────────────────
 // Populated lazily on first use. Pages with their own allKeys (e.g. Dashboards)
 // will have already set this before base.js functions are called.
-let _allKeysVal: IDataPointMeta[] = [];
+let _allKeysVal: ITelemetryMeta[] = [];
 if (typeof (window as any).allKeys === 'undefined') {
     Object.defineProperty(window, 'allKeys', {
         get: () => _allKeysVal,
@@ -22,7 +22,7 @@ if (typeof (window as any).allKeys === 'undefined') {
  * Resolve key metadata from the allKeys cache.
  * Falls back to basic info derived from the key string.
  */
-function resolveKeyMeta(key: string): IDataPointMeta {
+function resolveKeyMeta(key: string): ITelemetryMeta {
     if (allKeys.length) {
         const found = allKeys.find(k => k.key === key);
         if (found) return found;
