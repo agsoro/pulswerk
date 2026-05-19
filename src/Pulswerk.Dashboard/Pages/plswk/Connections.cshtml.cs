@@ -17,9 +17,12 @@ namespace Pulswerk.Dashboard.Pages
         }
 
         public List<ConnectionDetailDto> Connections { get; private set; } = new();
+        public bool CanEditConfig { get; set; }
 
         public void OnGet()
         {
+            CanEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server);
+
             foreach (var conn in _data.Config.Connections)
             {
                 var connDevices = _data.Config.Devices

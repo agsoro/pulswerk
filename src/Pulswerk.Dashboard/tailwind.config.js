@@ -2,7 +2,8 @@
 module.exports = {
   content: [
     "**/*.cshtml",
-    "wwwroot/js/**/*.js"
+    "wwwroot/js/**/*.js",
+    "src/frontend/**/*.{ts,tsx}"
   ],
   darkMode: 'class',
   theme: {

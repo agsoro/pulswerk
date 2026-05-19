@@ -70,16 +70,16 @@ export function editWidget(wid) {
         if (colorEl)
             colorEl.value = cfg.color;
     }
-    // Initialize animation rule editor for background-svg widgets
-    if (w.type === 'background-svg') {
-        if (typeof window.initAnimRuleEditor === 'function') {
-            window.initAnimRuleEditor(cfg.animationRules || []);
-        }
-    }
     if (typeof window.loadKeyPicker === 'function') {
         window.loadKeyPicker().then(() => {
-            const selected = keys.map(key => allKeys.find((k) => k.key === key)).filter(Boolean);
+            const selected = keys.map((key) => allKeys.find((k) => k.key === key)).filter(Boolean);
             window.renderKeyList(selected, true);
+            // Initialize animation rule editor for background-svg widgets AFTER keys are rendered
+            if (w.type === 'background-svg') {
+                if (typeof window.initAnimRuleEditor === 'function') {
+                    window.initAnimRuleEditor(cfg.animationRules || []);
+                }
+            }
         });
     }
     document.getElementById('addWidgetModal').style.display = 'flex';
@@ -163,7 +163,7 @@ export function confirmAddWidget() {
             return;
         }
         if (!DashboardStore.pendingSvgContent) {
-            alert('Please upload an SVG file.');
+            window.pwToast('Please upload an SVG file.', 'error');
             return;
         }
         const w = { id: 'w' + Date.now().toString(36), type: 'background-svg', title: title || 'Background', x: 0, y: 0, w: 12, h: 8, config: { svg: DashboardStore.pendingSvgContent, color, posX: 5, posY: 5, posW: 90, posH: 90, animationRules: animRules, keys: checkedKeys } };
@@ -175,7 +175,7 @@ export function confirmAddWidget() {
     }
     const checked = checkedKeys;
     if (!checked.length) {
-        alert('Select at least one data key.');
+        window.pwToast('Select at least one telemetry.', 'error');
         return;
     }
     if (DashboardStore.selectedType === 'scada-point') {
@@ -225,8 +225,8 @@ export function confirmAddWidget() {
     }
     closeAddWidget();
 }
-export function removeWidget(wid) {
-    if (!confirm(window.t ? window.t('confirm_remove_widget') : 'Remove widget?'))
+export async function removeWidget(wid) {
+    if (!await window.pwConfirm(window.t ? window.t('confirm_remove_widget') : 'Remove widget?', 'Remove Widget'))
         return;
     const removed = DashboardStore.dashboard.widgets.find(w => w.id === wid);
     DashboardStore.dashboard.widgets = DashboardStore.dashboard.widgets.filter(w => w.id !== wid);

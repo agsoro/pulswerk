@@ -36,6 +36,14 @@
                 </div>
             </div>
         }
+        @if (Model.CanEditConfig)
+        {
+            <div class="mt-auto pt-4">
+                <div class="conn-card glass p-3.5 rounded-xl border border-amber-500/20 cursor-pointer transition-all duration-150 flex items-center justify-center gap-2 select-none hover:border-amber-400 hover:bg-amber-400/10 text-amber-400 font-bold" id="btnEditConfig" onclick="selectConfig()">
+                    <i class="fas fa-cog"></i> Edit Configuration
+                </div>
+            </div>
+        }
     </div>
 
     <!-- ── Right: detail panel ── -->
@@ -45,6 +53,10 @@
         <div class="flex-1 flex flex-col items-center justify-center gap-4 text-slate-400 opacity-45 text-sm" id="detailEmpty" data-testid="conn-detail-empty">
             <i class="fas fa-network-wired text-4xl"></i>
             <p>Select a connection to view its devices</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto" id="panel-config" style="display:none;">
+            <div id="config-root" class="h-full w-full"></div>
         </div>
 
         <!-- per-connection panels, hidden until selected -->
@@ -155,6 +167,10 @@
             const old = document.getElementById('panel-' + activeId);
             if (old) old.style.display = 'none';
         }
+        const btnEditConfig = document.getElementById('btnEditConfig');
+        if (btnEditConfig) btnEditConfig.classList.remove('active');
+        const configPanel = document.getElementById('panel-config');
+        if (configPanel) configPanel.style.display = 'none';
 
         activeId = id;
         document.querySelector(`.conn-card[data-id="${id}"]`)?.classList.add('active');
@@ -167,6 +183,22 @@
         history.replaceState({}, '', url);
 
         loadHealthChart(id);
+    }
+
+    function selectConfig() {
+        if (activeId) {
+            document.querySelector(`.conn-card[data-id="${activeId}"]`)?.classList.remove('active');
+            const old = document.getElementById('panel-' + activeId);
+            if (old) old.style.display = 'none';
+        }
+        activeId = 'config';
+        document.getElementById('btnEditConfig').classList.add('active');
+        document.getElementById('detailEmpty').style.display = 'none';
+        document.getElementById('panel-config').style.display = 'block';
+
+        const url = new URL(window.location);
+        url.searchParams.set('conn', 'config');
+        history.replaceState({}, '', url);
     }
 
     async function loadHealthChart(connId) {
@@ -285,7 +317,9 @@
     window.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
         const conn = params.get('conn');
-        if (conn && document.querySelector(`.conn-card[data-id="${conn}"]`)) {
+        if (conn === 'config' && document.getElementById('btnEditConfig')) {
+            selectConfig();
+        } else if (conn && document.querySelector(`.conn-card[data-id="${conn}"]`)) {
             selectConnection(conn);
         } else {
             const first = document.querySelector('.conn-card');
@@ -295,4 +329,10 @@
         }
     });
 </script>
+    <environment include="Development">
+        <script src="/plswk/js/pages/config.page.js" type="module"></script>
+    </environment>
+    <environment exclude="Development">
+        <script src="/plswk/dist/js/config.page.bundle.js" type="module"></script>
+    </environment>
 }

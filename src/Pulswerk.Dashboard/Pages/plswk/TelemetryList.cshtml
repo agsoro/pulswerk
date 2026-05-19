@@ -107,7 +107,7 @@
 
         async function loadPoints() {
             try {
-                const response = await fetch('?handler=Points');
+                const response = await fetch('?handler=AvailableTelemetries');
                 allPoints = await response.json();
                 filteredPoints = [...allPoints];
                 applySort();
@@ -320,7 +320,7 @@
         // ── Live value updates (DOM-patching, no full re-render) ─────────
         async function refreshLiveValues() {
             try {
-                const response = await fetch('?handler=Points');
+                const response = await fetch('?handler=AvailableTelemetries');
                 const latest = await response.json();
                 
                 // Build a lookup map for O(1) updates

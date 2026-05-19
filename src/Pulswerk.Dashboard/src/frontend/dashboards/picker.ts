@@ -88,8 +88,8 @@ function renderKeyList(keys: ITelemetryMeta[], isSortedView: boolean = false, ch
         if (isSortedView) {
             list.innerHTML = `<div class="p-8 text-center text-slate-500 border-2 border-dashed border-white/5 rounded-lg m-3 bg-white/[0.01]">
                 <i class="fas fa-mouse-pointer mb-3 opacity-20 text-3xl block"></i>
-                <p class="text-[0.78rem] font-semibold text-slate-400 mb-1">No data keys selected</p>
-                <p class="text-[0.68rem] opacity-60">Use the <strong class="text-sky-400">SELECT KEYS</strong> button above to find and add data points to this widget.</p>
+                <p class="text-[0.78rem] font-semibold text-slate-400 mb-1">No telemetries selected</p>
+                <p class="text-[0.68rem] opacity-60">Use the <strong class="text-sky-400">SELECT KEYS</strong> button above to find and add telemetries to this widget.</p>
             </div>`;
         } else {
             list.innerHTML = `<div class="p-8 text-center text-slate-500">
@@ -126,6 +126,11 @@ function renderKeyList(keys: ITelemetryMeta[], isSortedView: boolean = false, ch
             <span class="key-val">${esc(k.value)} ${esc(k.units)}</span>
         </div>`
     }).join('');
+
+    // Re-render animation rules if the editor is open so dropdowns pick up new available keys
+    if (typeof (window as any).renderAnimRules === 'function') {
+        (window as any).renderAnimRules();
+    }
 }
 
 function removeKeyFromSelection(key: string): void {

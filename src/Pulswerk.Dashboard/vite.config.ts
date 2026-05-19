@@ -17,7 +17,7 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: true,
     rollupOptions: {
-      input: {
+        input: {
         layout: './src/frontend/layout.entry.ts',
         dashboards: './src/frontend/dashboards.entry.ts',
         'index.page': './src/frontend/pages/index.page.ts',
@@ -25,7 +25,8 @@ export default defineConfig({
         'assets.page': './src/frontend/pages/assets.page.ts',
         'alarms.page': './src/frontend/pages/alarms.page.ts',
         'heartbeat.page': './src/frontend/pages/heartbeat.page.ts',
-        'logs.page': './src/frontend/pages/logs.page.ts'
+        'logs.page': './src/frontend/pages/logs.page.ts',
+        'config.page': './src/frontend/pages/config.page.tsx'
       },
       output: {
         entryFileNames: 'js/[name].bundle.js',

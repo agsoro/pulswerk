@@ -72,6 +72,25 @@ namespace Pulswerk.Dashboard
             return HasGroupPermission(ctx, cfg, r => r.AllowFavoriteEdit ?? r.AllowAssetValueEdit);
         }
 
+        /// <summary>
+        /// Checks whether the current request is allowed to view and edit system configuration.
+        /// Defaults to allowing "admins" if not explicitly configured.
+        /// </summary>
+        public static bool CanEditConfig(HttpContext ctx, ServerConfig? cfg)
+        {
+            var rights = cfg?.Rights;
+            if (rights == null || !rights.Enabled) return true;
+            
+            var allowedGroups = rights.AllowConfigEdit ?? new List<string> { "admins" };
+            if (allowedGroups.Count == 0) return false;
+
+            var userGroups = GetGroups(ctx, cfg?.Auth);
+            if (userGroups.Count == 0) return false;
+
+            return userGroups.Any(ug =>
+                allowedGroups.Any(ag => string.Equals(ug, ag, StringComparison.OrdinalIgnoreCase)));
+        }
+
         private static bool HasGroupPermission(HttpContext ctx, ServerConfig? cfg,
             Func<RightsConfig, List<string>?> getAllowedGroups)
         {

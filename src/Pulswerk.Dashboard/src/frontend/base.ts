@@ -70,6 +70,108 @@ function friendlyName(key: string): string {
     return parts.length > 2 ? parts.slice(1, -1).join(' ') : key;
 }
 
+// ── Custom Confirm Dialog ──────────────────────────────────────────────────
+async function pwConfirm(message: string, title: string = 'Confirm Action'): Promise<boolean> {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[999999] flex items-center justify-center animate-fade-in p-4';
+        
+        const modal = document.createElement('div');
+        modal.className = 'bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden scale-95 opacity-0 transition-all duration-200';
+        
+        modal.innerHTML = `
+            <div class="p-6">
+                <div class="flex items-center gap-4 mb-4 text-amber-400">
+                    <i class="fas fa-exclamation-triangle text-2xl"></i>
+                    <h3 class="text-lg font-bold text-white tracking-tight">${esc(title)}</h3>
+                </div>
+                <p class="text-sm text-slate-300 font-medium leading-relaxed">${esc(message)}</p>
+            </div>
+            <div class="px-6 py-4 bg-slate-800/50 border-t border-white/5 flex items-center justify-end gap-3">
+                <button id="pwConfirmCancelBtn" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
+                    Cancel
+                </button>
+                <button id="pwConfirmOkBtn" class="px-4 py-2 rounded-xl text-sm font-bold bg-amber-500/20 text-amber-400 border border-amber-500/20 hover:bg-amber-500 hover:text-slate-900 hover:border-amber-500 transition-all shadow-lg shadow-amber-500/10">
+                    Confirm
+                </button>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        requestAnimationFrame(() => {
+            modal.classList.remove('scale-95', 'opacity-0');
+            modal.classList.add('scale-100', 'opacity-100');
+        });
+
+        let closed = false;
+        const close = (result: boolean) => {
+            if (closed) return;
+            closed = true;
+            document.removeEventListener('keydown', handleKeyDown);
+            modal.classList.remove('scale-100', 'opacity-100');
+            modal.classList.add('scale-95', 'opacity-0');
+            overlay.classList.add('opacity-0');
+            setTimeout(() => {
+                overlay.remove();
+                resolve(result);
+            }, 200);
+        };
+
+        const cancelBtn = modal.querySelector('#pwConfirmCancelBtn') as HTMLButtonElement;
+        const okBtn = modal.querySelector('#pwConfirmOkBtn') as HTMLButtonElement;
+
+        cancelBtn.onclick = () => close(false);
+        okBtn.onclick = () => close(true);
+        
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { e.preventDefault(); close(false); }
+            if (e.key === 'Enter') { e.preventDefault(); close(true); }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+
+        okBtn.focus();
+    });
+}
+
+// ── Custom Toast Notification ──────────────────────────────────────────────
+function pwToast(message: string, type: 'success' | 'error' = 'success'): void {
+    let container = document.getElementById('pw-toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'pw-toast-container';
+        container.className = 'fixed bottom-4 right-4 z-[999999] flex flex-col gap-2 pointer-events-none';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    const isError = type === 'error';
+    const bgColor = isError ? 'bg-red-500/10' : 'bg-emerald-500/10';
+    const borderColor = isError ? 'border-red-500/20' : 'border-emerald-500/20';
+    const iconColor = isError ? 'text-red-400' : 'text-emerald-400';
+    const icon = isError ? 'fa-exclamation-circle' : 'fa-check-circle';
+
+    toast.className = `flex items-center gap-3 px-4 py-3 rounded-xl border ${bgColor} ${borderColor} backdrop-blur-md shadow-lg transform translate-y-8 opacity-0 transition-all duration-300 pointer-events-auto`;
+    toast.innerHTML = `
+        <i class="fas ${icon} ${iconColor} text-lg"></i>
+        <p class="text-sm font-medium text-slate-200">${esc(message)}</p>
+    `;
+
+    container.appendChild(toast);
+
+    // Animate in
+    requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-8', 'opacity-0');
+    });
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-x-8');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
 // ── Client-side error reporting ───────────────────────────────────────────
 // Reports uncaught JS errors to the server for logging (visible in Docker logs).
 (function() {
@@ -307,3 +409,5 @@ if (document.readyState === 'loading') {
 (window as any).applyRightsToUI = applyRightsToUI;
 (window as any).updateUserBadge = updateUserBadge;
 (window as any).toggleUserPopover = toggleUserPopover;
+(window as any).pwConfirm = pwConfirm;
+(window as any).pwToast = pwToast;

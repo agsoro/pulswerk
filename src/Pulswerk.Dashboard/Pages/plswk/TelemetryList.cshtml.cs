@@ -26,18 +26,13 @@ namespace Pulswerk.Dashboard.Pages
             return new JsonResult(_dataService.GetAssetTrees());
         }
 
-        public IActionResult OnGetPoints()
-        {
-            return new JsonResult(_dataService.GetAvailableTelemetries());
-        }
-
         public JsonResult OnGetLatestValues(string keys)
         {
             var keyList = keys?.Split(',', System.StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>();
             return new JsonResult(_dataService.GetCurrentValues(keyList));
         }
 
-        public JsonResult OnGetAvailableTelemetries() => new JsonResult(_dataService.GetAvailableTelemetries());
+        public JsonResult OnGetAvailableTelemetries() => new JsonResult(_dataService.GetAvailableTelemetries(true));
 
         public async Task<IActionResult> OnGetHistoryAsync(string key, string? days, long? startTs, long? endTs)
         {

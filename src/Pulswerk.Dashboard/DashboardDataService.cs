@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -354,7 +355,7 @@ namespace Pulswerk.Dashboard
                 {
                     foreach (var dp in device.Telemetries)
                     {
-                        deviceTree.Telemetries.Add(new TelemetryDto
+                        var tDto = new TelemetryDto
                         {
                             Id = $"{device.Id}_{dp.Id}",
                             Key = $"{device.Id}_{dp.Id}",
@@ -365,7 +366,36 @@ namespace Pulswerk.Dashboard
                             Description = $"Formula: {dp.Formula}",
                             LastUpdate = "Live",
                             Value = includeLiveValues ? GetLiveValueForFormula(dp.Formula, dp.Units, device) : "---"
-                        });
+                        };
+
+                        if (dp.Path != null && dp.Path.Count > 0)
+                        {
+                            tDto.ParentPath = dp.Path.Take(dp.Path.Count - 1).Select(seg => new PathSegmentDto { Id = AssetNodeDto.PathSegmentId(seg), Name = seg }).ToList();
+                            tDto.ParentId = AssetNodeDto.PathSegmentId(dp.Path.Last());
+
+                            var lastSegment = dp.Path.Last();
+                            var parentPath = dp.Path.Take(dp.Path.Count - 1).ToList();
+
+                            var folderNode = new AssetNodeDto
+                            {
+                                Id = AssetNodeDto.PathSegmentId(lastSegment),
+                                Name = lastSegment,
+                                Type = "Folder",
+                                IsView = true
+                            };
+                            folderNode.Telemetries.Add(tDto);
+                            // Merge independently of the device tree
+                            MergeDtoIntoTree(root, folderNode, parentPath);
+                        }
+                        else
+                        {
+                            if (device.Path != null && device.Path.Count > 0)
+                            {
+                                tDto.ParentPath = device.Path.Select(seg => new PathSegmentDto { Id = AssetNodeDto.PathSegmentId(seg), Name = seg }).ToList();
+                                tDto.ParentId = AssetNodeDto.PathSegmentId(device.Path.Last());
+                            }
+                            deviceTree.Telemetries.Add(tDto);
+                        }
                     }
                 }
 
@@ -418,6 +448,54 @@ namespace Pulswerk.Dashboard
                     if (LatestValues.TryGetValue(baseKey + suffix, out var v))
                         return v?.ToString() ?? "0";
                 }
+
+                // If formula is just a key, return its value
+                if (LatestValues.TryGetValue(formula, out var rawVal) && TryToDouble(rawVal, out double rawNum))
+                {
+                    return Math.Round(rawNum, 2).ToString(CultureInfo.InvariantCulture);
+                }
+
+                // Mathematical evaluation fallback
+                // Extract keys wrapped in square brackets e.g. [meter_power] - [other_power]
+                string expr = formula;
+                bool hasMath = false;
+
+                expr = System.Text.RegularExpressions.Regex.Replace(expr, @"\[([^\]]+)\]", match =>
+                {
+                    hasMath = true;
+                    string key = match.Groups[1].Value;
+                    if (LatestValues.TryGetValue(key, out var val) && TryToDouble(val, out double num))
+                    {
+                        return num.ToString(CultureInfo.InvariantCulture);
+                    }
+                    return "0";
+                });
+
+                // If no square brackets were found, but there are math operators
+                if (!hasMath && (expr.Contains("+") || expr.Contains("-") || expr.Contains("*") || expr.Contains("/")))
+                {
+                    expr = System.Text.RegularExpressions.Regex.Replace(expr, @"[a-zA-Z][a-zA-Z0-9_\-:]*", match =>
+                    {
+                        string key = match.Value;
+                        if (key == "pathsum" || key == "consumption") return key;
+                        if (LatestValues.TryGetValue(key, out var val) && TryToDouble(val, out double num))
+                        {
+                            return num.ToString(CultureInfo.InvariantCulture);
+                        }
+                        return "0";
+                    });
+                    hasMath = true;
+                }
+
+                if (hasMath)
+                {
+                    using var dt = new DataTable();
+                    var result = dt.Compute(expr, "");
+                    if (result != DBNull.Value && TryToDouble(result, out double d))
+                    {
+                        return Math.Round(d, 2).ToString(CultureInfo.InvariantCulture);
+                    }
+                }
             }
             catch { /* fallback to default */ }
 
@@ -430,8 +508,11 @@ namespace Pulswerk.Dashboard
             var originalPoints = node.Telemetries.ToList();
             foreach (var p in originalPoints)
             {
-                p.Value = GetLatestValue(p.Key);
-                p.LastUpdate = FormatLastUpdate(p.Key);
+                if (p.Type != "Calculated")
+                {
+                    p.Value = GetLatestValue(p.Key);
+                    p.LastUpdate = FormatLastUpdate(p.Key);
+                }
             }
 
             // Recurse
@@ -524,7 +605,163 @@ namespace Pulswerk.Dashboard
         public async Task<List<TsPoint>> GetTelemetryHistoryAsync(string key, long startTs, long endTs)
         {
             Log.Debug($"[Dashboard] History requested: {key}, range={startTs} to {endTs}");
+
+            // Intercept virtual telemetry points with formulas to generate timeseries on the fly
+            var device = IdentifyDeviceFromTelemetryKey(key);
+            if (device != null && device.DeviceType == "virtual")
+            {
+                string pointKey = key.Substring(device.Id.Length + 1);
+                var point = device.Telemetries?.FirstOrDefault(t => t.Id == pointKey);
+                if (point != null && !string.IsNullOrWhiteSpace(point.Formula))
+                {
+                    return await GetVirtualTelemetryHistoryAsync(point.Formula, device, startTs, endTs);
+                }
+            }
+
             return await DataStore.QueryAsync(key, startTs, endTs, limit: 5000);
+        }
+
+        private async Task<List<TsPoint>> GetVirtualTelemetryHistoryAsync(string formula, DeviceConfig device, long startTs, long endTs)
+        {
+            var keys = new HashSet<string>();
+            formula = ExpandFormula(formula, device);
+
+            if (formula.StartsWith("pathsum("))
+            {
+                var pathSumKeys = ResolvePathSumKeys(formula);
+                foreach (var k in pathSumKeys) keys.Add(k);
+            }
+            else if (formula.Contains(":consumption:"))
+            {
+                var parts = formula.Split(":consumption:");
+                var baseKey = parts[0];
+                var interval = parts[1];
+                string suffix = interval switch { "1h" => "_hourly", "1d" => "_daily", "1m" => "_monthly", "1y" => "_yearly", _ => "" };
+                keys.Add(baseKey + suffix);
+            }
+            else
+            {
+                bool hasBrackets = false;
+                System.Text.RegularExpressions.Regex.Replace(formula, @"\[([^\]]+)\]", match =>
+                {
+                    hasBrackets = true;
+                    keys.Add(match.Groups[1].Value);
+                    return "";
+                });
+
+                if (!hasBrackets && (formula.Contains("+") || formula.Contains("-") || formula.Contains("*") || formula.Contains("/")))
+                {
+                    System.Text.RegularExpressions.Regex.Replace(formula, @"[a-zA-Z][a-zA-Z0-9_\-:]*", match =>
+                    {
+                        string k = match.Value;
+                        if (k != "pathsum" && k != "consumption") keys.Add(k);
+                        return "";
+                    });
+                }
+                else if (!hasBrackets)
+                {
+                    keys.Add(formula);
+                }
+            }
+
+            var keyList = keys.ToList();
+            if (keyList.Count == 0) return new List<TsPoint>();
+
+            if (keyList.Count == 1 && (formula == keyList[0] || formula == $"[{keyList[0]}]"))
+            {
+                return await DataStore.QueryAsync(keyList[0], startTs, endTs, limit: 5000);
+            }
+
+            var historyMap = await DataStore.QueryMultipleAsync(keyList, startTs, endTs, maxPointsPerKey: 5000);
+            var mergedPoints = new List<TsPoint>();
+
+            var allTimestamps = historyMap.Values
+                .SelectMany(list => list)
+                .Select(p => p.Ts)
+                .Distinct()
+                .OrderBy(ts => ts)
+                .ToList();
+
+            if (allTimestamps.Count == 0) return mergedPoints;
+
+            var lastKnownValues = new Dictionary<string, double>();
+            var iterators = new Dictionary<string, int>();
+            foreach (var k in keyList) iterators[k] = 0;
+
+            using var dt = new System.Data.DataTable();
+
+            foreach (var ts in allTimestamps)
+            {
+                foreach (var k in keyList)
+                {
+                    var list = historyMap.TryGetValue(k, out var l) ? l : null;
+                    if (list == null) continue;
+                    
+                    int idx = iterators[k];
+                    while (idx < list.Count && list[idx].Ts <= ts)
+                    {
+                        var val = list[idx].Value;
+                        if (val.HasValue) lastKnownValues[k] = val.Value;
+                        idx++;
+                    }
+                    iterators[k] = idx;
+                }
+
+                try
+                {
+                    string expr = formula;
+
+                    if (formula.StartsWith("pathsum("))
+                    {
+                        double sum = 0;
+                        foreach (var k in keyList) if (lastKnownValues.TryGetValue(k, out double v)) sum += v;
+                        mergedPoints.Add(new TsPoint(ts, sum, null));
+                        continue;
+                    }
+
+                    if (formula.Contains(":consumption:"))
+                    {
+                        string k = keyList.First();
+                        if (lastKnownValues.TryGetValue(k, out double v))
+                        {
+                            mergedPoints.Add(new TsPoint(ts, v, null));
+                        }
+                        continue;
+                    }
+
+                    bool hasMath = false;
+                    expr = System.Text.RegularExpressions.Regex.Replace(expr, @"\[([^\]]+)\]", match =>
+                    {
+                        hasMath = true;
+                        string k = match.Groups[1].Value;
+                        if (lastKnownValues.TryGetValue(k, out double num)) return num.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        return "0";
+                    });
+
+                    if (!hasMath && (expr.Contains("+") || expr.Contains("-") || expr.Contains("*") || expr.Contains("/")))
+                    {
+                        expr = System.Text.RegularExpressions.Regex.Replace(expr, @"[a-zA-Z][a-zA-Z0-9_\-:]*", match =>
+                        {
+                            string k = match.Value;
+                            if (lastKnownValues.TryGetValue(k, out double num)) return num.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                            return "0";
+                        });
+                        hasMath = true;
+                    }
+
+                    if (hasMath)
+                    {
+                        var result = dt.Compute(expr, "");
+                        if (result != DBNull.Value && TryToDouble(result, out double d))
+                        {
+                            mergedPoints.Add(new TsPoint(ts, Math.Round(d, 2), null));
+                        }
+                    }
+                }
+                catch { /* Ignore compute errors for this point */ }
+            }
+
+            return mergedPoints;
         }
 
         /// <summary>
@@ -618,11 +855,10 @@ namespace Pulswerk.Dashboard
         /// Returns all available data point keys with metadata for the dashboard widget key picker.
         /// Flattens the asset tree into a list of selectable keys.
         /// </summary>
-        public List<AvailableTelemetryDto> GetAvailableTelemetries()
+        public List<AvailableTelemetryDto> GetAvailableTelemetries(bool includeLiveValues = false)
         {
             var keys = new List<AvailableTelemetryDto>();
-            // Break recursion: do not calculate live values when just listing keys
-            var trees = GetAssetTrees(includeLiveValues: false);
+            var trees = GetAssetTrees(includeLiveValues);
 
             void ExtractKeys(List<AssetNodeDto> nodes, string pathPrefix)
             {
@@ -722,6 +958,10 @@ namespace Pulswerk.Dashboard
                 {
                     result[key] = await DataStore.QueryConsumptionAsync(baseKey, consumptionInterval, startTs, endTs);
                 }
+                else if (!System.Text.RegularExpressions.Regex.IsMatch(baseKey, @"^[a-zA-Z0-9_\-\.:]+$"))
+                {
+                    result[key] = await GetVirtualTelemetryHistoryAsync(baseKey, vdev!, startTs, endTs);
+                }
                 else
                 {
                     realKeys.Add(effectiveKey);
@@ -811,9 +1051,33 @@ namespace Pulswerk.Dashboard
             {
                 foreach (var key in keys)
                 {
-                    result[key] = LatestValues.TryGetValue(key, out var val)
-                        ? val?.ToString() ?? "---"
-                        : "---";
+                    if (LatestValues.TryGetValue(key, out var val))
+                    {
+                        result[key] = val?.ToString() ?? "---";
+                        continue;
+                    }
+
+                    // Check if it's a virtual telemetry point
+                    var device = IdentifyDeviceFromTelemetryKey(key);
+                    if (device != null && device.DeviceType == "virtual" && device.Telemetries != null)
+                    {
+                        string pointKey = key.Substring(device.Id.Length + 1);
+                        var dp = device.Telemetries.FirstOrDefault(t => t.Id == pointKey);
+                        if (dp != null && !string.IsNullOrWhiteSpace(dp.Formula))
+                        {
+                            result[key] = GetLiveValueForFormula(dp.Formula, dp.Units, device);
+                            continue;
+                        }
+                    }
+
+                    // Handle direct consumption, pathsum, or inline math formulas requested by widgets
+                    if (key.Contains(":consumption:") || !System.Text.RegularExpressions.Regex.IsMatch(key, @"^[a-zA-Z0-9_\-\.:]+$"))
+                    {
+                        result[key] = GetLiveValueForFormula(key, null, null);
+                        continue;
+                    }
+
+                    result[key] = "---";
                 }
             }
             return result;

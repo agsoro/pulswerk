@@ -17,7 +17,8 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("formula")] string Formula,
-        [property: JsonPropertyName("units")] string? Units = null
+        [property: JsonPropertyName("units")] string? Units = null,
+        [property: JsonPropertyName("path")] List<string>? Path = null
     );
 
     // ── InfluxDB ───────────────────────────────────────────────────────────────
@@ -368,6 +369,12 @@ namespace Pulswerk.Core
         /// Groups that are allowed to pin/unpin favorites.
         /// Falls back to AllowAssetValueEdit when null.
         /// </summary>
-        [property: JsonPropertyName("allowFavoriteEdit")] List<string>? AllowFavoriteEdit = null
+        [property: JsonPropertyName("allowFavoriteEdit")] List<string>? AllowFavoriteEdit = null,
+
+        /// <summary>
+        /// Groups that are allowed to view and edit system configuration.
+        /// Defaults to ["admins"] if not specified.
+        /// </summary>
+        [property: JsonPropertyName("allowConfigEdit")] List<string>? AllowConfigEdit = null
     );
 }

@@ -104,7 +104,7 @@ export async function confirmCreate() {
     location.href = `/plswk/Dashboards/${d.id}/${slugify(d.name)}?edit=true`;
 }
 export async function deleteDash(id) {
-    if (!confirm('Delete this dashboard?'))
+    if (!await window.pwConfirm('Delete this dashboard?', 'Delete Dashboard'))
         return;
     await DashboardService.deleteDashboard(id);
     loadList();

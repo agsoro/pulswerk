@@ -72,7 +72,7 @@ export function removeAnimRuleElementId(idx, id) {
     updateAnimRule(idx, 'elementId', filtered.join(','));
     renderAnimRules();
 }
-function renderAnimRules() {
+export function renderAnimRules() {
     const container = document.getElementById('animRuleList');
     if (!container)
         return;
@@ -112,7 +112,7 @@ function renderAnimRules() {
                 
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem; margin-bottom:0.5rem;">
                     <div>
-                        <label style="font-size:0.65rem; color:#64748b; display:block; margin-bottom:0.2rem;">Data Keys</label>
+                        <label style="font-size:0.65rem; color:#64748b; display:block; margin-bottom:0.2rem;">Telemetries</label>
                         <div style="display:flex; flex-wrap:wrap; gap:0.25rem; min-height: 28px; padding:0.25rem; background:rgba(0,0,0,0.2); border:1px solid #334155; border-radius:0.3rem; align-items:center;">
                             ${(rule.telemetryKeys || []).map((key, kIdx) => `
                                 <span style="background:#0f172a; color:#e2e8f0; font-size:0.65rem; padding:0.1rem 0.4rem; border-radius:0.2rem; display:inline-flex; align-items:center; gap:0.3rem;" title="Use v${kIdx} in formula">
@@ -392,6 +392,7 @@ function renderAnimChips(elementId) {
 Object.assign(window, {
     initAnimRuleEditor,
     getAnimRules,
+    renderAnimRules,
     addAnimRule,
     removeAnimRule,
     updateAnimRule,

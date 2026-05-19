@@ -180,6 +180,8 @@ declare function loadUserIdentity(): Promise<void>;
 declare function applyRightsToUI(u: IUserIdentity): void;
 declare function updateUserBadge(u: IUserIdentity): void;
 declare function toggleUserPopover(e?: Event): void;
+declare function pwConfirm(message: string, title?: string): Promise<boolean>;
+declare function pwToast(message: string, type?: 'success' | 'error'): void;
 
 declare function openHistory(key: string): Promise<void>;
 declare function closeHistory(): void;

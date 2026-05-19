@@ -63,17 +63,17 @@ export function editWidget(wid: string): void {
         if (colorEl) colorEl.value = cfg.color;
     }
 
-    // Initialize animation rule editor for background-svg widgets
-    if (w.type === 'background-svg') {
-        if (typeof (window as any).initAnimRuleEditor === 'function') {
-            (window as any).initAnimRuleEditor(cfg.animationRules || []);
-        }
-    }
-
     if (typeof (window as any).loadKeyPicker === 'function') {
         (window as any).loadKeyPicker().then(() => {
-            const selected = keys.map(key => allKeys.find((k: any) => k.key === key)).filter(Boolean);
+            const selected = keys.map((key: string) => allKeys.find((k: any) => k.key === key)).filter(Boolean);
             (window as any).renderKeyList(selected as any[], true);
+
+            // Initialize animation rule editor for background-svg widgets AFTER keys are rendered
+            if (w.type === 'background-svg') {
+                if (typeof (window as any).initAnimRuleEditor === 'function') {
+                    (window as any).initAnimRuleEditor(cfg.animationRules || []);
+                }
+            }
         });
     }
     document.getElementById('addWidgetModal')!.style.display = 'flex';
@@ -157,7 +157,7 @@ export function confirmAddWidget(): void {
             return;
         }
 
-        if (!DashboardStore.pendingSvgContent) { alert('Please upload an SVG file.'); return; }
+        if (!DashboardStore.pendingSvgContent) { window.pwToast('Please upload an SVG file.', 'error'); return; }
         const w: IWidget = { id: 'w' + Date.now().toString(36), type: 'background-svg', title: title || 'Background', x: 0, y: 0, w: 12, h: 8, config: { svg: DashboardStore.pendingSvgContent, color, posX: 5, posY: 5, posW: 90, posH: 90, animationRules: animRules, keys: checkedKeys } };
         DashboardStore.dashboard!.widgets = DashboardStore.dashboard!.widgets || []; DashboardStore.dashboard!.widgets.push(w);
         renderBackgroundSvg(w);
@@ -165,7 +165,7 @@ export function confirmAddWidget(): void {
     }
 
     const checked = checkedKeys;
-    if (!checked.length) { alert('Select at least one data key.'); return; }
+    if (!checked.length) { window.pwToast('Select at least one telemetry.', 'error'); return; }
 
     if (DashboardStore.selectedType === 'scada-point') {
         const layout = (document.querySelector('input[name="pointLayout"]:checked') as HTMLInputElement)?.value || 'vertical';
@@ -203,8 +203,8 @@ export function confirmAddWidget(): void {
     closeAddWidget();
 }
 
-export function removeWidget(wid: string): void {
-    if (!confirm((window as any).t ? (window as any).t('confirm_remove_widget') : 'Remove widget?')) return;
+export async function removeWidget(wid: string): Promise<void> {
+    if (!await window.pwConfirm((window as any).t ? (window as any).t('confirm_remove_widget') : 'Remove widget?', 'Remove Widget')) return;
     const removed = DashboardStore.dashboard!.widgets!.find(w => w.id === wid);
     DashboardStore.dashboard!.widgets = DashboardStore.dashboard!.widgets!.filter(w => w.id !== wid);
     if (removed?.type === 'background-svg') {

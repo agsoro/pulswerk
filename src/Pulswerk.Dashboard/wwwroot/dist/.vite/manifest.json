@@ -6,6 +6,13 @@
       "_jsxRuntime.module.chunk.js"
     ]
   },
+  "_hooks.module.chunk.js": {
+    "file": "js/hooks.module.chunk.js",
+    "name": "hooks.module",
+    "imports": [
+      "_jsxRuntime.module.chunk.js"
+    ]
+  },
   "_jsxRuntime.module.chunk.js": {
     "file": "js/jsxRuntime.module.chunk.js",
     "name": "jsxRuntime.module"
@@ -16,7 +23,8 @@
     "src": "src/frontend/dashboards.entry.ts",
     "isEntry": true,
     "imports": [
-      "_jsxRuntime.module.chunk.js"
+      "_jsxRuntime.module.chunk.js",
+      "_hooks.module.chunk.js"
     ]
   },
   "src/frontend/layout.entry.ts": {
@@ -36,6 +44,16 @@
     "name": "assets.page",
     "src": "src/frontend/pages/assets.page.ts",
     "isEntry": true
+  },
+  "src/frontend/pages/config.page.tsx": {
+    "file": "js/config.page.bundle.js",
+    "name": "config.page",
+    "src": "src/frontend/pages/config.page.tsx",
+    "isEntry": true,
+    "imports": [
+      "_jsxRuntime.module.chunk.js",
+      "_hooks.module.chunk.js"
+    ]
   },
   "src/frontend/pages/favorites.page.ts": {
     "file": "js/favorites.page.bundle.js",

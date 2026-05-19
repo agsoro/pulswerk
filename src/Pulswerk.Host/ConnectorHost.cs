@@ -105,8 +105,8 @@ namespace Pulswerk.Host
 
         static (AppConfig Cfg, string Path)? LoadConfig()
         {
-            string? configPath = ResolveConfigPath();
-            if (configPath == null)
+            string? baseConfigPath = ResolveConfigPath();
+            if (baseConfigPath == null)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.Error.WriteLine("\n[FATAL] pulswerk.json not found.");
@@ -117,18 +117,41 @@ namespace Pulswerk.Host
 
             try
             {
-                string json = File.ReadAllText(configPath);
                 var options = new JsonSerializerOptions
                 {
                     ReadCommentHandling = JsonCommentHandling.Skip,
                     AllowTrailingCommas = true
                 };
 
-                var cfg = JsonSerializer.Deserialize<AppConfig>(json, options)
-                          ?? throw new Exception("Deserialization returned null.");
+                string baseJson = File.ReadAllText(baseConfigPath);
+                var baseCfg = JsonSerializer.Deserialize<AppConfig>(baseJson, options)
+                              ?? throw new Exception("Deserialization returned null.");
 
-                ConfigValidator.Validate(cfg);
-                return (cfg, configPath);
+                string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+                if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+                
+                string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
+                if (File.Exists(overridePath))
+                {
+                    try
+                    {
+                        string overrideJson = File.ReadAllText(overridePath);
+                        var overrideCfg = JsonSerializer.Deserialize<AppConfig>(overrideJson, options);
+                        if (overrideCfg != null)
+                        {
+                            // Merge base and override configs
+                            baseCfg = MergeConfigs(baseCfg, overrideCfg);
+                            Log.Info($"[Config] Loaded override config from {overridePath}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[Config] Failed to load override config: {ex.Message}");
+                    }
+                }
+
+                ConfigValidator.Validate(baseCfg);
+                return (baseCfg, baseConfigPath);
             }
             catch (JsonException ex)
             {
@@ -148,6 +171,40 @@ namespace Pulswerk.Host
                 Console.ResetColor();
                 return null;
             }
+        }
+
+        static AppConfig MergeConfigs(AppConfig baseCfg, AppConfig overrideCfg)
+        {
+            var mergedConnections = new List<ConnectionConfig>(baseCfg.Connections ?? new());
+            if (overrideCfg.Connections != null)
+            {
+                foreach (var c in overrideCfg.Connections)
+                {
+                    var existing = mergedConnections.FindIndex(x => x.Id == c.Id);
+                    if (existing >= 0) mergedConnections[existing] = c;
+                    else mergedConnections.Add(c);
+                }
+            }
+
+            var mergedDevices = new List<DeviceConfig>(baseCfg.Devices ?? new());
+            if (overrideCfg.Devices != null)
+            {
+                foreach (var d in overrideCfg.Devices)
+                {
+                    var existing = mergedDevices.FindIndex(x => x.Id == d.Id);
+                    if (existing >= 0) mergedDevices[existing] = d;
+                    else mergedDevices.Add(d);
+                }
+            }
+
+            return new AppConfig(
+                overrideCfg.InfluxDb ?? baseCfg.InfluxDb,
+                overrideCfg.Database ?? baseCfg.Database,
+                overrideCfg.Polling ?? baseCfg.Polling,
+                mergedConnections,
+                mergedDevices,
+                overrideCfg.Server ?? baseCfg.Server
+            );
         }
 
         // ── Logging ──────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -233,6 +234,17 @@ namespace Pulswerk.Dashboard
                 return Results.Json(devices, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
             });
 
+            // ── Telemetry Keys Endpoint ──────────────────────────────────────
+            _app.MapGet("/plswk/api/telemetry-keys", (HttpContext ctx) =>
+            {
+                var serverCfg = _data.Config.Server;
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                    return Results.StatusCode(403);
+
+                var keys = _data.GetAvailableTelemetries();
+                return Results.Json(keys, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            });
+
             _app.MapGet("/plswk/api/logs", (HttpContext ctx) =>
             {
                 int count = 200;
@@ -346,6 +358,118 @@ namespace Pulswerk.Dashboard
 
                 return Results.Json(dto, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
             });
+
+            // ── Configuration Editor Endpoints ──────────────────────────────
+            _app.MapGet("/plswk/api/config", (HttpContext ctx) =>
+            {
+                var serverCfg = _data.Config.Server;
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                    return Results.StatusCode(403);
+
+                string baseConfigPath = ResolveConfigPath() ?? "";
+                string baseJson = File.Exists(baseConfigPath) ? File.ReadAllText(baseConfigPath) : "{}";
+
+                string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+                string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
+                string overrideJson = File.Exists(overridePath) ? File.ReadAllText(overridePath) : "{}";
+
+                try {
+                    var options = new JsonSerializerOptions {
+                        ReadCommentHandling = JsonCommentHandling.Skip,
+                        AllowTrailingCommas = true
+                    };
+                    var baseObj = JsonSerializer.Deserialize<AppConfig>(baseJson, options);
+                    var overrideObj = JsonSerializer.Deserialize<AppConfig>(overrideJson, options);
+                    
+                    var result = new {
+                        @base = baseObj,
+                        @override = overrideObj ?? new AppConfig(null, null, null, new(), new(), null)
+                    };
+                    return Results.Json(result, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                } catch (Exception ex) {
+                    return Results.Problem("Failed to parse config: " + ex.Message);
+                }
+            });
+
+            _app.MapPost("/plswk/api/config/override", async (HttpContext ctx) =>
+            {
+                var serverCfg = _data.Config.Server;
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                    return Results.StatusCode(403);
+
+                try
+                {
+                    using var reader = new StreamReader(ctx.Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    
+                    // Validate JSON
+                    var options = new JsonSerializerOptions {
+                        ReadCommentHandling = JsonCommentHandling.Skip,
+                        AllowTrailingCommas = true
+                    };
+                    var newOverride = JsonSerializer.Deserialize<AppConfig>(body, options);
+                    if (newOverride == null) return Results.BadRequest("Invalid JSON configuration");
+
+                    string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+                    if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+                    string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
+                    
+                    var writeOpts = new JsonSerializerOptions {
+                        WriteIndented = true,
+                        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    };
+                    string saveJson = JsonSerializer.Serialize(newOverride, writeOpts);
+                    File.WriteAllText(overridePath, saveJson);
+
+                    return Results.Ok();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[Server] Failed to save config override: {ex.Message}");
+                    return Results.Problem(ex.Message);
+                }
+            });
+
+            _app.MapPost("/plswk/api/config/evaluate-formula", async (HttpContext ctx) =>
+            {
+                var serverCfg = _data.Config.Server;
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                    return Results.StatusCode(403);
+
+                using var reader = new StreamReader(ctx.Request.Body);
+                var body = await reader.ReadToEndAsync();
+                var req = JsonSerializer.Deserialize<JsonElement>(body);
+                
+                string formula = req.TryGetProperty("formula", out var f) ? f.GetString() ?? "" : "";
+                string deviceId = req.TryGetProperty("deviceId", out var d) ? d.GetString() ?? "" : "";
+                
+                DeviceConfig? dev = _data.Config.Devices.FirstOrDefault(x => x.Id == deviceId);
+                
+                try {
+                    // Quick live value resolution using DashboardDataService methods via reflection or public method
+                    var method = _data.GetType().GetMethod("GetLiveValueForFormula", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (method != null) {
+                        string? val = method.Invoke(_data, new object?[] { formula, null, dev }) as string;
+                        return Results.Json(new { result = val ?? "", success = true });
+                    }
+                } catch (Exception ex) {
+                    return Results.Json(new { error = ex.Message, success = false });
+                }
+                return Results.Json(new { error = "Evaluation not available", success = false });
+            });
+        }
+
+        static string? ResolveConfigPath()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null)
+            {
+                var path = Path.Combine(dir.FullName, "pulswerk.json");
+                if (File.Exists(path)) return path;
+                dir = dir.Parent;
+            }
+            return null;
         }
 
         public async Task RunAsync(CancellationToken cancellationToken)
