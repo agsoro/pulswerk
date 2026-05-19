@@ -4,6 +4,9 @@ Pulswerk is a professional-grade gateway for industrial building automation and 
 
 Designed for resilience and scalability, Pulswerk enables seamless integration of multi-vendor hardware into a unified data layer.
 
+## 💡 Why Pulswerk?
+Pulswerk was built from the ground up as a simpler, faster, and far less configuration-heavy alternative to platforms like **ThingsBoard**. We focus entirely on what building automation professionals actually need: no bloatware, no complex orchestration, just raw performance and instant visibility. See our [Alternatives & Comparisons](docs/alternatives.md) guide for more details.
+
 ---
 
 ## 🚀 Key Features
