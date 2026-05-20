@@ -5,10 +5,16 @@
 }
 
 <div class="flex justify-between items-center mb-4 animate-fade-in">
-    <div class="flex gap-2">
+    <div class="flex gap-2 items-center">
         <div class="w-3 h-3 rounded-full bg-red-500"></div>
         <div class="w-3 h-3 rounded-full bg-amber-500"></div>
         <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+        <select id="logLevelSelect" class="ml-4 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-300 focus:outline-none focus:border-sky-500">
+            <option value="all">All Levels</option>
+            <option value="info">Info & Above</option>
+            <option value="warning">Warning & Error</option>
+            <option value="error">Error Only</option>
+        </select>
     </div>
     <div class="text-slate-400 text-sm">
         Showing last 500 entries • <a href="javascript:location.reload()" class="text-sky-400 hover:underline no-underline">Refresh</a>
@@ -18,7 +24,7 @@
 <div class="glass rounded-2xl border border-slate-700 p-4 font-mono text-[0.8125rem] h-[calc(100vh-200px)] overflow-y-auto flex flex-col gap-1 animate-fade-in" data-testid="log-container" style="background-color: #020617;">
     @foreach (var log in Model.Logs)
     {
-        <div class="flex gap-4 leading-relaxed whitespace-pre-wrap break-all">
+        <div class="flex gap-4 leading-relaxed whitespace-pre-wrap break-all log-entry" data-level="@log.Severity">
             <span class="text-slate-500 shrink-0 w-[180px]">[@log.Timestamp]</span>
             <span class="shrink-0 w-[60px] font-bold uppercase @(log.Severity == "info" ? "text-emerald-500" : log.Severity == "warning" ? "text-amber-500" : log.Severity == "error" ? "text-red-500" : "text-slate-400")">@log.Severity</span>
             <span class="text-sky-400 shrink-0 w-[120px] truncate">[@log.Source]</span>

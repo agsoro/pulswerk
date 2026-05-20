@@ -41,10 +41,14 @@ namespace Pulswerk.Core
     /// </summary>
     public sealed class LogBuffer
     {
-        private readonly LogEntry[] _buffer;
+        private readonly LogEntry[] _debugBuffer;
+        private readonly LogEntry[] _importantBuffer;
+        
         private readonly int _capacity;
-        private int _head = 0;  // next write position
-        private int _count = 0; // current number of entries
+        private int _debugHead = 0;
+        private int _debugCount = 0;
+        private int _importantHead = 0;
+        private int _importantCount = 0;
 
         /// <summary>Thread-safety lock for all public operations.</summary>
         private readonly object _lock = new object();
@@ -52,12 +56,13 @@ namespace Pulswerk.Core
         public LogBuffer(int capacity = 5000)
         {
             _capacity = capacity > 0 ? capacity : 5000;
-            _buffer = new LogEntry[_capacity];
+            _debugBuffer = new LogEntry[_capacity];
+            _importantBuffer = new LogEntry[_capacity];
         }
 
         /// <summary>
         /// Adds a log entry to the buffer. Thread-safe.
-        /// If the buffer is full, the oldest entry is overwritten.
+        /// Important messages and debug messages use separate ring buffers to prevent important messages from being flushed.
         /// </summary>
         public void Add(LogEntry entry)
         {
@@ -65,10 +70,18 @@ namespace Pulswerk.Core
 
             lock (_lock)
             {
-                _buffer[_head] = entry;
-                _head = (_head + 1) % _capacity;
-                if (_count < _capacity)
-                    _count++;
+                if (entry.Severity == LogSeverity.Debug)
+                {
+                    _debugBuffer[_debugHead] = entry;
+                    _debugHead = (_debugHead + 1) % _capacity;
+                    if (_debugCount < _capacity) _debugCount++;
+                }
+                else
+                {
+                    _importantBuffer[_importantHead] = entry;
+                    _importantHead = (_importantHead + 1) % _capacity;
+                    if (_importantCount < _capacity) _importantCount++;
+                }
             }
         }
 
@@ -80,19 +93,30 @@ namespace Pulswerk.Core
             lock (_lock)
             {
                 if (count <= 0) count = 200;
-                if (count > _count) count = _count;
 
-                var result = new List<LogEntry>(count);
-                int start = _count > _capacity
-                    ? (_head - _count + _capacity) % _capacity
-                    : (_head - _count + _capacity) % _capacity;
-
-                for (int i = 0; i < count; i++)
+                var all = new List<LogEntry>();
+                
+                int dCount = Math.Min(count, _debugCount);
+                int dStart = (_debugHead - dCount + _capacity) % _capacity;
+                for (int i = 0; i < dCount; i++)
                 {
-                    int idx = (start + i) % _capacity;
-                    result.Add(_buffer[idx]);
+                    all.Add(_debugBuffer[(dStart + i) % _capacity]);
                 }
-                return result;
+
+                int iCount = Math.Min(count, _importantCount);
+                int iStart = (_importantHead - iCount + _capacity) % _capacity;
+                for (int i = 0; i < iCount; i++)
+                {
+                    all.Add(_importantBuffer[(iStart + i) % _capacity]);
+                }
+
+                all.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
+                if (all.Count > count)
+                {
+                    all.RemoveRange(0, all.Count - count);
+                }
+                
+                return all;
             }
         }
 
@@ -101,7 +125,7 @@ namespace Pulswerk.Core
         /// </summary>
         public List<LogEntry> GetAll() => GetLatest(int.MaxValue);
 
-        /// <summary>Total capacity of the buffer.</summary>
+        /// <summary>Total capacity of EACH buffer.</summary>
         public int Capacity => _capacity;
 
         /// <summary>Number of entries currently stored.</summary>
@@ -109,7 +133,7 @@ namespace Pulswerk.Core
         {
             get
             {
-                lock (_lock) return _count;
+                lock (_lock) return _debugCount + _importantCount;
             }
         }
     }

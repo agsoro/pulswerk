@@ -2196,12 +2196,14 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         Pulswerk.Core.Log.Debug($"[COV] {obj.ObjectName}: fallback-poll (NAK)");
                         state.CovFallbackPoll.TryAdd(obj.ObjectId, 0);
+                        state.CovSubExpiry[obj.ObjectId] = now.AddMinutes(10);
                     }
                 }
                 catch (Exception ex)
                 {
                     Pulswerk.Core.Log.Debug($"[COV] {obj.ObjectName}: fallback-poll ({ex.Message})");
                     state.CovFallbackPoll.TryAdd(obj.ObjectId, 0);
+                    state.CovSubExpiry[obj.ObjectId] = now.AddMinutes(10);
                 }
             }
         }
@@ -2385,7 +2387,7 @@ namespace Pulswerk.Drivers.BACnet
                         // Match full key OR driver-scoped key (device prefix stripped)
                         if (fullKey == key || fullKey.EndsWith("_" + key) || key == fullKey)
                         {
-                            return obj.Writeable;
+                            return obj.Writeable || obj.Commandable;
                         }
                     }
                 }
@@ -2443,9 +2445,9 @@ namespace Pulswerk.Drivers.BACnet
                     $"Object for key '{key}' ({objectId}) not found in discovery cache for '{device.Name}'. " +
                     "Trigger a rediscovery or check the key name.");
 
-            if (!obj.Writeable)
+            if (!obj.Writeable && !obj.Commandable)
                 throw new InvalidOperationException(
-                    $"Object '{key}' ({objectId}) is not a writeable config value type (it may be commandable/have a priority array). " +
+                    $"Object '{key}' ({objectId}) is neither writeable nor commandable. " +
                     "Write rejected to protect the device logic.");
 
             var client = OpenClient(conn);
@@ -3061,7 +3063,7 @@ namespace Pulswerk.Drivers.BACnet
                             : info.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last();
 
                         string description = info.Description;
-                        bool isWritable = info.Writeable;
+                        bool isWritable = info.Writeable || info.Commandable;
                         List<string>? enumValues = null;
 
                         bool isMultiState = child.ObjectId.type is
