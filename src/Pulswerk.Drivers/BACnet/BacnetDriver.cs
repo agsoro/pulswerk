@@ -162,6 +162,7 @@ namespace Pulswerk.Drivers.BACnet
         string Units = "",           // from PROP_UNITS
         string ProfileName = "",     // from PROP_PROFILE_NAME (168)
         bool Commandable = false,    // true when PROP_PRIORITY_ARRAY present
+        bool Writeable = false,      // true when it's a config value type AND NOT commandable
         int Category = -1,           // vendor-specific category
         BacnetObjectId? LogObjectId = null,   // associated trend log
         List<string>? StateText = null,       // from PROP_STATE_TEXT (110)
@@ -794,6 +795,7 @@ namespace Pulswerk.Drivers.BACnet
             var allDescs = new Dictionary<BacnetObjectId, string>();
             var allUnits = new Dictionary<BacnetObjectId, string>();
             var allCommandable = new HashSet<BacnetObjectId>();
+            var allReadOnly = new HashSet<BacnetObjectId>();
             var allStateText = new Dictionary<BacnetObjectId, List<string>>();
 
             var candidatesList = candidates
@@ -823,6 +825,7 @@ namespace Pulswerk.Drivers.BACnet
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_READ_ONLY, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
                             };
                             if (extraProps != null)
@@ -835,7 +838,7 @@ namespace Pulswerk.Drivers.BACnet
 
                         if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
                         {
-                            ProcessRpmResults(batchResults, allNames, allDescs, allUnits, allCommandable, allStateText, extraProps, extraResults);
+                            ProcessRpmResults(batchResults, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, extraProps, extraResults);
                             if (i > 0 && i % 250 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... {i}/{candidatesList.Count} objects fetched");
                             continue;  // batch succeeded — next batch
                         }
@@ -864,6 +867,7 @@ namespace Pulswerk.Drivers.BACnet
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_DESCRIPTION, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_READ_ONLY, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
                             })
                         };
@@ -875,14 +879,14 @@ namespace Pulswerk.Drivers.BACnet
 
                         if (client.ReadPropertyMultipleRequest(address, singleSpec, out IList<BacnetReadAccessResult> singleResults))
                         {
-                            ProcessRpmResults(singleResults, allNames, allDescs, allUnits, allCommandable, allStateText, extraProps, extraResults);
+                            ProcessRpmResults(singleResults, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, extraProps, extraResults);
                             continue;
                         }
                     }
                     catch { /* single RPM also failed — fall through to individual reads */ }
 
                     // Ultimate fallback: individual ReadPropertyRequest calls
-                    ReadSingleProps(client, address, oid, allNames, allDescs, allUnits, allCommandable, extraProps, extraResults);
+                    ReadSingleProps(client, address, oid, allNames, allDescs, allUnits, allCommandable, allReadOnly, extraProps, extraResults);
                 }
                 if (i > 0 && i % 250 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... {i}/{candidatesList.Count} objects fetched (single-object mode)");
             }
@@ -902,7 +906,10 @@ namespace Pulswerk.Drivers.BACnet
                 if (includeDescRx != null && !includeDescRx.IsMatch(description)) continue;
 
                 allUnits.TryGetValue(oid, out string? units);
-                bool commandable = allCommandable.Contains(oid) && IsCommandableType(oid.type);
+                bool commandable = allCommandable.Contains(oid);
+                bool isConfigValue = IsConfigValueType(oid.type);
+                bool isReadOnly = allReadOnly.Contains(oid);
+                bool writeable = isConfigValue && !commandable && !isReadOnly;
                 allStateText.TryGetValue(oid, out List<string>? stateText);
 
                 // Fallback for binary state text if not in batch
@@ -925,6 +932,7 @@ namespace Pulswerk.Drivers.BACnet
                     Description: description ?? "",
                     Units: units ?? "",
                     Commandable: commandable,
+                    Writeable: writeable,
                     StateText: stateText
                 ));
             }
@@ -945,6 +953,7 @@ namespace Pulswerk.Drivers.BACnet
             Dictionary<BacnetObjectId, string> allDescs,
             Dictionary<BacnetObjectId, string> allUnits,
             HashSet<BacnetObjectId> allCommandable,
+            HashSet<BacnetObjectId> allReadOnly,
             Dictionary<BacnetObjectId, List<string>> allStateText,
             List<BacnetPropertyIds>? extraProps,
             Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraResults)
@@ -967,6 +976,11 @@ namespace Pulswerk.Drivers.BACnet
                         allUnits[oid] = UnitMapper.Format(pv.value[0].Value);
                     else if (propId == BacnetPropertyIds.PROP_PRIORITY_ARRAY)
                         allCommandable.Add(oid);
+                    else if (propId == BacnetPropertyIds.PROP_READ_ONLY)
+                    {
+                        if (pv.value[0].Value is bool ro && ro) allReadOnly.Add(oid);
+                        else if (pv.value[0].Value is uint rou && rou != 0) allReadOnly.Add(oid);
+                    }
                     else if (propId == BacnetPropertyIds.PROP_STATE_TEXT)
                     {
                         var list = new List<string>();
@@ -1000,6 +1014,7 @@ namespace Pulswerk.Drivers.BACnet
             Dictionary<BacnetObjectId, string> allDescs,
             Dictionary<BacnetObjectId, string> allUnits,
             HashSet<BacnetObjectId> allCommandable,
+            HashSet<BacnetObjectId> allReadOnly,
             List<BacnetPropertyIds>? extraProps,
             Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraResults)
         {
@@ -1032,6 +1047,17 @@ namespace Pulswerk.Drivers.BACnet
             {
                 if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_PRIORITY_ARRAY, out _))
                     allCommandable.Add(oid);
+            }
+            catch { }
+
+            // PROP_READ_ONLY
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_READ_ONLY, out var vals) && vals.Count > 0)
+                {
+                    if (vals[0].Value is bool ro && ro) allReadOnly.Add(oid);
+                    else if (vals[0].Value is uint rou && rou != 0) allReadOnly.Add(oid);
+                }
             }
             catch { }
 
@@ -1174,18 +1200,14 @@ namespace Pulswerk.Drivers.BACnet
         }
 
         /// <summary>
-        /// Returns true for BACnet object types that always have a priority array
-        /// and are therefore operator-writable (commandable). Matches the 
-        /// Only OUTPUT object types and Schedules are considered operator-writable.
-        /// VALUE types (AV, BV, MV) are excluded — while technically commandable in
-        /// BACnet, most are internal calculated values, not operator setpoints.
-        /// AI, BI, MI are sensor inputs and are never commandable.
+        /// Returns true for BACnet Value object types (AV, BV, MV) which are
+        /// used as config values or setpoints.
+        /// OUTPUT types and Schedules are excluded as they are not config values.
         /// </summary>
-        static bool IsCommandableType(BacnetObjectTypes t) => t is
-            BacnetObjectTypes.OBJECT_ANALOG_OUTPUT or
-            BacnetObjectTypes.OBJECT_BINARY_OUTPUT or
-            BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT or
-            BacnetObjectTypes.OBJECT_SCHEDULE;
+        static bool IsConfigValueType(BacnetObjectTypes t) => t is
+            BacnetObjectTypes.OBJECT_ANALOG_VALUE or
+            BacnetObjectTypes.OBJECT_BINARY_VALUE or
+            BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE;
 
 
         static string ReadObjectName(BacnetClient client, BacnetAddress address, BacnetObjectId oid)
@@ -2282,8 +2304,6 @@ namespace Pulswerk.Drivers.BACnet
         // =====================================================================
         public bool IsWritable(string key)
         {
-            if (key.Contains("schedule")) return true;
-
             lock (_stateLock)
             {
                 foreach (var kvp in _stateByDevice)
@@ -2294,7 +2314,7 @@ namespace Pulswerk.Drivers.BACnet
                         // Match full key OR driver-scoped key (device prefix stripped)
                         if (fullKey == key || fullKey.EndsWith("_" + key) || key == fullKey)
                         {
-                            return obj.Commandable;
+                            return obj.Writeable;
                         }
                     }
                 }
@@ -2352,9 +2372,9 @@ namespace Pulswerk.Drivers.BACnet
                     $"Object for key '{key}' ({objectId}) not found in discovery cache for '{device.Name}'. " +
                     "Trigger a rediscovery or check the key name.");
 
-            if (!obj.Commandable && !key.Contains("schedule"))
+            if (!obj.Writeable)
                 throw new InvalidOperationException(
-                    $"Object '{key}' ({objectId}) is not commandable (no PROP_PRIORITY_ARRAY). " +
+                    $"Object '{key}' ({objectId}) is not a writeable config value type (it may be commandable/have a priority array). " +
                     "Write rejected to protect the device logic.");
 
             var client = OpenClient(conn);
@@ -3038,13 +3058,14 @@ namespace Pulswerk.Drivers.BACnet
                 var info = discovered.FirstOrDefault(i => (i.KeyPrefix + "_value") == key);
                 if (info == null) return props;
 
-                props.Add(new PropertyDto { Name = "Object ID", Value = info.ObjectId.ToString() });
-                props.Add(new PropertyDto { Name = "Object Name", Value = info.ObjectName });
-                props.Add(new PropertyDto { Name = "Description", Value = info.Description });
-                props.Add(new PropertyDto { Name = "Profile Name", Value = info.ProfileName });
-                props.Add(new PropertyDto { Name = "Category", Value = info.Category.ToString() });
-                props.Add(new PropertyDto { Name = "Writable", Value = info.Commandable ? "Yes" : "No" });
-                props.Add(new PropertyDto { Name = "Friendly Path", Value = string.Join(" > ", info.NamingPath) });
+                props.Add(new PropertyDto { Name = "Object ID (75)", Value = info.ObjectId.ToString() });
+                props.Add(new PropertyDto { Name = "Object Name (77)", Value = info.ObjectName });
+                props.Add(new PropertyDto { Name = "Description (28)", Value = info.Description });
+                props.Add(new PropertyDto { Name = "Profile Name (168)", Value = info.ProfileName });
+                props.Add(new PropertyDto { Name = "Category (4941)", Value = info.Category.ToString() });
+                props.Add(new PropertyDto { Name = "Commandable", Value = info.Commandable ? "Yes" : "No" });
+                props.Add(new PropertyDto { Name = "Writable", Value = info.Writeable ? "Yes" : "No" });
+                props.Add(new PropertyDto { Name = "Friendly Path (4397)", Value = string.Join(" > ", info.NamingPath) });
 
                 try
                 {
@@ -3064,6 +3085,7 @@ namespace Pulswerk.Drivers.BACnet
                         BacnetPropertyIds.PROP_RELINQUISH_DEFAULT,
                         BacnetPropertyIds.PROP_WEEKLY_SCHEDULE,
                         BacnetPropertyIds.PROP_EXCEPTION_SCHEDULE,
+                        BacnetPropertyIds.PROP_READ_ONLY,
                         (BacnetPropertyIds)4311, // Substitution Value
                         (BacnetPropertyIds)4312  // Substitution Active
                     };
@@ -3074,6 +3096,7 @@ namespace Pulswerk.Drivers.BACnet
                         if (kv.Value == null) continue;
                         string name = kv.Key.ToString().Replace("PROP_", "").Replace("_", " ");
                         name = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(name.ToLower());
+                        name = $"{name} ({(int)kv.Key})";
 
                         string valStr;
                         if (kv.Key == BacnetPropertyIds.PROP_WEEKLY_SCHEDULE
