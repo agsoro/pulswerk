@@ -318,8 +318,16 @@ namespace Pulswerk.Drivers.BACnet
                             propId, out IList<BacnetValue> countVal, arrayIndex: 0)
                         && countVal.Count > 0)
                     {
-                        count = Convert.ToUInt32(countVal[0].Value);
-                        break;
+                        if (Pulswerk.Drivers.BACnet.BacnetValueConverter.TryToDouble(countVal[0].Value, out double d))
+                        {
+                            count = (uint)d;
+                            break;
+                        }
+                        else
+                        {
+                            // If it's a BacnetError, throwing would crash the loop, so just break and return empty.
+                            break;
+                        }
                     }
                     if (retry < 3) Thread.Sleep(500);
                 }
@@ -395,7 +403,15 @@ namespace Pulswerk.Drivers.BACnet
 
                     return result;
                 }
-                count = Convert.ToUInt32(countVal[0].Value);
+                
+                if (Pulswerk.Drivers.BACnet.BacnetValueConverter.TryToDouble(countVal[0].Value, out double d))
+                    count = (uint)d;
+                else
+                {
+                    if (propId == PropSubordinateList)
+                        return ReadSubordinateList(client, address, viewId, PropDezikoSubordinateList);
+                    return result;
+                }
             }
             catch
             {

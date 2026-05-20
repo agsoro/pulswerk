@@ -70,7 +70,10 @@ namespace Pulswerk.Drivers.BACnet
                 }
 
                 if (props.TryGetValue(PropCategory4941, out var vals3) && vals3.Count > 0)
-                    category = Convert.ToInt32(vals3[0].Value);
+                {
+                    if (Pulswerk.Drivers.BACnet.BacnetValueConverter.TryToDouble(vals3[0].Value, out double d))
+                        category = (int)d;
+                }
 
                 if (props.TryGetValue(PropTrendLogReference, out var vals4) && vals4.Count > 0)
                 {
@@ -111,7 +114,8 @@ namespace Pulswerk.Drivers.BACnet
                     if (client.ReadPropertyRequest(address, info.ObjectId, PropCategory4941, out var catValues)
                         && catValues.Count > 0)
                     {
-                        category = Convert.ToInt32(catValues[0].Value);
+                        if (Pulswerk.Drivers.BACnet.BacnetValueConverter.TryToDouble(catValues[0].Value, out double d))
+                            category = (int)d;
                     }
                 }
                 catch { }
