@@ -21,6 +21,9 @@ export class ScadaPickerController {
         if (!widgetEl) return;
 
         widgetEl.classList.add('id-picker-mode');
+        
+        const bgLayer = document.getElementById('scadaBg');
+        if (bgLayer) bgLayer.style.zIndex = '10';
 
         const svg = widgetEl.querySelector('svg');
         if (!svg) return;
@@ -47,6 +50,9 @@ export class ScadaPickerController {
         if (this.hoveredEl) { this.hoveredEl.classList.remove('scada-id-hover-highlight'); this.hoveredEl = null; }
         if (this.selectedEl) { this.selectedEl.classList.remove('scada-id-selected'); this.selectedEl = null; }
 
+        const bgLayer = document.getElementById('scadaBg');
+        if (bgLayer) bgLayer.style.zIndex = '';
+
         const panel = document.getElementById('scadaIdPanel');
         if (panel) panel.classList.remove('open');
         const popup = document.getElementById('scadaRenamePopup');
@@ -57,15 +63,53 @@ export class ScadaPickerController {
 
     static findTarget(e: Event): HTMLElement | null {
         let el = e.target as HTMLElement | null;
-        let target = el?.closest('[id]:not(svg), [data-cell-id]:not(svg)') as HTMLElement | null;
-        if (!target) {
-            while (el && el.tagName !== 'svg') {
-                if (ScadaPickerController.tags.has(el.tagName?.toLowerCase())) return el;
-                el = el.parentElement;
+        const svg = el?.closest('svg');
+
+        // 1. Try to find an element that has a meaningful, custom ID
+        let curr = el;
+        while (curr && curr.tagName !== 'svg') {
+            const id = curr.getAttribute('id') || curr.getAttribute('data-cell-id') || '';
+            if (id && !/^\d+$/.test(id) && !id.startsWith('mxCell') && !/^(mxGraphModel|root)\b/i.test(id)) {
+                return curr;
             }
-            return null;
+            curr = curr.parentElement;
         }
-        return target;
+
+        // 2. Fallback: Find the closest actual shape, but ignore structural wrappers
+        curr = el;
+        while (curr && curr.tagName !== 'svg') {
+            const tag = curr.tagName?.toLowerCase();
+            if (ScadaPickerController.tags.has(tag)) {
+                const id = curr.getAttribute('id') || curr.getAttribute('data-cell-id') || '';
+                
+                // Ignore Draw.io absolute root structural elements (0, 1, root)
+                if (id === '0' || id === '1' || /^(mxGraphModel|root)\b/i.test(id)) {
+                    curr = curr.parentElement;
+                    continue;
+                }
+                
+                // Ignore the root <g> (direct child of SVG) if it has no ID
+                if (tag === 'g' && curr.parentElement?.tagName.toLowerCase() === 'svg') {
+                    curr = curr.parentElement;
+                    continue;
+                }
+
+                // Ignore background rects
+                if (tag === 'rect' && svg) {
+                     const r = curr.getBoundingClientRect();
+                     const s = svg.getBoundingClientRect();
+                     if (r.width >= s.width - 2 && r.height >= s.height - 2) {
+                         curr = curr.parentElement;
+                         continue;
+                     }
+                }
+                
+                return curr;
+            }
+            curr = curr.parentElement;
+        }
+        
+        return null;
     }
 
     static onMouseOver = (e: Event): void => {
@@ -154,12 +198,16 @@ export class ScadaPickerController {
         }
 
         const oldId = this.selectedEl.getAttribute('id') || this.selectedEl.getAttribute('data-cell-id');
-        if (!oldId) return;
 
-        if (this.selectedEl.hasAttribute('id')) this.selectedEl.setAttribute('id', newId);
-        if (this.selectedEl.hasAttribute('data-cell-id')) this.selectedEl.setAttribute('data-cell-id', newId);
+        // Always set the new ID on the DOM element
+        this.selectedEl.setAttribute('id', newId);
+        
+        // If it came from Draw.io, keep the data-cell-id in sync
+        if (this.selectedEl.hasAttribute('data-cell-id')) {
+            this.selectedEl.setAttribute('data-cell-id', newId);
+        }
 
-        if (svg) {
+        if (oldId && svg) {
             let contentXml = svg.getAttribute('content');
             if (contentXml) {
                 try {

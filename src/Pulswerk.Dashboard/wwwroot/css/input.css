@@ -684,39 +684,64 @@ aside:hover .user-name {
     from { stroke-dashoffset: 0; }
     to   { stroke-dashoffset: 30; }
 }
-.scada-flow-right {
+.scada-flow-right, .scada-flow-right * {
     stroke-dasharray: 10 5 !important;
     animation: scada-flow-right-kf 1.2s linear infinite !important;
 }
-.scada-flow-left {
+.scada-flow-left, .scada-flow-left * {
     stroke-dasharray: 10 5 !important;
     animation: scada-flow-left-kf 1.2s linear infinite !important;
 }
-.scada-flow-fast {
+.scada-flow-fast, .scada-flow-fast * {
     stroke-dasharray: 6 4 !important;
     animation: scada-flow-right-kf 0.4s linear infinite !important;
 }
 
 /* ── Color State Classes (static overrides) ───────────── */
-.scada-green  { stroke: #22c55e !important; fill: #22c55e !important; }
-.scada-red    { stroke: #ef4444 !important; fill: #ef4444 !important; }
-.scada-amber  { stroke: #f59e0b !important; fill: #f59e0b !important; }
-.scada-blue   { stroke: #3b82f6 !important; fill: #3b82f6 !important; }
-.scada-gray   { stroke: #64748b !important; fill: #64748b !important; }
+.scada-green, .scada-green *  { stroke: #22c55e !important; fill: #22c55e !important; }
+.scada-red, .scada-red *    { stroke: #ef4444 !important; fill: #ef4444 !important; }
+.scada-amber, .scada-amber *  { stroke: #f59e0b !important; fill: #f59e0b !important; }
+.scada-blue, .scada-blue *   { stroke: #3b82f6 !important; fill: #3b82f6 !important; }
+.scada-gray, .scada-gray *   { stroke: #64748b !important; fill: #64748b !important; }
 
 /* Stroke-only variants (for paths/lines — don't fill) */
-.scada-stroke-green  { stroke: #22c55e !important; }
-.scada-stroke-red    { stroke: #ef4444 !important; }
-.scada-stroke-amber  { stroke: #f59e0b !important; }
-.scada-stroke-blue   { stroke: #3b82f6 !important; }
-.scada-stroke-gray   { stroke: #64748b !important; }
+.scada-stroke-green, .scada-stroke-green *  { stroke: #22c55e !important; }
+.scada-stroke-red, .scada-stroke-red *    { stroke: #ef4444 !important; }
+.scada-stroke-amber, .scada-stroke-amber *  { stroke: #f59e0b !important; }
+.scada-stroke-blue, .scada-stroke-blue *   { stroke: #3b82f6 !important; }
+.scada-stroke-gray, .scada-stroke-gray *   { stroke: #64748b !important; }
 
 /* Fill-only variants (for shapes — don't change stroke) */
-.scada-fill-green  { fill: #22c55e !important; }
-.scada-fill-red    { fill: #ef4444 !important; }
-.scada-fill-amber  { fill: #f59e0b !important; }
-.scada-fill-blue   { fill: #3b82f6 !important; }
-.scada-fill-gray   { fill: #64748b !important; }
+.scada-fill-green, .scada-fill-green *  { fill: #22c55e !important; }
+.scada-fill-red, .scada-fill-red *    { fill: #ef4444 !important; }
+.scada-fill-amber, .scada-fill-amber *  { fill: #f59e0b !important; }
+.scada-fill-blue, .scada-fill-blue *   { fill: #3b82f6 !important; }
+.scada-fill-gray, .scada-fill-gray *   { fill: #64748b !important; }
+
+/* Protect elements that explicitly have no stroke/fill from being colored by cascade */
+.scada-svg-widget [stroke="none"], .scada-svg-widget [stroke="transparent"],
+.scada-svg-widget [style*="stroke: none"], .scada-svg-widget [style*="stroke: transparent"],
+.scada-svg-widget [style*="stroke:none"], .scada-svg-widget [style*="stroke:transparent"] {
+    stroke: none !important;
+}
+.scada-svg-widget [fill="none"], .scada-svg-widget [fill="transparent"],
+.scada-svg-widget [style*="fill: none"], .scada-svg-widget [style*="fill: transparent"],
+.scada-svg-widget [style*="fill:none"], .scada-svg-widget [style*="fill:transparent"] {
+    fill: none !important;
+}
+
+/* Absolute brute-force protection for Draw.io's invisible bounding boxes */
+.scada-svg-widget [fill="none"][stroke="none"],
+.scada-svg-widget [fill="transparent"][stroke="transparent"] {
+    stroke: none !important;
+    fill: none !important;
+    opacity: 0 !important;
+}
+
+/* Prevent invisible rects from inheriting strokes from animated groups */
+.scada-svg-widget rect:not([stroke]):not([style*="stroke"]) {
+    stroke: none !important;
+}
 
 /* ── Fill Level (tank/vessel, bottom-up via clip-path) ── */
 .scada-level-10  { clip-path: inset(90% 0 0 0) !important; }
@@ -974,6 +999,9 @@ aside:hover .user-name {
     to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+.scada-svg-widget.id-picker-mode {
+    z-index: 2000 !important;
+}
 .scada-svg-widget.id-picker-mode svg {
     pointer-events: auto !important;
     cursor: crosshair !important;

@@ -37,6 +37,42 @@ export function renderBackgroundSvg(w: any): void {
     if (svg) {
         svg.removeAttribute('width'); svg.removeAttribute('height');
         svg.style.width = '100%'; svg.style.display = 'block'; svg.style.pointerEvents = 'none';
+
+        // Convert black lines/fills to white (for SVGs created without dark mode)
+        svg.querySelectorAll('*').forEach((child: Element) => {
+            const stroke = child.getAttribute('stroke');
+            if (stroke === 'rgb(0, 0, 0)' || stroke === '#000000') {
+                child.setAttribute('stroke', '#ffffff');
+            }
+            const fill = child.getAttribute('fill');
+            if (fill === 'rgb(0, 0, 0)' || fill === '#000000') {
+                child.setAttribute('fill', '#ffffff');
+            }
+            // Also check for inline styles
+            let style = child.getAttribute('style') || '';
+            if (style) {
+                let newStyle = style;
+                newStyle = newStyle.replace(/stroke:\s*(rgb\(0,\s*0,\s*0\)|#000000);?/g, 'stroke: #ffffff;');
+                newStyle = newStyle.replace(/fill:\s*(rgb\(0,\s*0,\s*0\)|#000000);?/g, 'fill: #ffffff;');
+                if (newStyle !== style) {
+                    child.setAttribute('style', newStyle);
+                    style = newStyle;
+                }
+            }
+
+            // Enforce transparent strokes
+            if (stroke === 'none' || stroke === 'transparent' || style.includes('stroke: none') || style.includes('stroke: transparent')) {
+                child.setAttribute('style', (child.getAttribute('style') || '') + '; stroke: none !important;');
+            }
+            // Enforce transparent fills
+            if (fill === 'none' || fill === 'transparent' || style.includes('fill: none') || style.includes('fill: transparent')) {
+                child.setAttribute('style', (child.getAttribute('style') || '') + '; fill: none !important;');
+            }
+            // Enforce invisibility for pure bounding boxes
+            if ((fill === 'none' && stroke === 'none') || (fill === 'transparent' && stroke === 'transparent')) {
+                child.setAttribute('style', (child.getAttribute('style') || '') + '; opacity: 0 !important; stroke: none !important; fill: none !important;');
+            }
+        });
     }
 
     const toolbar = document.createElement('div');

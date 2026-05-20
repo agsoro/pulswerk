@@ -259,14 +259,21 @@
         document.getElementById('assetSearch').addEventListener('input', (e) => {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
-                const term = e.target.value.toLowerCase();
-                filteredPoints = allPoints.filter(p => 
-                    (p.name || '').toLowerCase().includes(term) ||
-                    (p.key || '').toLowerCase().includes(term) ||
-                    (p.device || '').toLowerCase().includes(term) ||
-                    (p.connection || '').toLowerCase().includes(term) ||
-                    (p.path || '').toLowerCase().includes(term)
-                );
+                const raw = e.target.value.toLowerCase();
+                const terms = raw.split(/\s+/).filter(t => t.length > 0);
+                
+                if (terms.length === 0) {
+                    filteredPoints = [...allPoints];
+                } else {
+                    filteredPoints = allPoints.filter(p => {
+                        const searchStr = [
+                            p.connection, p.device, p.name, p.path, p.key, p.type, p.units, p.value, p.lastUpdate
+                        ].map(s => (s || '').toString().toLowerCase()).join(' ');
+                        
+                        return terms.every(t => searchStr.includes(t));
+                    });
+                }
+                
                 applySort();
                 // Reset scroll to top on new search
                 document.getElementById('scrollViewport').scrollTop = 0;

@@ -124,7 +124,7 @@ export function renderAnimRules() {
                             <div style="position:relative; display:inline-block;">
                                 <button class="btn-ghost btn-sm h-5 !py-0 !px-1.5" style="font-size:0.6rem; opacity:0.7; border-radius:0.2rem;" onclick="event.preventDefault(); const p = this.nextElementSibling; p.style.display = p.style.display === 'none' ? 'block' : 'none'; if(p.style.display==='block') { const inp = p.querySelector('input'); if(inp) inp.focus(); }"><i class="fas fa-plus"></i></button>
                                 <div style="display:none; position:absolute; top:100%; left:0; z-index:100; margin-top:0.2rem; background:#1e293b; border:1px solid #334155; border-radius:0.3rem; padding:0.3rem; width:200px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.5);">
-                                    <input type="text" list="dl_keys_${idx}" class="form-input" style="padding:0.25rem 0.5rem; font-size:0.75rem; width:100%;" placeholder="Select or type..." onkeydown="if(event.key==='Enter') { event.preventDefault(); addAnimRuleTelemetryKey(${idx}, this.value); }">
+                                    <input type="text" list="dl_keys_${idx}" class="form-input" style="padding:0.25rem 0.5rem; font-size:0.75rem; width:100%;" placeholder="Select or type..." onkeydown="if(event.key==='Enter' && this.value) { event.preventDefault(); addAnimRuleTelemetryKey(${idx}, this.value); }" onchange="if(this.value) { addAnimRuleTelemetryKey(${idx}, this.value); }">
                                     <datalist id="dl_keys_${idx}">
                                         ${availableKeys.filter(k => !(rule.telemetryKeys || []).includes(k)).map(k => `<option value="${window.esc ? window.esc(k) : k}">`).join('')}
                                     </datalist>
@@ -145,7 +145,7 @@ export function renderAnimRules() {
                             <div style="position:relative; display:inline-block;">
                                 <button class="btn-ghost btn-sm h-5 !py-0 !px-1.5" style="font-size:0.6rem; opacity:0.7; border-radius:0.2rem;" onclick="event.preventDefault(); const p = this.nextElementSibling; p.style.display = p.style.display === 'none' ? 'block' : 'none'; if(p.style.display==='block') { const inp = p.querySelector('input'); if(inp) inp.focus(); }"><i class="fas fa-plus"></i></button>
                                 <div style="display:none; position:absolute; top:100%; left:0; z-index:100; margin-top:0.2rem; background:#1e293b; border:1px solid #334155; border-radius:0.3rem; padding:0.3rem; width:200px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.5);">
-                                    <input type="text" list="dl_elements_${idx}" class="form-input" style="padding:0.25rem 0.5rem; font-size:0.75rem; width:100%;" placeholder="Select or type..." onkeydown="if(event.key==='Enter') { event.preventDefault(); addAnimRuleElementId(${idx}, this.value); }">
+                                    <input type="text" list="dl_elements_${idx}" class="form-input" style="padding:0.25rem 0.5rem; font-size:0.75rem; width:100%;" placeholder="Select or type..." onkeydown="if(event.key==='Enter' && this.value) { event.preventDefault(); addAnimRuleElementId(${idx}, this.value); }" onchange="if(this.value) { addAnimRuleElementId(${idx}, this.value); }">
                                     <datalist id="dl_elements_${idx}">
                                         ${Array.from(allIds)
             .filter(id => !(rule.elementId || '').split(',').map(s => s.trim()).includes(id))
@@ -192,9 +192,43 @@ export function openAnimPreview(ruleIdx) {
     }
     if (svgContent) {
         previewSvg.innerHTML = svgContent;
-        // Collect element IDs
+        // Collect element IDs and enforce JS protections so preview matches dashboard exactly
         const svgEl = previewSvg.querySelector('svg');
         if (svgEl) {
+            svgEl.querySelectorAll('*').forEach(child => {
+                let stroke = child.getAttribute('stroke');
+                let fill = child.getAttribute('fill');
+                // Convert black to white for dark mode compatibility
+                if (stroke === 'rgb(0, 0, 0)' || stroke === '#000000') {
+                    child.setAttribute('stroke', '#ffffff');
+                    stroke = '#ffffff';
+                }
+                if (fill === 'rgb(0, 0, 0)' || fill === '#000000') {
+                    child.setAttribute('fill', '#ffffff');
+                    fill = '#ffffff';
+                }
+                let style = child.getAttribute('style') || '';
+                if (style) {
+                    let newStyle = style;
+                    newStyle = newStyle.replace(/stroke:\s*(rgb\(0,\s*0,\s*0\)|#000000);?/g, 'stroke: #ffffff;');
+                    newStyle = newStyle.replace(/fill:\s*(rgb\(0,\s*0,\s*0\)|#000000);?/g, 'fill: #ffffff;');
+                    if (newStyle !== style) {
+                        child.setAttribute('style', newStyle);
+                        style = newStyle;
+                    }
+                }
+                if (stroke === 'none' || stroke === 'transparent' || style.includes('stroke: none') || style.includes('stroke: transparent')) {
+                    child.setAttribute('style', style + '; stroke: none !important;');
+                    style = child.getAttribute('style') || '';
+                }
+                if (fill === 'none' || fill === 'transparent' || style.includes('fill: none') || style.includes('fill: transparent')) {
+                    child.setAttribute('style', style + '; fill: none !important;');
+                    style = child.getAttribute('style') || '';
+                }
+                if ((fill === 'none' && stroke === 'none') || (fill === 'transparent' && stroke === 'transparent')) {
+                    child.setAttribute('style', style + '; opacity: 0 !important; stroke: none !important; fill: none !important;');
+                }
+            });
             const select = document.getElementById('previewElementSelect');
             if (select) {
                 const elements = svgEl.querySelectorAll('[id], [data-cell-id]');
@@ -372,8 +406,18 @@ function renderAnimChips(elementId) {
         container.innerHTML = '<span style="color:#64748b;font-size:0.78rem">Select an element above to see available classes</span>';
         return;
     }
+    let hasPath = false;
+    if (currentPreviewElement) {
+        const tag = currentPreviewElement.tagName.toLowerCase();
+        if (['path', 'line', 'polyline'].includes(tag))
+            hasPath = true;
+        else if (currentPreviewElement.querySelector('path, line, polyline'))
+            hasPath = true;
+    }
     let html = '';
     animCategories.forEach(cat => {
+        if (cat.name.startsWith('Particle') && !hasPath)
+            return;
         const chipsHtml = cat.classes.map(cls => {
             const active = currentPreviewElement.classList.contains(cls);
             return `<span class="scada-anim-chip ${active ? 'active' : ''}" onclick="togglePreviewClass('${cls}')">${cls}</span>`;
