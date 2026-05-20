@@ -36,13 +36,13 @@ function resolveKeyMeta(key) {
     };
 }
 /**
- * Lazily load allKeys from the AvailableKeys API if not already populated.
+ * Lazily load allKeys from the AvailableTelemetries API if not already populated.
  */
 async function ensureKeysMeta() {
     if (allKeys.length)
         return;
     try {
-        const r = await fetch('?handler=AvailableKeys');
+        const r = await fetch('?handler=AvailableTelemetries');
         if (r.ok)
             allKeys = await r.json();
     }

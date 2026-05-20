@@ -3061,7 +3061,7 @@ namespace Pulswerk.Drivers.BACnet
                             : info.ObjectName.Split(new[] { '.', '\'' }, StringSplitOptions.RemoveEmptyEntries).Last();
 
                         string description = info.Description;
-                        bool isWritable = info.Commandable;
+                        bool isWritable = info.Writeable;
                         List<string>? enumValues = null;
 
                         bool isMultiState = child.ObjectId.type is
@@ -3256,6 +3256,20 @@ namespace Pulswerk.Drivers.BACnet
                             Name = "_scheduleStates",
                             Value = JsonSerializer.Serialize(info.StateText)
                         });
+                    }
+                    else
+                    {
+                        var prop4460 = props.FirstOrDefault(p => p.Name == "4460 (4460)");
+                        if (prop4460 != null && !string.IsNullOrWhiteSpace(prop4460.Value))
+                        {
+                            schedType = "enumerated";
+                            var states = prop4460.Value.Split(',').Select(s => s.Trim()).ToList();
+                            props.Add(new PropertyDto
+                            {
+                                Name = "_scheduleStates",
+                                Value = JsonSerializer.Serialize(states)
+                            });
+                        }
                     }
 
                     props.Add(new PropertyDto { Name = "_scheduleValueType", Value = schedType });

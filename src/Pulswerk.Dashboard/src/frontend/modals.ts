@@ -310,6 +310,10 @@ async function submitEdit(e?: Event): Promise<void> {
         value = parseFloat((document.getElementById('editValue') as HTMLInputElement).value) || 0;
     } else if (document.getElementById('enumGroup')!.style.display !== 'none') {
         value = parseInt((document.getElementById('enumSelect') as HTMLSelectElement).value, 10) || 0;
+        const meta = resolveKeyMeta(currentEditKey!);
+        if (meta && meta.type && meta.type.includes('MULTI_STATE')) {
+            value += 1;
+        }
     } else {
         value = (document.getElementById('boolInput') as HTMLInputElement).checked ? 1 : 0;
     }
@@ -502,20 +506,43 @@ async function openScheduleView(key: string): Promise<void> {
         currentScheduleData = [0,1,2,3,4,5,6].map(i => ({ dayIndex: i, entries: [] }));
         
         if (schedProp && schedProp.value && schedProp.value !== 'Empty Schedule' && schedProp.value !== 'None') {
-            const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-            const days = schedProp.value.split(' | ');
-            days.forEach((dayStr: string) => {
-                const parts = dayStr.split(': ');
-                if (parts.length < 2) return;
-                const dayIdx = dayNames.indexOf(parts[0]);
-                if (dayIdx === -1) return;
-                
-                const timesStr = parts[1];
-                currentScheduleData[dayIdx].entries = timesStr.split(', ').map((t: string) => {
-                    const [time, val] = t.split('➔');
-                    return { time, value: parseFloat(val) };
+            let parsedJson = false;
+            try {
+                const schedData = JSON.parse(schedProp.value);
+                if (schedData && schedData.Days) {
+                    const dayMap: Record<string, number> = { "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Friday": 4, "Saturday": 5, "Sunday": 6 };
+                    schedData.Days.forEach((d: any) => {
+                        const idx = dayMap[d.Day];
+                        if (idx !== undefined && d.Entries) {
+                            currentScheduleData[idx].entries = d.Entries.map((e: any) => {
+                                let val = parseFloat(e.Value);
+                                if (scheduleValueType === 'enumerated') val -= 1;
+                                return { time: e.Time, value: val };
+                            });
+                        }
+                    });
+                    parsedJson = true;
+                }
+            } catch (e) {}
+            
+            if (!parsedJson) {
+                const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                const days = schedProp.value.split(' | ');
+                days.forEach((dayStr: string) => {
+                    const parts = dayStr.split(': ');
+                    if (parts.length < 2) return;
+                    const dayIdx = dayNames.indexOf(parts[0]);
+                    if (dayIdx === -1) return;
+                    
+                    const timesStr = parts[1];
+                    currentScheduleData[dayIdx].entries = timesStr.split(', ').map((t: string) => {
+                        const [time, val] = t.split('➔');
+                        let v = parseFloat(val);
+                        if (scheduleValueType === 'enumerated') v -= 1;
+                        return { time, value: v };
+                    });
                 });
-            });
+            }
         }
         
         renderSchedule();
@@ -665,6 +692,15 @@ async function saveSchedule(): Promise<void> {
             day.entries.sort((a: any, b: any) => a.time.localeCompare(b.time));
         });
 
+        const payloadData = currentScheduleData.map(day => ({
+            dayIndex: day.dayIndex,
+            entries: day.entries.map((e: any) => {
+                let v = e.value;
+                if (scheduleValueType === 'enumerated') v += 1;
+                return { time: e.time, value: v };
+            })
+        }));
+
         const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement)?.value || '';
         const response = await fetch('?handler=WriteComplex', {
             method: 'POST',
@@ -674,7 +710,7 @@ async function saveSchedule(): Promise<void> {
             },
             body: JSON.stringify({
                 key: currentScheduleKey,
-                value: JSON.stringify(currentScheduleData)
+                value: JSON.stringify(payloadData)
             })
         });
 

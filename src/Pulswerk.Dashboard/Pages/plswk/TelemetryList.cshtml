@@ -109,6 +109,7 @@
             try {
                 const response = await fetch('?handler=AvailableTelemetries');
                 allPoints = await response.json();
+                window.allKeys = allPoints;
                 filteredPoints = [...allPoints];
                 applySort();
                 scheduleRender();

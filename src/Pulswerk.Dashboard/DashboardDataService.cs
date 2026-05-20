@@ -842,6 +842,7 @@ namespace Pulswerk.Dashboard
             try
             {
                 writer.WriteComplex(conn, device, driverKey, value);
+                Log.Info($"[Dashboard] Complex write success: {key}");
                 return Task.FromResult(true);
             }
             catch (Exception ex)
