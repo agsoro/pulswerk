@@ -204,7 +204,8 @@ async function openEdit(key) {
     const path = meta.parentPath || [];
     const enums = meta.enumValues || null;
     const type = meta.type || '';
-    document.getElementById('editTitle').textContent = meta.name || key;
+    const fn = window.friendlyName;
+    document.getElementById('editTitle').textContent = (fn ? fn(key) : null) || meta.name || key;
     document.getElementById('editMeta').textContent = meta.fullName || key;
     document.getElementById('editUnitLabel').textContent = meta.units || '';
     renderModalBreadcrumb('editPath', path);

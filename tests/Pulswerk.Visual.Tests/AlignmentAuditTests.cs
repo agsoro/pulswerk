@@ -186,7 +186,7 @@ public class AlignmentAuditTests : BrowserTestBase
     {
         var path = spec.PagePath ?? "/";
         if (!path.StartsWith("/plswk/")) path = "/plswk" + (path == "/" ? "/" : path);
-        
+
         await Page.SetViewportSizeAsync(1920, 1080);
         await Page.GotoAsync(Url(path));
         await WaitForDashboard();

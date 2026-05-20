@@ -215,7 +215,8 @@ async function openEdit(key: string): Promise<void> {
     const enums = meta.enumValues || null;
     const type = meta.type || '';
     
-    document.getElementById('editTitle')!.textContent = meta.name || key;
+    const fn = (window as any).friendlyName;
+    document.getElementById('editTitle')!.textContent = (fn ? fn(key) : null) || meta.name || key;
     document.getElementById('editMeta')!.textContent = meta.fullName || key;
     document.getElementById('editUnitLabel')!.textContent = meta.units || '';
     renderModalBreadcrumb('editPath', path);

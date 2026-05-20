@@ -238,7 +238,7 @@ namespace Pulswerk.Dashboard
             _app.MapGet("/plswk/api/telemetry-keys", (HttpContext ctx) =>
             {
                 var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
                     return Results.StatusCode(403);
 
                 var keys = _data.GetAvailableTelemetries();
@@ -314,12 +314,12 @@ namespace Pulswerk.Dashboard
                     var body = await reader.ReadToEndAsync();
                     var err = JsonSerializer.Deserialize<JsonElement>(body);
 
-                    var msg   = err.TryGetProperty("msg", out var m) ? m.GetString() : "unknown";
-                    var src   = err.TryGetProperty("source", out var s) ? s.GetString() : "";
-                    var line  = err.TryGetProperty("line", out var l) ? l.GetInt32().ToString() : "?";
-                    var col   = err.TryGetProperty("col", out var c) ? c.GetInt32().ToString() : "?";
+                    var msg = err.TryGetProperty("msg", out var m) ? m.GetString() : "unknown";
+                    var src = err.TryGetProperty("source", out var s) ? s.GetString() : "";
+                    var line = err.TryGetProperty("line", out var l) ? l.GetInt32().ToString() : "?";
+                    var col = err.TryGetProperty("col", out var c) ? c.GetInt32().ToString() : "?";
                     var stack = err.TryGetProperty("stack", out var st) ? st.GetString() : "";
-                    var page  = err.TryGetProperty("page", out var p) ? p.GetString() : "";
+                    var page = err.TryGetProperty("page", out var p) ? p.GetString() : "";
 
                     Log.Warning($"[UI] JS Error on {page} at {src}:{line}:{col} — {msg}");
                     if (!string.IsNullOrEmpty(stack))
@@ -334,20 +334,20 @@ namespace Pulswerk.Dashboard
             {
                 var serverCfg = _data.Config.Server;
                 var authCfg = serverCfg?.Auth;
-                
+
                 string? user = DashboardAuth.GetUser(ctx, authCfg);
                 var groups = DashboardAuth.GetGroups(ctx, authCfg);
-                
+
                 var headers = ctx.Request.Headers;
-                string? name  = headers["Remote-Name"].FirstOrDefault();
+                string? name = headers["Remote-Name"].FirstOrDefault();
                 string? email = headers["Remote-Email"].FirstOrDefault();
 
                 var dto = new
                 {
                     authenticated = !string.IsNullOrWhiteSpace(user) && user != authCfg?.DefaultUser,
                     isDefault = !string.IsNullOrWhiteSpace(user) && user == authCfg?.DefaultUser,
-                    user  = user ?? "public",
-                    name  = name ?? user ?? "Public",
+                    user = user ?? "public",
+                    name = name ?? user ?? "Public",
                     email = email ?? "",
                     groups = groups,
                     canWriteValue = DashboardAuth.CanWriteValue(ctx, serverCfg),
@@ -363,7 +363,7 @@ namespace Pulswerk.Dashboard
             _app.MapGet("/plswk/api/config", (HttpContext ctx) =>
             {
                 var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
                     return Results.StatusCode(403);
 
                 string baseConfigPath = ResolveConfigPath() ?? "";
@@ -373,20 +373,25 @@ namespace Pulswerk.Dashboard
                 string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
                 string overrideJson = File.Exists(overridePath) ? File.ReadAllText(overridePath) : "{}";
 
-                try {
-                    var options = new JsonSerializerOptions {
+                try
+                {
+                    var options = new JsonSerializerOptions
+                    {
                         ReadCommentHandling = JsonCommentHandling.Skip,
                         AllowTrailingCommas = true
                     };
                     var baseObj = JsonSerializer.Deserialize<AppConfig>(baseJson, options);
                     var overrideObj = JsonSerializer.Deserialize<AppConfig>(overrideJson, options);
-                    
-                    var result = new {
+
+                    var result = new
+                    {
                         @base = baseObj,
                         @override = overrideObj ?? new AppConfig(null, null, null, new(), new(), null)
                     };
                     return Results.Json(result, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-                } catch (Exception ex) {
+                }
+                catch (Exception ex)
+                {
                     return Results.Problem("Failed to parse config: " + ex.Message);
                 }
             });
@@ -394,16 +399,17 @@ namespace Pulswerk.Dashboard
             _app.MapPost("/plswk/api/config/override", async (HttpContext ctx) =>
             {
                 var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
                     return Results.StatusCode(403);
 
                 try
                 {
                     using var reader = new StreamReader(ctx.Request.Body);
                     var body = await reader.ReadToEndAsync();
-                    
+
                     // Validate JSON
-                    var options = new JsonSerializerOptions {
+                    var options = new JsonSerializerOptions
+                    {
                         ReadCommentHandling = JsonCommentHandling.Skip,
                         AllowTrailingCommas = true
                     };
@@ -413,8 +419,9 @@ namespace Pulswerk.Dashboard
                     string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
                     if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
                     string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
-                    
-                    var writeOpts = new JsonSerializerOptions {
+
+                    var writeOpts = new JsonSerializerOptions
+                    {
                         WriteIndented = true,
                         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
                         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -434,26 +441,30 @@ namespace Pulswerk.Dashboard
             _app.MapPost("/plswk/api/config/evaluate-formula", async (HttpContext ctx) =>
             {
                 var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg)) 
+                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
                     return Results.StatusCode(403);
 
                 using var reader = new StreamReader(ctx.Request.Body);
                 var body = await reader.ReadToEndAsync();
                 var req = JsonSerializer.Deserialize<JsonElement>(body);
-                
+
                 string formula = req.TryGetProperty("formula", out var f) ? f.GetString() ?? "" : "";
                 string deviceId = req.TryGetProperty("deviceId", out var d) ? d.GetString() ?? "" : "";
-                
+
                 DeviceConfig? dev = _data.Config.Devices.FirstOrDefault(x => x.Id == deviceId);
-                
-                try {
+
+                try
+                {
                     // Quick live value resolution using DashboardDataService methods via reflection or public method
                     var method = _data.GetType().GetMethod("GetLiveValueForFormula", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (method != null) {
+                    if (method != null)
+                    {
                         string? val = method.Invoke(_data, new object?[] { formula, null, dev }) as string;
                         return Results.Json(new { result = val ?? "", success = true });
                     }
-                } catch (Exception ex) {
+                }
+                catch (Exception ex)
+                {
                     return Results.Json(new { error = ex.Message, success = false });
                 }
                 return Results.Json(new { error = "Evaluation not available", success = false });

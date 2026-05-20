@@ -169,7 +169,9 @@ namespace Pulswerk.Drivers.BACnet
         double? HighLimit = null,    // from PROP_HIGH_LIMIT (45)
         double? LowLimit = null,     // from PROP_LOW_LIMIT (59)
         double? Deadband = null,     // from PROP_DEADBAND (25)
-        uint? LimitEnable = null     // from PROP_LIMIT_ENABLE (52)
+        uint? LimitEnable = null,    // from PROP_LIMIT_ENABLE (52)
+        double? Resolution = null,   // from PROP_RESOLUTION (108)
+        double? CovIncrement = null  // from PROP_COV_INCREMENT (109)
     )
     {
         /// <summary>Sanitised technical ObjectName used as the key prefix, e.g. "ahu-01_rlt001_t_su".</summary>
@@ -771,6 +773,10 @@ namespace Pulswerk.Drivers.BACnet
             List<BacnetPropertyIds>? extraProps = null,
             int readDelayMs = 0)
         {
+            extraProps ??= new List<BacnetPropertyIds>();
+            if (!extraProps.Contains((BacnetPropertyIds)108)) extraProps.Add((BacnetPropertyIds)108);
+            if (!extraProps.Contains((BacnetPropertyIds)109)) extraProps.Add((BacnetPropertyIds)109);
+
             var extraResults = new Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>>();
             // Build type allowlist (null = accept all)
             HashSet<BacnetObjectTypes>? allowedTypes = null;
@@ -797,6 +803,7 @@ namespace Pulswerk.Drivers.BACnet
             var allCommandable = new HashSet<BacnetObjectId>();
             var allReadOnly = new HashSet<BacnetObjectId>();
             var allStateText = new Dictionary<BacnetObjectId, List<string>>();
+            var allNumStates = new Dictionary<BacnetObjectId, uint>();
 
             var candidatesList = candidates
                 .Where(oid => allowedTypes == null || allowedTypes.Contains(oid.type))
@@ -826,7 +833,8 @@ namespace Pulswerk.Drivers.BACnet
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_READ_ONLY, uint.MaxValue),
-                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_NUMBER_OF_STATES, uint.MaxValue)
                             };
                             if (extraProps != null)
                             {
@@ -838,7 +846,7 @@ namespace Pulswerk.Drivers.BACnet
 
                         if (client.ReadPropertyMultipleRequest(address, readSpecs, out IList<BacnetReadAccessResult> batchResults))
                         {
-                            ProcessRpmResults(batchResults, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, extraProps, extraResults);
+                            ProcessRpmResults(batchResults, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, allNumStates, extraProps, extraResults);
                             if (i > 0 && i % 250 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... {i}/{candidatesList.Count} objects fetched");
                             continue;  // batch succeeded — next batch
                         }
@@ -868,7 +876,8 @@ namespace Pulswerk.Drivers.BACnet
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_UNITS, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_PRIORITY_ARRAY, uint.MaxValue),
                                 new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_READ_ONLY, uint.MaxValue),
-                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue)
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_STATE_TEXT, uint.MaxValue),
+                                new BacnetPropertyReference((uint)BacnetPropertyIds.PROP_NUMBER_OF_STATES, uint.MaxValue)
                             })
                         };
                         if (extraProps != null)
@@ -879,14 +888,14 @@ namespace Pulswerk.Drivers.BACnet
 
                         if (client.ReadPropertyMultipleRequest(address, singleSpec, out IList<BacnetReadAccessResult> singleResults))
                         {
-                            ProcessRpmResults(singleResults, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, extraProps, extraResults);
+                            ProcessRpmResults(singleResults, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, allNumStates, extraProps, extraResults);
                             continue;
                         }
                     }
                     catch { /* single RPM also failed — fall through to individual reads */ }
 
                     // Ultimate fallback: individual ReadPropertyRequest calls
-                    ReadSingleProps(client, address, oid, allNames, allDescs, allUnits, allCommandable, allReadOnly, extraProps, extraResults);
+                    ReadSingleProps(client, address, oid, allNames, allDescs, allUnits, allCommandable, allReadOnly, allStateText, allNumStates, extraProps, extraResults);
                 }
                 if (i > 0 && i % 250 == 0) Pulswerk.Core.Log.Debug($"[BACnet] ... {i}/{candidatesList.Count} objects fetched (single-object mode)");
             }
@@ -911,6 +920,7 @@ namespace Pulswerk.Drivers.BACnet
                 bool isReadOnly = allReadOnly.Contains(oid);
                 bool writeable = isConfigValue && !commandable && !isReadOnly;
                 allStateText.TryGetValue(oid, out List<string>? stateText);
+                allNumStates.TryGetValue(oid, out uint numStates);
 
                 // Fallback for binary state text if not in batch
                 if (stateText == null && IsBinary(oid.type))
@@ -921,7 +931,28 @@ namespace Pulswerk.Drivers.BACnet
                         stateText = new List<string> { string.IsNullOrEmpty(inactive) ? "0" : inactive, string.IsNullOrEmpty(active) ? "1" : active };
                 }
 
+                if (stateText == null && IsMultiState(oid.type) && numStates > 0)
+                {
+                    stateText = new List<string>();
+                    for (int n = 1; n <= numStates; n++)
+                        stateText.Add($"State {n}");
+                }
+
                 if (stateText != null && stateText.Count > 0) objectsWithLabels++;
+
+                double? resolution = null;
+                double? covIncrement = null;
+                if (extraResults.TryGetValue(oid, out var exProps))
+                {
+                    if (exProps.TryGetValue((BacnetPropertyIds)108, out var resVals) && resVals.Count > 0 && resVals[0].Value != null)
+                    {
+                        if (BacnetValueConverter.TryToDouble(resVals[0].Value, out double r)) resolution = r;
+                    }
+                    if (exProps.TryGetValue((BacnetPropertyIds)109, out var covVals) && covVals.Count > 0 && covVals[0].Value != null)
+                    {
+                        if (BacnetValueConverter.TryToDouble(covVals[0].Value, out double c)) covIncrement = c;
+                    }
+                }
 
                 result.Add(new BacnetObjectInfo(
                     TechDeviceId: techDeviceId,
@@ -933,7 +964,9 @@ namespace Pulswerk.Drivers.BACnet
                     Units: units ?? "",
                     Commandable: commandable,
                     Writeable: writeable,
-                    StateText: stateText
+                    StateText: stateText,
+                    Resolution: resolution,
+                    CovIncrement: covIncrement
                 ));
             }
 
@@ -955,6 +988,7 @@ namespace Pulswerk.Drivers.BACnet
             HashSet<BacnetObjectId> allCommandable,
             HashSet<BacnetObjectId> allReadOnly,
             Dictionary<BacnetObjectId, List<string>> allStateText,
+            Dictionary<BacnetObjectId, uint> allNumStates,
             List<BacnetPropertyIds>? extraProps,
             Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraResults)
         {
@@ -994,6 +1028,11 @@ namespace Pulswerk.Drivers.BACnet
                         }
                         if (list.Count > 0) allStateText[oid] = list;
                     }
+                    else if (propId == BacnetPropertyIds.PROP_NUMBER_OF_STATES)
+                    {
+                        if (pv.value[0].Value is uint n) allNumStates[oid] = n;
+                        else if (BacnetValueConverter.TryToDouble(pv.value[0].Value, out double d)) allNumStates[oid] = (uint)d;
+                    }
                     else if (extraProps != null && extraProps.Contains(propId))
                     {
                         if (!extraResults.TryGetValue(oid, out var dict))
@@ -1015,6 +1054,8 @@ namespace Pulswerk.Drivers.BACnet
             Dictionary<BacnetObjectId, string> allUnits,
             HashSet<BacnetObjectId> allCommandable,
             HashSet<BacnetObjectId> allReadOnly,
+            Dictionary<BacnetObjectId, List<string>> allStateText,
+            Dictionary<BacnetObjectId, uint> allNumStates,
             List<BacnetPropertyIds>? extraProps,
             Dictionary<BacnetObjectId, Dictionary<BacnetPropertyIds, List<BacnetValue>>> extraResults)
         {
@@ -1057,6 +1098,35 @@ namespace Pulswerk.Drivers.BACnet
                 {
                     if (vals[0].Value is bool ro && ro) allReadOnly.Add(oid);
                     else if (vals[0].Value is uint rou && rou != 0) allReadOnly.Add(oid);
+                }
+            }
+            catch { }
+
+            // PROP_STATE_TEXT
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_STATE_TEXT, out var vals) && vals.Count > 0)
+                {
+                    var list = new List<string>();
+                    foreach (var v in vals)
+                    {
+                        if (v.Tag == BacnetApplicationTags.BACNET_APPLICATION_TAG_ERROR) continue;
+                        var s = v.Value?.ToString() ?? "";
+                        if (s.Contains("ERROR_")) continue;
+                        list.Add(s);
+                    }
+                    if (list.Count > 0) allStateText[oid] = list;
+                }
+            }
+            catch { }
+
+            // PROP_NUMBER_OF_STATES
+            try
+            {
+                if (client.ReadPropertyRequest(address, oid, BacnetPropertyIds.PROP_NUMBER_OF_STATES, out var vals) && vals.Count > 0)
+                {
+                    if (vals[0].Value is uint n) allNumStates[oid] = n;
+                    else if (BacnetValueConverter.TryToDouble(vals[0].Value, out double d)) allNumStates[oid] = (uint)d;
                 }
             }
             catch { }
@@ -1621,6 +1691,7 @@ namespace Pulswerk.Drivers.BACnet
                     { "status_flags",  bs.ToString() },
                     { "reliability",   relStr },
                     { "bacnetAckKey",  ackKey },
+                    { "telemetryKey",  $"{obj.KeyPrefix}_present_value" }
                 };
                 if (!string.IsNullOrWhiteSpace(obj.Description))
                     details["bacnet_description"] = obj.Description;
@@ -2386,14 +2457,28 @@ namespace Pulswerk.Drivers.BACnet
             // Delegate tag selection to the converter (binary → ENUMERATED, analog → REAL)
             BacnetValue bv = BacnetValueConverter.ToWriteValue(objectId.Value.type, internalVal);
 
-            bool ok = client.WritePropertyRequest(
-                address, objectId.Value,
-                BacnetPropertyIds.PROP_PRESENT_VALUE,
-                new List<BacnetValue> { bv });
+            try
+            {
+                bool ok = client.WritePropertyRequest(
+                    address, objectId.Value,
+                    BacnetPropertyIds.PROP_PRESENT_VALUE,
+                    new List<BacnetValue> { bv });
 
-            if (!ok)
-                throw new Exception(
-                    $"BACnet WriteProperty returned NAK for key '{key}' ({objectId}).");
+                if (!ok)
+                {
+                    string errMsg = $"[BACnet] WriteProperty returned NAK or Timeout. Device: {device.Name} ({address}), Object: {obj.ObjectName} ({objectId.Value}), Target Value: {internalVal} (Raw: {value})";
+                    Pulswerk.Core.Log.Warning(errMsg);
+                    throw new Exception(errMsg);
+                }
+
+                Pulswerk.Core.Log.Info($"[BACnet] Write successful. Device: {device.Name} ({address}), Object: {obj.ObjectName} ({objectId.Value}), Value: {internalVal}");
+            }
+            catch (Exception ex) when (!ex.Message.StartsWith("[BACnet] WriteProperty"))
+            {
+                string errMsg = $"[BACnet] Exception during WriteProperty. Device: {device.Name} ({address}), Object: {obj.ObjectName} ({objectId.Value}), Target Value: {internalVal}. Error: {ex.Message}";
+                Pulswerk.Core.Log.Error(errMsg);
+                throw new Exception(errMsg, ex);
+            }
         }
         public void WriteComplex(ConnectionConfig conn, DeviceConfig device, string key, object value)
         {
@@ -2417,14 +2502,16 @@ namespace Pulswerk.Drivers.BACnet
 
             if (objectId.Value.type == BacnetObjectTypes.OBJECT_SCHEDULE)
             {
-                WriteWeeklySchedule(client, address, objectId.Value, json);
+                WriteWeeklySchedule(client, address, objectId.Value, json, device.Name);
                 return;
             }
 
-            throw new NotSupportedException($"Complex write not supported for key '{key}' (type {objectId.Value.type}).");
+            string errMsg = $"[BACnet] Complex write not supported for key '{key}' (type {objectId.Value.type}). Device: {device.Name} ({address}).";
+            Pulswerk.Core.Log.Warning(errMsg);
+            throw new NotSupportedException(errMsg);
         }
 
-        private void WriteWeeklySchedule(BacnetClient client, BacnetAddress address, BacnetObjectId oid, string json)
+        private void WriteWeeklySchedule(BacnetClient client, BacnetAddress address, BacnetObjectId oid, string json, string deviceName)
         {
             try
             {
@@ -2467,7 +2554,7 @@ namespace Pulswerk.Drivers.BACnet
                     catch { }
                 }
 
-                Pulswerk.Core.Log.Info($"[BACnet] Writing schedule for {oid} — detected value tag: {valueTag}, entries per day: {days.Sum(d => d.Entries?.Count ?? 0)}");
+                Pulswerk.Core.Log.Info($"[BACnet] Writing schedule for {oid} on {deviceName} ({address}) — detected value tag: {valueTag}, entries per day: {days.Sum(d => d.Entries?.Count ?? 0)}");
 
                 // BACnet Weekly_Schedule is an array of 7 DailySchedule (SEQUENCE OF TimeValue)
                 // arrayIndex 1 = Monday, ..., 7 = Sunday
@@ -2513,19 +2600,25 @@ namespace Pulswerk.Drivers.BACnet
                     {
                         if (!client.WritePropertyMultipleRequest(address, oid, new[] { propValue }))
                         {
-                            Pulswerk.Core.Log.Error($"[BACnet] Failed to write schedule for day index {arrayIndex} (object {oid})");
+                            Pulswerk.Core.Log.Warning($"[BACnet] Failed to write schedule for day index {arrayIndex} (object {oid}) on {deviceName} ({address}). NAK or Timeout.");
+                        }
+                        else
+                        {
+                            Pulswerk.Core.Log.Info($"[BACnet] Successfully wrote schedule day index {arrayIndex} to {oid} on {deviceName}.");
                         }
                     }
                     catch (Exception dayEx)
                     {
-                        Pulswerk.Core.Log.Error($"[BACnet] Schedule write error day {arrayIndex}: {dayEx.Message}");
+                        Pulswerk.Core.Log.Error($"[BACnet] Schedule write error day {arrayIndex} on {deviceName} ({address}) for object {oid}: {dayEx.Message}");
                         throw;
                     }
                 }
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to write weekly schedule: {ex.Message}", ex);
+                string errMsg = $"[BACnet] Failed to write weekly schedule on {deviceName} ({address}) for object {oid}. Error: {ex.Message}";
+                Pulswerk.Core.Log.Error(errMsg);
+                throw new Exception(errMsg, ex);
             }
         }
 

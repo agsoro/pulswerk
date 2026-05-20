@@ -127,11 +127,11 @@ namespace Pulswerk.Core
 
             // 3. Validate point references (external to strings)
             var allDeviceIds = cfg.Devices.Select(d => d.Id).ToHashSet();
-            
+
             // Remove strings and consumption modifiers from formula before checking for variable references
             string cleanFormula = System.Text.RegularExpressions.Regex.Replace(formula, @"(['""])(?:(?=(\\?))\2.)*?\1", "");
             cleanFormula = System.Text.RegularExpressions.Regex.Replace(cleanFormula, @":consumption:[a-z0-9]+", "");
-            
+
             var segments = System.Text.RegularExpressions.Regex.Matches(cleanFormula, @"([a-zA-Z0-9\-_]+)")
                 .Cast<System.Text.RegularExpressions.Match>()
                 .Select(m => m.Value)
@@ -139,8 +139,8 @@ namespace Pulswerk.Core
 
             foreach (var segment in segments)
             {
-                if (double.TryParse(segment, out _) || 
-                    segment.Equals("pathsum", StringComparison.OrdinalIgnoreCase)) 
+                if (double.TryParse(segment, out _) ||
+                    segment.Equals("pathsum", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 // Check if segment refers to a known device
@@ -161,7 +161,7 @@ namespace Pulswerk.Core
                     // Check if it's potentially a local key of the current device.
                     // If the segment doesn't start with *any* known device ID, we assume it's local.
                     bool startsWithOtherDevice = allDeviceIds.Any(id => segment.StartsWith(id + "_"));
-                    
+
                     if (startsWithOtherDevice)
                     {
                         errors.Add($"{context}: Formula references unknown device in point '{segment}'.");

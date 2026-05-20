@@ -65,6 +65,42 @@ export async function submitAck(): Promise<void> {
     }
 }
 
+export async function resetAlarm(btn: HTMLElement): Promise<void> {
+    const alarmId = btn.dataset.alarmId;
+    if (!alarmId) return;
+
+    if (!confirm('Are you sure you want to reset this alarm?')) return;
+
+    const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement)?.value ?? '';
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = 'fas fa-spinner fa-spin';
+    btn.style.pointerEvents = 'none';
+    btn.style.opacity = '0.7';
+
+    try {
+        const resp = await fetch('?handler=Reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ alarmId })
+        });
+        const result = await resp.json();
+
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Failed to reset alarm: ' + (result.error ?? 'Unknown error'));
+            if (icon) icon.className = 'fas fa-redo';
+            btn.style.pointerEvents = '';
+            btn.style.opacity = '1';
+        }
+    } catch (err: any) {
+        alert('Request failed: ' + err.message);
+        if (icon) icon.className = 'fas fa-redo';
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '1';
+    }
+}
+
 export function initAlarmsPage(): void {
     const ackModal = document.getElementById('ackModal');
     if (ackModal) {
@@ -76,6 +112,7 @@ export function initAlarmsPage(): void {
     (window as any).openAck = openAck;
     (window as any).closeAck = closeAck;
     (window as any).submitAck = submitAck;
+    (window as any).resetAlarm = resetAlarm;
 }
 
 initAlarmsPage();

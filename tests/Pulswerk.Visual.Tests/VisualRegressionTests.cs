@@ -198,7 +198,7 @@ public class VisualRegressionTests : BrowserTestBase
             await scheduleBtn.ClickAsync();
             await Page.WaitForSelectorAsync("#scheduleModal", new() { State = WaitForSelectorState.Visible });
             await Page.WaitForSelectorAsync(".sched-day-row", new() { State = WaitForSelectorState.Visible });
-            
+
             await Page.ClickAsync("#btnEditSchedule");
             await Page.WaitForSelectorAsync("#editScheduleActions", new() { State = WaitForSelectorState.Visible });
             await Page.WaitForTimeoutAsync(300);

@@ -46,6 +46,7 @@ namespace Pulswerk.Core
         [JsonPropertyName("time")] public string Time { get; set; } = "";
         [JsonPropertyName("ackComment")] public string? AckComment { get; set; }
         [JsonPropertyName("bacnetAckKey")] public string? BacnetAckKey { get; set; }
+        [JsonPropertyName("telemetryKey")] public string? TelemetryKey { get; set; }
     }
 
     public class AssetNodeDto

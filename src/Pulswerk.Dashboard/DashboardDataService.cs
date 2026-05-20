@@ -216,13 +216,13 @@ namespace Pulswerk.Dashboard
                         string pointKey = $"{device.Id}_{k}";
                         if (units.TryGetValue(k, out var u))
                         {
-                        // Register key for metadata purposes and for calculation engine
-                        _calc.RegisterKey(pointKey, u);
+                            // Register key for metadata purposes and for calculation engine
+                            _calc.RegisterKey(pointKey, u);
+                        }
                     }
                 }
             }
         }
-    }
 
 
         public Dictionary<string, (double val, DateTime ts)> UpdateTelemetries(Dictionary<string, object> values, bool isPush = false)
@@ -696,7 +696,7 @@ namespace Pulswerk.Dashboard
                 {
                     var list = historyMap.TryGetValue(k, out var l) ? l : null;
                     if (list == null) continue;
-                    
+
                     int idx = iterators[k];
                     while (idx < list.Count && list[idx].Ts <= ts)
                     {
@@ -923,8 +923,8 @@ namespace Pulswerk.Dashboard
                 }
 
                 // Resolve calculated point within any device (physical or virtual)
-                var vdev = Config.Devices.FirstOrDefault(d => 
-                    keyWithoutModifier.StartsWith(d.Id + "_") && 
+                var vdev = Config.Devices.FirstOrDefault(d =>
+                    keyWithoutModifier.StartsWith(d.Id + "_") &&
                     d.Telemetries != null &&
                     d.Telemetries.Any(p => p.Id == keyWithoutModifier.Substring(d.Id.Length + 1))
                 );

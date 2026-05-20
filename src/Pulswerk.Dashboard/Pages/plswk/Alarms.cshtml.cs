@@ -46,7 +46,8 @@ namespace Pulswerk.Dashboard.Pages
                     Originator = a.Originator,
                     Time = DateTimeOffset.FromUnixTimeMilliseconds(a.CreatedAt).ToString("o"),
                     AckComment = a.AckComment,
-                    BacnetAckKey = a.BacnetAckKey
+                    BacnetAckKey = a.BacnetAckKey,
+                    TelemetryKey = a.Details != null && a.Details.Contains("\"telemetryKey\"") ? JsonSerializer.Deserialize<JsonElement>(a.Details).GetProperty("telemetryKey").GetString() : null
                 }).ToList();
 
                 var unacked = all.Where(a => a.Status == "ACTIVE_UNACK").ToList();
@@ -68,6 +69,30 @@ namespace Pulswerk.Dashboard.Pages
             {
                 Log.Error($"[Dashboard] Failed to fetch alarms: {ex.Message}");
             }
+        }
+
+        public IActionResult OnPostReset([FromBody] ResetRequest req)
+        {
+            if (!DashboardAuth.CanAckAlarm(HttpContext, _data.Config.Server))
+                return new JsonResult(new { success = false, error = "Forbidden" }) { StatusCode = 403 };
+
+            if (string.IsNullOrEmpty(req?.AlarmId))
+                return new JsonResult(new { success = false, error = "Missing alarm ID" });
+
+            try
+            {
+                bool ok = _data.AlarmStore.Clear(req.AlarmId);
+                return new JsonResult(new { success = ok });
+            }
+            catch (Exception ex)
+            {
+                return new JsonResult(new { success = false, error = ex.Message });
+            }
+        }
+
+        public class ResetRequest
+        {
+            public string AlarmId { get; set; } = "";
         }
 
         public IActionResult OnPostAck([FromBody] AckRequest req)
@@ -106,6 +131,12 @@ namespace Pulswerk.Dashboard.Pages
             public string AlarmId { get; set; } = "";
             public string Comment { get; set; } = "";
             public string? BacnetAckKey { get; set; }
+        }
+
+        public async Task<JsonResult> OnGetPropertiesAsync(string key)
+        {
+            var data = await _data.GetPropertiesAsync(key);
+            return new JsonResult(data);
         }
     }
 }

@@ -46,8 +46,8 @@ namespace Pulswerk.Storage
             if (string.IsNullOrEmpty(units)) return;
 
             string u = units.ToLowerInvariant().Trim();
-            if (u == "kwh" || u == "wh" || u == "mwh" || u == "gwh" || u == "btu" || u == "kj" || u == "j" || 
-                u == "m³" || u == "m3" || u == "cubic meters" || u == "cubic-meters" || 
+            if (u == "kwh" || u == "wh" || u == "mwh" || u == "gwh" || u == "btu" || u == "kj" || u == "j" ||
+                u == "m³" || u == "m3" || u == "cubic meters" || u == "cubic-meters" ||
                 u == "l" || u == "liters" || u == "gal" || u == "gallons" || u == "ft³" || u == "ft3")
             {
                 lock (_lock)

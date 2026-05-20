@@ -22,7 +22,7 @@ namespace Pulswerk.Dashboard
             var raw = ctx.Request.Headers["Remote-Groups"].FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(raw))
                 return raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-            
+
             return auth?.DefaultGroups ?? new List<string>();
         }
 
@@ -80,7 +80,7 @@ namespace Pulswerk.Dashboard
         {
             var rights = cfg?.Rights;
             if (rights == null || !rights.Enabled) return true;
-            
+
             var allowedGroups = rights.AllowConfigEdit ?? new List<string> { "admins" };
             if (allowedGroups.Count == 0) return false;
 

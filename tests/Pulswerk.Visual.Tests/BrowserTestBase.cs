@@ -32,8 +32,8 @@ public abstract class BrowserTestBase
     {
         _playwright = await Playwright.CreateAsync();
         var wsEndpoint = $"{BrowserlessUrl}/chromium?token={BrowserlessToken}";
-        
-        try 
+
+        try
         {
             _browser = await _playwright.Chromium.ConnectOverCDPAsync(wsEndpoint);
             EffectiveDashboardUrl = "http://pulswerk:5000";

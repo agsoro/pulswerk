@@ -4,8 +4,10 @@
 //  dashboard, then hands off to DevicePoller for the actual read loops.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.BACnet;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -15,8 +17,6 @@ using Pulswerk.Dashboard;
 using Pulswerk.Drivers;
 using Pulswerk.Drivers.BACnet;
 using Pulswerk.Storage;
-using System.IO.BACnet;
-using System.Collections.Concurrent;
 
 namespace Pulswerk.Host
 {
@@ -129,7 +129,7 @@ namespace Pulswerk.Host
 
                 string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
                 if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
-                
+
                 string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
                 if (File.Exists(overridePath))
                 {
