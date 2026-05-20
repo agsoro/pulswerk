@@ -223,10 +223,15 @@ namespace Pulswerk.Drivers.BACnet
         /// </summary>
         public static BacnetValue ToWriteValue(BacnetObjectTypes objectType, double value)
         {
-            if (IsEnumerated(objectType))
+            if (IsBinary(objectType))
                 return new BacnetValue(
                     BacnetApplicationTags.BACNET_APPLICATION_TAG_ENUMERATED,
-                    (uint)(IsBinary(objectType) ? (value != 0 ? 1 : 0) : Math.Round(value)));
+                    (uint)(value != 0 ? 1 : 0));
+
+            if (IsMultiState(objectType))
+                return new BacnetValue(
+                    BacnetApplicationTags.BACNET_APPLICATION_TAG_UNSIGNED_INT,
+                    (uint)Math.Round(value));
 
             return new BacnetValue(
                 BacnetApplicationTags.BACNET_APPLICATION_TAG_REAL,
