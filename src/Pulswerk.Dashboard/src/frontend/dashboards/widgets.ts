@@ -93,6 +93,26 @@ export async function renderTimeseries(w: IWidget, body: HTMLElement, cfg: IWidg
 
     const yAxisOpts = calculateYAxisConstraints(series);
 
+    const isRealtime = !DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime';
+    const realtimeMs = DashboardStore.dashTw ? DashboardStore.dashTw.realtimeMs : 3600000;
+
+    const xaxisConfig: any = {
+        type: 'datetime',
+        labels: { datetimeUTC: false, style: { colors: '#64748b', fontSize: '10px' } },
+        axisBorder: { show: false },
+        axisTicks: { show: false }
+    };
+
+    if (isRealtime) {
+        xaxisConfig.range = realtimeMs;
+        xaxisConfig.min = undefined;
+        xaxisConfig.max = undefined;
+    } else {
+        xaxisConfig.min = startTs;
+        xaxisConfig.max = endTs;
+        xaxisConfig.range = undefined;
+    }
+
     // Update existing chart if it still has a valid DOM element
     const existingChart = DashboardStore.charts[w.id];
     if (existingChart) {
@@ -101,14 +121,10 @@ export async function renderTimeseries(w: IWidget, body: HTMLElement, cfg: IWidg
             const chartEl = document.getElementById('chart_' + w.id);
             if (chartEl && chartEl.querySelector('.apexcharts-canvas')) {
                 existingChart.updateOptions({
-                    xaxis: {
-                        type: 'datetime', min: startTs, max: endTs,
-                        labels: { datetimeUTC: false, style: { colors: '#64748b', fontSize: '10px' } },
-                        axisBorder: { show: false }, axisTicks: { show: false }
-                    },
+                    xaxis: xaxisConfig,
                     yaxis: yAxisOpts,
                     series: series
-                }, true, false);
+                }, true, true);
                 return;
             }
             // Chart container was destroyed – clean up and recreate
@@ -151,13 +167,7 @@ export async function renderTimeseries(w: IWidget, body: HTMLElement, cfg: IWidg
             yaxis: { lines: { show: true } },
             padding: { top: 0, right: 0, bottom: 0, left: 10 }
         },
-        xaxis: {
-            type: 'datetime',
-            min: startTs, max: endTs,
-            labels: { datetimeUTC: false, style: { colors: '#64748b', fontSize: '10px' } },
-            axisBorder: { show: false },
-            axisTicks: { show: false },
-        },
+        xaxis: xaxisConfig,
         yaxis: yAxisOpts,
         annotations: {
             yaxis: [{
@@ -185,11 +195,76 @@ export async function renderTimeseries(w: IWidget, body: HTMLElement, cfg: IWidg
     const chart = new (window as any).ApexCharts(chartEl, options);
     DashboardStore.charts[w.id] = chart;  // register BEFORE render to prevent concurrent creation
     chart.render().then(() => {
-        setTimeout(() => chart.windowResize?.(), 200);
+        setTimeout(() => {
+            chart.windowResize?.();
+            window.dispatchEvent(new Event('resize'));
+        }, 100);
+        setTimeout(() => {
+            chart.windowResize?.();
+            window.dispatchEvent(new Event('resize'));
+        }, 500);
     }).catch((e: any) => {
         console.error('Chart render failed for', w.id, e);
         delete DashboardStore.charts[w.id];
     });
+}
+
+export function appendTimeseriesData(w: IWidget, newData: Record<string, string>): void {
+    const chart = DashboardStore.charts[w.id];
+    if (!chart) return;
+    
+    const cfg = w.config || {};
+    const keys = cfg.keys || [];
+    if (!keys.length) return;
+
+    const isRealtime = !DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime';
+    const realtimeMs = DashboardStore.dashTw ? DashboardStore.dashTw.realtimeMs : 3600000;
+
+    let hasUpdate = false;
+    const now = Date.now();
+    const cutoff = now - realtimeMs;
+
+    const currentSeries = chart.w?.config?.series || [];
+
+    const updatedSeries = keys.map((key, i) => {
+        const existing = currentSeries[i] || { name: key, data: [] };
+        let points: { x: number, y: number }[] = [];
+        
+        if (Array.isArray(existing.data)) {
+            points = existing.data.map((p: any) => {
+                if (p && typeof p === 'object') {
+                    if (p.x !== undefined && p.y !== undefined) {
+                        return { x: Number(p.x), y: Number(p.y) };
+                    }
+                    if (Array.isArray(p) && p.length >= 2) {
+                        return { x: Number(p[0]), y: Number(p[1]) };
+                    }
+                }
+                return null;
+            }).filter((p: any) => p !== null && !isNaN(p.x) && !isNaN(p.y));
+        }
+
+        if (newData[key] !== undefined) {
+            const val = parseFloat(newData[key]);
+            if (!isNaN(val)) {
+                hasUpdate = true;
+                points.push({ x: now, y: parseFloat(val.toFixed(2)) });
+            }
+        }
+
+        if (isRealtime) {
+            points = points.filter((p: any) => p.x >= cutoff);
+        }
+
+        return {
+            name: existing.name || key,
+            data: points
+        };
+    });
+
+    if (hasUpdate) {
+        chart.updateSeries(updatedSeries, true);
+    }
 }
 
 export async function renderLatestValues(_w: IWidget, body: HTMLElement, cfg: IWidgetConfig): Promise<void> {
@@ -227,7 +302,7 @@ export function getTimeRange(): { startTs: number; endTs: number } {
 
 // Keep exporting globally for older scripts and Razor pages until they are converted to ES Modules
 Object.assign(window, {
-    renderAllWidgets, addWidgetToGrid, renderWidgetContent, renderTimeseries,
+    renderAllWidgets, addWidgetToGrid, renderWidgetContent, renderTimeseries, appendTimeseriesData,
     renderLatestValues, updateLatestValues, renderSingleValue, updateSingleValue,
     miniSparkSvg, getTimeRange
 });

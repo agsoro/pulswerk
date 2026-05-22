@@ -426,10 +426,10 @@ public class BacnetValueConverterTests
     [Theory]
     [InlineData(BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE)]
     [InlineData(BacnetObjectTypes.OBJECT_MULTI_STATE_OUTPUT)]
-    public void ToWriteValue_MultiState_UsesEnumeratedTag(BacnetObjectTypes type)
+    public void ToWriteValue_MultiState_UsesUnsignedIntTag(BacnetObjectTypes type)
     {
         var bv = BacnetValueConverter.ToWriteValue(type, 3.0);
-        Assert.Equal(BacnetApplicationTags.BACNET_APPLICATION_TAG_ENUMERATED, bv.Tag);
+        Assert.Equal(BacnetApplicationTags.BACNET_APPLICATION_TAG_UNSIGNED_INT, bv.Tag);
         Assert.Equal((uint)3, bv.Value);
     }
 
@@ -670,14 +670,14 @@ public class BacnetValueConverterTests
     {
         var stateText = new List<string> { "Auto", "Manual", "Off" };
 
-        // "Manual" → internal 2 → BacnetValue(ENUMERATED, 2) → FormatValue → "Manual"
+        // "Manual" → internal 2 → BacnetValue(UNSIGNED_INT, 2) → FormatValue → "Manual"
         double internalVal = BacnetValueConverter.FromDisplayValue(
             BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE, "Manual", stateText);
         Assert.Equal(2.0, internalVal);
 
         var bv = BacnetValueConverter.ToWriteValue(
             BacnetObjectTypes.OBJECT_MULTI_STATE_VALUE, internalVal);
-        Assert.Equal(BacnetApplicationTags.BACNET_APPLICATION_TAG_ENUMERATED, bv.Tag);
+        Assert.Equal(BacnetApplicationTags.BACNET_APPLICATION_TAG_UNSIGNED_INT, bv.Tag);
         Assert.Equal(2u, bv.Value);
 
         var displayResult = BacnetValueConverter.FormatValue(

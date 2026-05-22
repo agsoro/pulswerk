@@ -2,8 +2,10 @@
 import { h, render } from 'preact';
 import { DashCard } from './components/DashCard';
 import { PointCard } from './components/PointCard';
+import { DashboardService } from '../dashboards/api';
 let allPoints = [];
 let allDashboards = [];
+let liveUnsubscribe = null;
 export async function loadFavoriteDashboards() {
     const favIds = window.pw_fav.get('pw_fav_dashboards');
     const list = document.getElementById('favoriteDashList');
@@ -18,7 +20,7 @@ export async function loadFavoriteDashboards() {
     list.style.display = 'grid';
     empty.style.display = 'none';
     try {
-        const response = await fetch('/plswk/Dashboards?handler=List');
+        const response = await fetch('/plswk/api/dashboards');
         allDashboards = await response.json();
         list.innerHTML = '';
         favIds.forEach(id => {
@@ -37,6 +39,10 @@ function renderDashCard(d, container) {
     render(h(DashCard, { dashboard: d }), wrapper);
 }
 export async function loadFavorites() {
+    if (liveUnsubscribe) {
+        liveUnsubscribe();
+        liveUnsubscribe = null;
+    }
     const favKeys = window.pw_fav.get('deziko_favorites');
     const list = document.getElementById('favoritesList');
     const empty = document.getElementById('emptyFavorites');
@@ -50,23 +56,26 @@ export async function loadFavorites() {
     list.style.display = 'grid';
     empty.style.display = 'none';
     try {
-        const response = await fetch('?handler=Tree');
-        const trees = await response.json();
-        allPoints = [];
-        const extractPoints = (nodes) => {
-            nodes.forEach(n => {
-                if (n.telemetries)
-                    allPoints.push(...n.telemetries);
-                if (n.children)
-                    extractPoints(n.children);
-            });
-        };
-        extractPoints(trees);
+        const response = await fetch(`/plswk/api/telemetries?keys=${encodeURIComponent(favKeys.join(','))}&includeLiveValues=true`);
+        allPoints = await response.json();
         list.innerHTML = '';
-        favKeys.forEach(key => {
-            const point = allPoints.find(p => p.key === key);
-            if (point)
-                renderPoint(point, list);
+        allPoints.forEach(point => {
+            renderPoint(point, list);
+        });
+        // Subscribe to live SSE updates for the favorite keys
+        liveUnsubscribe = DashboardService.listenToLiveUpdates(favKeys, (newData) => {
+            Object.entries(newData).forEach(([key, val]) => {
+                const el = document.querySelector(`.point-value[data-key="${key}"]`);
+                if (el) {
+                    el.textContent = PulswerkValue.formatDisplay(val, el.dataset.type || '');
+                }
+                if (window.currentHistoryKey === key &&
+                    document.getElementById('historyModal')?.style.display === 'flex') {
+                    const lv = document.getElementById('chartLiveValue');
+                    if (lv)
+                        lv.textContent = PulswerkValue.formatDisplay(val, el?.dataset.type || '');
+                }
+            });
         });
     }
     catch (err) {
@@ -78,37 +87,9 @@ function renderPoint(point, container) {
     container.appendChild(wrapper);
     render(h(PointCard, { point, variant: 'index' }), wrapper);
 }
-async function refreshValues() {
-    try {
-        const response = await fetch('?handler=Tree');
-        const newTrees = await response.json();
-        const updateValues = (nodes) => {
-            nodes.forEach(node => {
-                if (node.telemetries) {
-                    node.telemetries.forEach((p) => {
-                        const el = document.querySelector(`.point-value[data-key="${p.key}"]`);
-                        if (el)
-                            el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
-                        if (window.currentHistoryKey === p.key &&
-                            document.getElementById('historyModal')?.style.display === 'flex') {
-                            const lv = document.getElementById('chartLiveValue');
-                            if (lv)
-                                lv.textContent = PulswerkValue.formatDisplay(p.value, p.type);
-                        }
-                    });
-                }
-                if (node.children)
-                    updateValues(node.children);
-            });
-        };
-        updateValues(newTrees);
-    }
-    catch (err) { /* silently ignore */ }
-}
 export function initIndexPage() {
     loadFavorites();
     loadFavoriteDashboards();
-    setInterval(refreshValues, 2000);
     window.loadFavorites = loadFavorites;
     window.loadFavoriteDashboards = loadFavoriteDashboards;
 }

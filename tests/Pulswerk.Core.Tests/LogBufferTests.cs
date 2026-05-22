@@ -52,15 +52,13 @@ namespace Connector.Tests
             for (int i = 0; i < 10; i++)
                 buf.Add(new LogEntry(DateTime.UtcNow, LogSeverity.Info, $"msg{i}", ""));
 
-            // GetLatest returns the first N entries from the chronological ring
-            // When buffer isn't full, start = (_head - _count + _capacity) % _capacity
-            // = (10 - 10 + 100) % 100 = 0, so it returns msg0, msg1, msg2
+            // GetLatest returns the latest N entries from the chronological ring (msg7, msg8, msg9)
             var latest = buf.GetLatest(3);
 
             Assert.Equal(3, latest.Count);
-            Assert.Equal("msg0", latest[0].Message);
-            Assert.Equal("msg1", latest[1].Message);
-            Assert.Equal("msg2", latest[2].Message);
+            Assert.Equal("msg7", latest[0].Message);
+            Assert.Equal("msg8", latest[1].Message);
+            Assert.Equal("msg9", latest[2].Message);
         }
 
         [Fact]

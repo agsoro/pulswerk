@@ -232,7 +232,9 @@ namespace Pulswerk.Host
                 influxUrl, influxToken, influxOrg, influxBucket,
                 dbCfg.RetentionDays, dbCfg.CompactionAfterDays);
 
-            string alarmDbPath = Path.Combine(AppContext.BaseDirectory, "alarms.db");
+            string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+            if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+            string alarmDbPath = Path.Combine(dataDir, "alarms.db");
             _alarmStore = new AlarmStore(alarmDbPath);
 
             Log.Info($"InfluxDB: {influxUrl} org={influxOrg} bucket={influxBucket}");

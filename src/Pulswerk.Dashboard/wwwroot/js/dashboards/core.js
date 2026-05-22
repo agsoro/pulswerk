@@ -131,13 +131,43 @@ export async function showDashboard() {
         btn.querySelector('i').style.color = isFav ? '#fbbf24' : '';
         btn.style.display = window.pwCanEditFavorites ? 'flex' : 'none';
     }
-    if (!window.allKeys?.length) {
+    const keysUsed = new Set();
+    if (DashboardStore.dashboard?.widgets) {
+        DashboardStore.dashboard.widgets.forEach((w) => {
+            if (w.config?.keys)
+                w.config.keys.forEach((k) => keysUsed.add(k));
+            if (w.config?.key)
+                keysUsed.add(w.config.key);
+            if (w.config?.rules) {
+                w.config.rules.forEach((r) => {
+                    if (r.telemetryKeys)
+                        r.telemetryKeys.forEach((k) => keysUsed.add(k));
+                    if (r.telemetryKey)
+                        keysUsed.add(r.telemetryKey);
+                });
+            }
+            if (w.config?.animationRules) {
+                w.config.animationRules.forEach((r) => {
+                    if (r.telemetryKeys)
+                        r.telemetryKeys.forEach((k) => keysUsed.add(k));
+                    if (r.telemetryKey)
+                        keysUsed.add(r.telemetryKey);
+                });
+            }
+        });
+    }
+    if (keysUsed.size > 0) {
         try {
-            window.allKeys = await DashboardService.fetchAvailableTelemetries();
+            const neededMeta = await DashboardService.fetchAvailableTelemetries(Array.from(keysUsed));
+            const existing = window.allKeys || [];
+            const merged = [...existing];
+            neededMeta.forEach((m) => {
+                if (!merged.some(x => x.key === m.key))
+                    merged.push(m);
+            });
+            window.allKeys = merged;
         }
-        catch (e) {
-            window.allKeys = [];
-        }
+        catch (e) { }
     }
     initGrid();
     if (DashboardStore.dashboard.widgets?.length) {
@@ -218,21 +248,64 @@ export async function saveDashboard() {
     location.href = `/plswk/Dashboards/${DashboardStore.dashboard.id}/${slugify(DashboardStore.dashboard.name)}`;
 }
 // ── POLLING ──────────────────────────────────────────────────────────────
-export function startPolling() { if (DashboardStore.pollTimer)
-    clearInterval(DashboardStore.pollTimer); DashboardStore.pollTimer = setInterval(refreshAllWidgets, 10000); }
+export function startPolling() {
+    if (DashboardStore.pollTimer) {
+        if (typeof DashboardStore.pollTimer === 'function') {
+            DashboardStore.pollTimer(); // unsubscribe
+        }
+        else {
+            clearInterval(DashboardStore.pollTimer);
+        }
+    }
+    if (!DashboardStore.dashboard?.widgets)
+        return;
+    const allKeys = new Set();
+    DashboardStore.dashboard.widgets.forEach((w) => {
+        if (w.type === 'timeseries' || w.type === 'scada-point') {
+            if (w.config?.keys)
+                w.config.keys.forEach((k) => allKeys.add(k));
+        }
+        else if (w.type === 'background-svg') {
+            if (w.config?.animationRules) {
+                w.config.animationRules.forEach((r) => {
+                    if (r.telemetryKeys)
+                        r.telemetryKeys.forEach((k) => allKeys.add(k));
+                    if (r.telemetryKey)
+                        allKeys.add(r.telemetryKey);
+                });
+            }
+        }
+    });
+    DashboardStore.pollTimer = DashboardService.listenToLiveUpdates(Array.from(allKeys), (newData) => {
+        if (!DashboardStore.dashboard?.widgets)
+            return;
+        DashboardStore.dashboard.widgets.forEach((w) => {
+            if (w.type === 'timeseries' && (!DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime')) {
+                if (window.appendTimeseriesData) {
+                    window.appendTimeseriesData(w, newData);
+                }
+            }
+        });
+        if (window.updateAllScadaPointsWithData) {
+            window.updateAllScadaPointsWithData(newData);
+        }
+        if (window.updateAllSvgAnimations) {
+            window.updateAllSvgAnimations(newData);
+        }
+    });
+}
 export function refreshAllWidgets() {
     if (!DashboardStore.dashboard?.widgets)
         return;
     DashboardStore.dashboard.widgets.forEach((w) => {
-        if (w.type === 'timeseries' && (!DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime'))
+        if (w.type === 'timeseries')
             window.renderTimeseries(w, document.getElementById('wb_' + w.id), w.config || {});
-        else if (w.type === 'latest-values')
-            window.updateLatestValues(w, w.config || {});
-        else if (w.type === 'single-value')
-            window.updateSingleValue(w, w.config || {});
+        // LatestValuesWidget and SingleValueWidget handle their own initial fetch in Preact
     });
     window.updateAllScadaPoints();
-    window.updateAllSvgAnimations();
+    if (window.updateAllSvgAnimations) {
+        window.updateAllSvgAnimations();
+    }
 }
 // ── HELPERS ──────────────────────────────────────────────────────────────
 // esc() and friendlyName() are provided by base.js
@@ -270,7 +343,7 @@ export function updateHistoryLiveValue(key, value) {
 Object.assign(window, {
     initDashboards, loadList, toggleFavoriteDash, createDashboard, confirmCreate, deleteDash,
     showDashboard, initGrid, enterEditMode, cancelEdit, saveDashboard, startPolling, refreshAllWidgets,
-    keyName, hexToRgba, timeAgo, slugify, updateHistoryLiveValue, api, token, COLORS, DashboardStore
+    keyName, hexToRgba, timeAgo, slugify, updateHistoryLiveValue, api, token, COLORS, DashboardStore, DashboardService
 });
 // Deprecated Global Accessors (to be removed once all files use DashboardStore directly)
 Object.defineProperties(window, {

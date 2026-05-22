@@ -17,7 +17,7 @@ public abstract class BrowserTestBase
 
     /// <summary>Connection URL for the Browserless container (CDP endpoint).</summary>
     private static string BrowserlessUrl =>
-        Environment.GetEnvironmentVariable("BROWSERLESS_URL") ?? "ws://localhost:3000";
+        Environment.GetEnvironmentVariable("BROWSERLESS_URL") ?? "ws://127.0.0.1:3000";
 
     /// <summary>Auth token for Browserless.</summary>
     private static string BrowserlessToken =>
@@ -31,7 +31,8 @@ public abstract class BrowserTestBase
     public async Task SetUpBrowser()
     {
         _playwright = await Playwright.CreateAsync();
-        var wsEndpoint = $"{BrowserlessUrl}/chromium?token={BrowserlessToken}";
+        var launchOptions = "{\"defaultViewport\":{\"width\":1920,\"height\":1080},\"args\":[\"--window-size=1920,1080\"]}";
+        var wsEndpoint = $"{BrowserlessUrl}/chromium?token={BrowserlessToken}&launch={System.Uri.EscapeDataString(launchOptions)}";
 
         try
         {
@@ -46,12 +47,10 @@ public abstract class BrowserTestBase
             EffectiveDashboardUrl = "http://localhost:5000";
         }
 
-        var context = _browser.Contexts.Count > 0
-            ? _browser.Contexts[0]
-            : await _browser.NewContextAsync(new BrowserNewContextOptions
-            {
-                ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
-            });
+        var context = await _browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
+        });
 
         Page = await context.NewPageAsync();
         Page.SetDefaultTimeout(60000);
@@ -173,10 +172,10 @@ public static class Pages
 {
     public static readonly PageInfo[] All =
     [
-        new("Dashboard",   "/plswk/",            "Dashboard"),
+        new("Dashboard",   "/plswk/",            "Home"),
         new("Dashboards",  "/plswk/Dashboards",  "Dashboards"),
         new("Assets",      "/plswk/Assets",      "Assets"),
-        new("Inventory",   "/plswk/AssetsList",  "Asset Inventory"),
+        new("Inventory",   "/plswk/TelemetryList", "Data Points"),
         new("Connections", "/plswk/Connections",  "Connections"),
         new("Alarms",      "/plswk/Alarms",      "Active Alarms"),
         new("Logs",        "/plswk/Logs",         "System Logs"),

@@ -1,8 +1,17 @@
 // @ts-nocheck
+import { DashboardService } from './api';
 // picker.js – Data key selection and ordering logic
 
 async function loadKeyPicker(): Promise<void> {
-    if (!allKeys.length) { try { allKeys = await api('AvailableTelemetries'); } catch (e) { allKeys = []; } }
+    if (!(window as any).allKeysLoaded) {
+        try {
+            allKeys = await DashboardService.fetchAvailableTelemetries();
+            (window as any).allKeys = allKeys;
+            (window as any).allKeysLoaded = true;
+        } catch (e) {
+            allKeys = (window as any).allKeys || [];
+        }
+    }
     
     // Default to rendering selected keys in sorted view
     const selected = activeKeyOrder.map(key => allKeys.find(k => k.key === key)).filter(Boolean);

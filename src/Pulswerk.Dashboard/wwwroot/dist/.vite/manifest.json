@@ -6,6 +6,10 @@
       "_jsxRuntime.module.chunk.js"
     ]
   },
+  "_api.chunk.js": {
+    "file": "js/api.chunk.js",
+    "name": "api"
+  },
   "_hooks.module.chunk.js": {
     "file": "js/hooks.module.chunk.js",
     "name": "hooks.module",
@@ -23,6 +27,7 @@
     "src": "src/frontend/dashboards.entry.ts",
     "isEntry": true,
     "imports": [
+      "_api.chunk.js",
       "_jsxRuntime.module.chunk.js",
       "_hooks.module.chunk.js"
     ]
@@ -43,7 +48,10 @@
     "file": "js/assets.page.bundle.js",
     "name": "assets.page",
     "src": "src/frontend/pages/assets.page.ts",
-    "isEntry": true
+    "isEntry": true,
+    "imports": [
+      "_api.chunk.js"
+    ]
   },
   "src/frontend/pages/config.page.tsx": {
     "file": "js/config.page.bundle.js",
@@ -62,7 +70,8 @@
     "isEntry": true,
     "imports": [
       "_jsxRuntime.module.chunk.js",
-      "_PointCard.chunk.js"
+      "_PointCard.chunk.js",
+      "_api.chunk.js"
     ]
   },
   "src/frontend/pages/heartbeat.page.ts": {
@@ -78,7 +87,8 @@
     "isEntry": true,
     "imports": [
       "_jsxRuntime.module.chunk.js",
-      "_PointCard.chunk.js"
+      "_PointCard.chunk.js",
+      "_api.chunk.js"
     ]
   },
   "src/frontend/pages/logs.page.ts": {

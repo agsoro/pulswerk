@@ -18,16 +18,39 @@ namespace Pulswerk.Dashboard.Pages
         }
 
         public List<LogEntryDto> Logs { get; private set; } = new();
+        public string CurrentLevel { get; private set; } = "all";
 
-        public void OnGet()
+        public void OnGet([FromQuery] string? level)
         {
-            Logs = _data.LogBuffer.GetLatest(500).Select(l => new LogEntryDto
+            CurrentLevel = level ?? "all";
+            var allLogs = _data.LogBuffer.GetAll();
+
+            if (CurrentLevel != "all")
             {
-                Timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                Severity = l.Severity.ToString().ToLowerInvariant(),
-                Message = l.Message,
-                Source = l.Source
-            }).ToList();
+                if (CurrentLevel == "info")
+                {
+                    allLogs = allLogs.Where(l => l.Severity != LogSeverity.Debug).ToList();
+                }
+                else if (CurrentLevel == "warning")
+                {
+                    allLogs = allLogs.Where(l => l.Severity == LogSeverity.Warning || l.Severity == LogSeverity.Error).ToList();
+                }
+                else if (CurrentLevel == "error")
+                {
+                    allLogs = allLogs.Where(l => l.Severity == LogSeverity.Error).ToList();
+                }
+            }
+
+            Logs = allLogs.OrderByDescending(l => l.Timestamp)
+                          .Take(500)
+                          .Reverse()
+                          .Select(l => new LogEntryDto
+                          {
+                              Timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                              Severity = l.Severity.ToString().ToLowerInvariant(),
+                              Message = l.Message,
+                              Source = l.Source
+                          }).ToList();
         }
     }
 }

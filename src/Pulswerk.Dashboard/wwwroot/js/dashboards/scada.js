@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { DashboardService } from './api';
 import './scada/scada.animation.editor';
 // scada.js – SCADA Background SVGs and Data Points
 // ── SCADA: BACKGROUND SVG ────────────────────────────────────────────────
@@ -259,7 +260,7 @@ export function renderScadaPoint(w) {
             <span style="flex:1;font-size:0.68rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${esc(name)}</span>
             <span class="sp-val" data-key="${key}">---</span>
             ${units ? `<span class="sp-unit">${esc(units)}</span>` : ''}
-            <i class="fas fa-info-circle sp-info" onclick="event.stopPropagation();showScadaPopup('${key}',this)"></i>
+            <i class="fas fa-info-circle sp-info" data-key="${esc(key)}" onclick="event.stopPropagation();showScadaPopup(this.dataset.key || '',this)"></i>
         </div>`;
     });
     html += '</div>';
@@ -373,7 +374,7 @@ async function updateScadaPointValues(w) {
         return;
     let data;
     try {
-        data = await api(`LatestValues&keys=${keys.join(',')}`);
+        data = await DashboardService.fetchLatestValues(keys);
     }
     catch (e) {
         return;
@@ -409,36 +410,53 @@ async function updateAllScadaPoints() {
         return;
     let data;
     try {
-        data = await api(`LatestValues&keys=${allScadaKeys.join(',')}`);
+        data = await DashboardService.fetchLatestValues(allScadaKeys);
     }
     catch (e) {
         return;
     }
     scadaWidgets.forEach(w => renderScadaValues(w.id, w.config?.keys || [], data));
 }
+function updateAllScadaPointsWithData(newData) {
+    if (!dashboard?.widgets)
+        return;
+    const scadaWidgets = dashboard.widgets.filter(w => w.type === 'scada-point');
+    scadaWidgets.forEach(w => {
+        const keys = w.config?.keys || [];
+        keys.forEach((key) => {
+            if (newData[key] !== undefined) {
+                renderScadaValues(w.id, [key], newData);
+            }
+        });
+    });
+}
 async function showScadaPopup(key, triggerEl) {
     hideScadaPopup();
     const popup = document.getElementById('scadaPopup'), content = document.getElementById('scadaPopupContent');
     if (!popup || !content)
         return;
-    if (!allKeys.length) {
+    if (!window.allKeysLoaded && !allKeys.some(k => k.key === key)) {
         try {
-            allKeys = await api('AvailableKeys');
+            allKeys = await DashboardService.fetchAvailableTelemetries();
+            window.allKeys = allKeys;
+            window.allKeysLoaded = true;
         }
         catch (e) {
-            allKeys = [];
+            allKeys = window.allKeys || [];
         }
     }
-    const meta = allKeys.find(k => k.key === key) || { key, name: key }, icon = typeof getPointIcon === 'function' ? getPointIcon(meta.type || '') : '<i class="fas fa-microchip"></i>', keyJs = key.replace(/'/g, "\\'");
+    const meta = allKeys.find(k => k.key === key) || { key, name: key }, icon = typeof getPointIcon === 'function' ? getPointIcon(meta.type || '') : '<i class="fas fa-microchip"></i>';
     const pp = meta.parentPath || [], pathHtml = pp.map((p, i) => `<a href="/plswk/Assets?node=${p.id}" style="color:inherit;text-decoration:none">${esc(p.name)}</a>${i < pp.length - 1 ? '<i class="fas fa-chevron-right" style="margin:0 0.4rem;font-size:0.55rem;opacity:0.4"></i>' : ''}`).join('');
     let currentVal = '---';
     try {
-        const data = await api(`LatestValues&keys=${key}`), raw = data?.[key];
-        if (raw != null)
+        const data = await DashboardService.fetchLatestValues(key);
+        const raw = data?.[key];
+        if (raw != null) {
             currentVal = PulswerkValue.formatDisplay(raw, meta.type);
+        }
     }
     catch (e) { }
-    content.innerHTML = `<div class="sv-card" style="height:auto"><div class="sv-card-path">${pathHtml || '<span style="opacity:0.4">\u2014</span>'}</div><div class="sv-card-body"><div class="sv-card-icon">${icon}</div><div class="sv-card-info"><div class="sv-card-name">${esc(meta.name || friendlyName(key))}</div><div class="sv-card-fullname">${esc(meta.fullName || key)}</div></div><div class="sv-card-valbox"><span class="sv-card-val">${esc(currentVal)}</span><span class="sv-card-units">${esc(meta.units || '')}</span></div></div><div class="sv-card-actions"><button class="btn-icon" title="Trend" onclick="hideScadaPopup();openHistory('${keyJs}')"><i class="fas fa-chart-area"></i></button>${meta.isWritable ? `<button class="btn-icon" title="Edit" onclick="hideScadaPopup();openEdit('${keyJs}')"><i class="fas fa-pen"></i></button>` : ''}<button class="btn-icon" title="Properties" onclick="hideScadaPopup();openProperties('${keyJs}')"><i class="fas fa-cog"></i></button></div></div>`;
+    content.innerHTML = `<div class="sv-card" style="height:auto"><div class="sv-card-path">${pathHtml || '<span style="opacity:0.4">\u2014</span>'}</div><div class="sv-card-body"><div class="sv-card-icon">${icon}</div><div class="sv-card-info"><div class="sv-card-name">${esc(meta.name || friendlyName(key))}</div><div class="sv-card-fullname">${esc(meta.fullName || key)}</div></div><div class="sv-card-valbox"><span class="sv-card-val">${esc(currentVal)}</span><span class="sv-card-units">${esc(meta.units || '')}</span></div></div><div class="sv-card-actions"><button class="btn-icon" title="Trend" data-key="${esc(key)}" onclick="hideScadaPopup();openHistory(this.dataset.key || '')"><i class="fas fa-chart-area"></i></button>${meta.isWritable ? `<button class="btn-icon" title="Edit" data-key="${esc(key)}" onclick="hideScadaPopup();openEdit(this.dataset.key || '')"><i class="fas fa-pen"></i></button>` : ''}<button class="btn-icon" title="Properties" data-key="${esc(key)}" onclick="hideScadaPopup();openProperties(this.dataset.key || '')"><i class="fas fa-cog"></i></button></div></div>`;
     const rect = triggerEl.getBoundingClientRect();
     popup.style.left = Math.min(rect.right + 8, window.innerWidth - 360) + 'px';
     popup.style.top = Math.max(rect.top - 20, 8) + 'px';
@@ -691,9 +709,9 @@ function parseSvgElementIds(svgContent) {
         return [];
     }
 }
-async function updateAllSvgAnimations() {
+async function updateAllSvgAnimations(newData) {
     if (window.ScadaAnimationController)
-        await window.ScadaAnimationController.updateAll();
+        await window.ScadaAnimationController.updateAll(newData);
 }
 function toggleIdPicker(wid) {
     if (window.ScadaPickerController)
@@ -739,6 +757,7 @@ window.updateEdgeDotVisibility = updateEdgeDotVisibility;
 window.updateScadaPointValues = updateScadaPointValues;
 window.renderScadaValues = renderScadaValues;
 window.updateAllScadaPoints = updateAllScadaPoints;
+window.updateAllScadaPointsWithData = updateAllScadaPointsWithData;
 window.showScadaPopup = showScadaPopup;
 window.hideScadaPopup = hideScadaPopup;
 window.initScadaPointDrag = initScadaPointDrag;

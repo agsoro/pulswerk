@@ -9,6 +9,7 @@ namespace Pulswerk.Core
         [JsonPropertyName("offlineDevices")] public int OfflineDevices { get; set; }
         [JsonPropertyName("activeAlarms")] public int ActiveAlarms { get; set; }
         [JsonPropertyName("connectorVersion")] public string ConnectorVersion { get; set; } = "";
+        [JsonPropertyName("version")] public string Version { get; set; } = "";
         [JsonPropertyName("uptimeSeconds")] public long UptimeSeconds { get; set; }
         [JsonPropertyName("logBufferSize")] public int LogBufferSize { get; set; }
         [JsonPropertyName("logBufferCapacity")] public int LogBufferCapacity { get; set; }
@@ -119,5 +120,40 @@ namespace Pulswerk.Core
         [JsonPropertyName("lastUpdate")] public string LastUpdate { get; set; } = "";
         [JsonPropertyName("isWritable")] public bool IsWritable { get; set; }
         [JsonPropertyName("enumValues")] public List<string>? EnumValues { get; set; }
+    }
+
+    public class CreateDashboardRequestDto
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = "";
+        [JsonPropertyName("description")] public string? Description { get; set; }
+    }
+
+    public class DeleteDashboardRequestDto
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = "";
+    }
+
+    public class WriteTelemetryRequestDto
+    {
+        [JsonPropertyName("key")] public string Key { get; set; } = "";
+        [JsonPropertyName("value")] public double Value { get; set; }
+    }
+
+    public class WriteComplexTelemetryRequestDto
+    {
+        [JsonPropertyName("key")] public string Key { get; set; } = "";
+        [JsonPropertyName("value")] public object Value { get; set; } = null!;
+    }
+
+    public class AlarmResetRequestDto
+    {
+        [JsonPropertyName("alarmId")] public string AlarmId { get; set; } = "";
+    }
+
+    public class AlarmAckRequestDto
+    {
+        [JsonPropertyName("alarmId")] public string AlarmId { get; set; } = "";
+        [JsonPropertyName("comment")] public string Comment { get; set; } = "";
+        [JsonPropertyName("bacnetAckKey")] public string? BacnetAckKey { get; set; }
     }
 }

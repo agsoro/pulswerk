@@ -6,43 +6,26 @@ export function initLogsPage(): void {
 
     const select = document.getElementById('logLevelSelect') as HTMLSelectElement;
     if (select) {
-        // Retrieve saved preference
-        const savedLevel = localStorage.getItem('logLevelPref');
-        if (savedLevel) {
-            select.value = savedLevel;
+        const params = new URLSearchParams(window.location.search);
+        const urlLevel = params.get('level');
+        const savedPref = localStorage.getItem('logLevelPref') || 'all';
+
+        if (!urlLevel) {
+            window.location.replace('/plswk/Logs?level=' + savedPref);
+            return;
         }
+
+        if (urlLevel !== savedPref) {
+            localStorage.setItem('logLevelPref', urlLevel);
+        }
+
+        select.value = urlLevel;
 
         select.addEventListener('change', () => {
             const level = select.value;
             localStorage.setItem('logLevelPref', level);
-            const entries = document.querySelectorAll('.log-entry');
-            
-            entries.forEach((el) => {
-                const entryLevel = el.getAttribute('data-level');
-                let show = true;
-                
-                if (level === 'info') {
-                    show = entryLevel !== 'debug';
-                } else if (level === 'warning') {
-                    show = entryLevel === 'warning' || entryLevel === 'error';
-                } else if (level === 'error') {
-                    show = entryLevel === 'error';
-                }
-                
-                if (show) {
-                    (el as HTMLElement).style.display = '';
-                } else {
-                    (el as HTMLElement).style.display = 'none';
-                }
-            });
-            
-            if (container) {
-                container.scrollTop = container.scrollHeight;
-            }
+            window.location.href = '/plswk/Logs?level=' + level;
         });
-        
-        // Initial filter application
-        select.dispatchEvent(new Event('change'));
     }
 }
 

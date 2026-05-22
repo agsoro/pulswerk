@@ -391,7 +391,7 @@ aside:hover .lang-sep { width: 1px; opacity: 1; }
     position: absolute; pointer-events: none; overflow: visible;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
-.scada-svg-widget svg { width: 100%; height: 100%; display: block; }
+.scada-svg-widget svg { width: 100%; height: 100%; display: block; color-scheme: dark !important; }
 .scada-svg-widget.edit-mode {
     pointer-events: auto; cursor: move;
     border: 2px dashed rgba(56,189,248,0.4); border-radius: 6px;
@@ -903,7 +903,7 @@ aside:hover .user-name {
     border-radius: 1rem; padding: 1.5rem; min-height: 200px;
     display: flex; align-items: center; justify-content: center;
 }
-.scada-preview-svg svg { max-width: 100%; max-height: 300px; }
+.scada-preview-svg svg { max-width: 100%; max-height: 300px; color-scheme: dark !important; }
 .scada-preview-controls {
     grid-column: 1 / -1;
     display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start;

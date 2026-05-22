@@ -1,4 +1,5 @@
 import { ConditionEvaluator } from './condition.evaluator';
+import { DashboardService } from '../api';
 
 export class ScadaAnimationController {
     static allClasses = [
@@ -74,27 +75,34 @@ export class ScadaAnimationController {
         }
     }
 
-    static async updateAll(): Promise<void> {
+    static cache: Record<string, any> = {};
+
+    static async updateAll(newData?: Record<string, string>): Promise<void> {
         const dashboard = (window as any).dashboard;
-        const api = (window as any).api;
         if (!dashboard?.widgets) return;
         const svgWidgets = dashboard.widgets.filter((w: any) => w.type === 'background-svg' && w.config?.animationRules?.length);
         if (!svgWidgets.length) return;
         
         const allAnimKeys = [...new Set(svgWidgets.flatMap((w: any) => 
             w.config!.animationRules!.flatMap((r: any) => r.telemetryKeys || (r.telemetryKey ? [r.telemetryKey] : []))
-        ).filter(Boolean))];
+        ).filter(Boolean))] as string[];
         
         if (!allAnimKeys.length) return;
-        let data: any; 
-        try { 
-            data = await api(`LatestValues&keys=${allAnimKeys.join(',')}`); 
-        } catch (e) { 
-            return; 
+        
+        if (newData) {
+            Object.assign(ScadaAnimationController.cache, newData);
+        } else {
+            try { 
+                const fetchedData = await DashboardService.fetchLatestValues(allAnimKeys); 
+                Object.assign(ScadaAnimationController.cache, fetchedData);
+            } catch (e) { 
+                return; 
+            }
         }
+
         svgWidgets.forEach((w: any) => {
             const el = document.querySelector(`.scada-svg-widget[data-wid="${w.id}"]`) as HTMLElement;
-            ScadaAnimationController.applyAnimationRules(el, w.config!.animationRules!, data);
+            ScadaAnimationController.applyAnimationRules(el, w.config!.animationRules!, ScadaAnimationController.cache);
         });
         ScadaAnimationController.updateDotAnimations();
     }

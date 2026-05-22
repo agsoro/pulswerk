@@ -27,10 +27,12 @@ namespace Pulswerk.Dashboard
     {
         private readonly WebApplication _app;
         private readonly DashboardDataService _data;
+        private readonly DashboardStore _store;
 
         public DashboardServer(DashboardDataService data, DashboardStore dashboardStore)
         {
             _data = data;
+            _store = dashboardStore;
 
             try
             {
@@ -44,12 +46,14 @@ namespace Pulswerk.Dashboard
                 builder.Logging.AddFilter("System.Net.Http.HttpClient", Microsoft.Extensions.Logging.LogLevel.Error);
                 builder.Logging.AddFilter("Microsoft.Extensions.Http", Microsoft.Extensions.Logging.LogLevel.Error);
 
-                // Add Razor Pages with CamelCase JSON
-                builder.Services.AddRazorPages()
+                // Add Controllers and Razor Pages with CamelCase JSON
+                builder.Services.AddControllers()
                     .AddJsonOptions(options =>
                     {
                         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+                        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
                     });
+                builder.Services.AddRazorPages();
                 builder.Services.AddSingleton(_data);
                 builder.Services.AddSingleton(dashboardStore);
 
@@ -83,7 +87,6 @@ namespace Pulswerk.Dashboard
                 _app = builder.Build();
 
                 ConfigureMiddleware();
-                ConfigureRoutes();
             }
             catch (Exception ex)
             {
@@ -95,6 +98,70 @@ namespace Pulswerk.Dashboard
 
         private void ConfigureMiddleware()
         {
+            // Add global Pulswerk version header to all API responses
+            _app.Use(async (ctx, next) =>
+            {
+                if (ctx.Request.Path.StartsWithSegments("/plswk/api"))
+                {
+                    ctx.Response.Headers.Append("X-Pulswerk-Version", _data.Version);
+                }
+                await next();
+            });
+
+            // High-priority redirects for root and legacy paths
+            _app.Use(async (ctx, next) =>
+            {
+                var path = ctx.Request.Path.Value;
+                if (path != null)
+                {
+                    // Redirect legacy /plswk/AssetsList to TelemetryList
+                    if (path.Equals("/plswk/AssetsList", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var dest = "/plswk/TelemetryList" + ctx.Request.QueryString.Value;
+                        ctx.Response.Redirect(dest, permanent: true);
+                        return;
+                    }
+
+                    // Check if path is a legacy root-level page
+                    var legacyPages = new[] {
+                        "/Dashboards", "/Assets", "/TelemetryList", "/AssetsList",
+                        "/Connections", "/Alarms", "/Logs", "/Heartbeat"
+                    };
+
+                    string? target = null;
+                    if (path.Equals("/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        target = "/plswk/";
+                    }
+                    else
+                    {
+                        foreach (var page in legacyPages)
+                        {
+                            if (path.Equals(page, StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (page.Equals("/AssetsList", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    target = "/plswk/TelemetryList";
+                                }
+                                else
+                                {
+                                    target = "/plswk" + page;
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    if (target != null)
+                    {
+                        var dest = target + ctx.Request.QueryString.Value;
+                        ctx.Response.Redirect(dest, permanent: true);
+                        return;
+                    }
+                }
+                await next();
+            });
+
             if (_app.Environment.IsDevelopment())
             {
                 _app.UseDeveloperExceptionPage();
@@ -181,295 +248,11 @@ namespace Pulswerk.Dashboard
 
             _app.UseRouting();
 
-            // Redirect root to /plswk
-            _app.MapGet("/", (HttpContext ctx) => Results.Redirect("/plswk/", permanent: true));
-
+            _app.MapControllers();
             _app.MapRazorPages();
         }
 
-        private void ConfigureRoutes()
-        {
-            // We keep the API routes for live-updates and potential external integrations
 
-            _app.MapGet("/plswk/api/status", (HttpContext ctx) =>
-            {
-                var alarmCount = _data.AlarmStore.CountActive();
-                var status = new DeviceStatusDto
-                {
-                    TotalDevices = _data.Config.Devices.Count,
-                    OnlineDevices = _data.Config.Devices.Count - _data.OfflineDevices.Count,
-                    OfflineDevices = _data.OfflineDevices.Count,
-                    ActiveAlarms = alarmCount,
-                    ConnectorVersion = _data.Version,
-                    UptimeSeconds = (long)_data.Uptime.Elapsed.TotalSeconds,
-                    LogBufferSize = _data.LogBuffer.Count,
-                    LogBufferCapacity = _data.LogBuffer.Capacity,
-                    Timestamp = DateTime.UtcNow.ToString("o")
-                };
-
-                return Results.Json(status, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            _app.MapGet("/plswk/api/devices", (HttpContext ctx) =>
-            {
-                var devices = _data.Config.Devices.Select(d =>
-                {
-                    bool isOffline = _data.OfflineDevices.ContainsKey(d.Name);
-                    _data.LastPolledAtMap.TryGetValue(d.Name, out var lastPolled);
-                    var connCfg = _data.Config.Connections.FirstOrDefault(c => c.Id == d.ConnectionId);
-
-                    return new DeviceDto
-                    {
-                        Name = d.Name,
-                        Type = d.DeviceType,
-                        ConnectionId = d.ConnectionId ?? "",
-                        Status = isOffline ? "offline" : "online",
-                        StatusColor = isOffline ? "#ef4444" : "#10b981",
-                        LastSeen = lastPolled == default ? "Never" : lastPolled.ToString("yyyy-MM-dd HH:mm:ss UTC"),
-                        Connection = connCfg?.Address ?? "unknown",
-                        Port = connCfg?.Port ?? 0
-                    };
-                }).ToList();
-
-                return Results.Json(devices, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            // ── Telemetry Keys Endpoint ──────────────────────────────────────
-            _app.MapGet("/plswk/api/telemetry-keys", (HttpContext ctx) =>
-            {
-                var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
-                    return Results.StatusCode(403);
-
-                var keys = _data.GetAvailableTelemetries();
-                return Results.Json(keys, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            _app.MapGet("/plswk/api/logs", (HttpContext ctx) =>
-            {
-                int count = 200;
-                if (int.TryParse(ctx.Request.Query["count"], out int c)) count = Math.Min(c, 5000);
-
-                var logs = _data.LogBuffer.GetLatest(count).Select(l => new LogEntryDto
-                {
-                    Timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                    Severity = l.Severity.ToString().ToLowerInvariant(),
-                    Message = l.Message,
-                    Source = l.Source
-                }).ToList();
-
-                return Results.Json(logs, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            _app.MapGet("/plswk/api/alarm", (HttpContext ctx) =>
-            {
-                var alarms = _data.AlarmStore.GetAllActive();
-                var dtos = alarms.Select(a => new AlarmDisplayDto
-                {
-                    AlarmId = a.Id,
-                    Type = a.Type,
-                    Severity = a.Severity,
-                    Status = a.Status,
-                    Message = a.Message,
-                    Originator = a.Originator,
-                    Time = DateTimeOffset.FromUnixTimeMilliseconds(a.CreatedAt).ToString("o"),
-                    AckComment = a.AckComment,
-                    BacnetAckKey = a.BacnetAckKey
-                }).ToList();
-
-                return Results.Json(dtos, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            _app.MapGet("/plswk/api/connection-health/{connId}", (HttpContext ctx, string connId) =>
-            {
-                var history = _data.GetConnectionHealth(connId);
-                var dto = history.Select(h => new
-                {
-                    t = h.Time.ToString("o"),
-                    online = h.Online,
-                    total = h.Total
-                }).ToList();
-
-                return Results.Json(dto, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            _app.MapGet("/plswk/api/health-history", (HttpContext ctx) =>
-            {
-                var history = _data.GetHealthHistory();
-                return Results.Json(history, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            _app.MapGet("/plswk/api/latest-value/{key}", (HttpContext ctx, string key) =>
-            {
-                var values = _data.GetCurrentValues(new List<string> { key });
-                return Results.Json(values, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            // Client-side JS error reporting endpoint
-            _app.MapPost("/plswk/api/client-error", async (HttpContext ctx) =>
-            {
-                try
-                {
-                    using var reader = new StreamReader(ctx.Request.Body);
-                    var body = await reader.ReadToEndAsync();
-                    var err = JsonSerializer.Deserialize<JsonElement>(body);
-
-                    var msg = err.TryGetProperty("msg", out var m) ? m.GetString() : "unknown";
-                    var src = err.TryGetProperty("source", out var s) ? s.GetString() : "";
-                    var line = err.TryGetProperty("line", out var l) ? l.GetInt32().ToString() : "?";
-                    var col = err.TryGetProperty("col", out var c) ? c.GetInt32().ToString() : "?";
-                    var stack = err.TryGetProperty("stack", out var st) ? st.GetString() : "";
-                    var page = err.TryGetProperty("page", out var p) ? p.GetString() : "";
-
-                    Log.Warning($"[UI] JS Error on {page} at {src}:{line}:{col} — {msg}");
-                    if (!string.IsNullOrEmpty(stack))
-                        Log.Warning($"[UI]   Stack: {stack.Replace("\n", " | ")}");
-                }
-                catch { /* don't fail on malformed reports */ }
-                return Results.Ok();
-            });
-
-            // ── Authelia user identity endpoint ──────────────────────────────
-            _app.MapGet("/plswk/api/user", (HttpContext ctx) =>
-            {
-                var serverCfg = _data.Config.Server;
-                var authCfg = serverCfg?.Auth;
-
-                string? user = DashboardAuth.GetUser(ctx, authCfg);
-                var groups = DashboardAuth.GetGroups(ctx, authCfg);
-
-                var headers = ctx.Request.Headers;
-                string? name = headers["Remote-Name"].FirstOrDefault();
-                string? email = headers["Remote-Email"].FirstOrDefault();
-
-                var dto = new
-                {
-                    authenticated = !string.IsNullOrWhiteSpace(user) && user != authCfg?.DefaultUser,
-                    isDefault = !string.IsNullOrWhiteSpace(user) && user == authCfg?.DefaultUser,
-                    user = user ?? "public",
-                    name = name ?? user ?? "Public",
-                    email = email ?? "",
-                    groups = groups,
-                    canWriteValue = DashboardAuth.CanWriteValue(ctx, serverCfg),
-                    canAckAlarm = DashboardAuth.CanAckAlarm(ctx, serverCfg),
-                    canEditDashboard = DashboardAuth.CanEditDashboard(ctx, serverCfg),
-                    canEditFavorites = DashboardAuth.CanEditFavorites(ctx, serverCfg)
-                };
-
-                return Results.Json(dto, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            });
-
-            // ── Configuration Editor Endpoints ──────────────────────────────
-            _app.MapGet("/plswk/api/config", (HttpContext ctx) =>
-            {
-                var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
-                    return Results.StatusCode(403);
-
-                string baseConfigPath = ResolveConfigPath() ?? "";
-                string baseJson = File.Exists(baseConfigPath) ? File.ReadAllText(baseConfigPath) : "{}";
-
-                string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
-                string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
-                string overrideJson = File.Exists(overridePath) ? File.ReadAllText(overridePath) : "{}";
-
-                try
-                {
-                    var options = new JsonSerializerOptions
-                    {
-                        ReadCommentHandling = JsonCommentHandling.Skip,
-                        AllowTrailingCommas = true
-                    };
-                    var baseObj = JsonSerializer.Deserialize<AppConfig>(baseJson, options);
-                    var overrideObj = JsonSerializer.Deserialize<AppConfig>(overrideJson, options);
-
-                    var result = new
-                    {
-                        @base = baseObj,
-                        @override = overrideObj ?? new AppConfig(null, null, null, new(), new(), null)
-                    };
-                    return Results.Json(result, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-                }
-                catch (Exception ex)
-                {
-                    return Results.Problem("Failed to parse config: " + ex.Message);
-                }
-            });
-
-            _app.MapPost("/plswk/api/config/override", async (HttpContext ctx) =>
-            {
-                var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
-                    return Results.StatusCode(403);
-
-                try
-                {
-                    using var reader = new StreamReader(ctx.Request.Body);
-                    var body = await reader.ReadToEndAsync();
-
-                    // Validate JSON
-                    var options = new JsonSerializerOptions
-                    {
-                        ReadCommentHandling = JsonCommentHandling.Skip,
-                        AllowTrailingCommas = true
-                    };
-                    var newOverride = JsonSerializer.Deserialize<AppConfig>(body, options);
-                    if (newOverride == null) return Results.BadRequest("Invalid JSON configuration");
-
-                    string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
-                    if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
-                    string overridePath = Path.Combine(dataDir, "pulswerk.override.json");
-
-                    var writeOpts = new JsonSerializerOptions
-                    {
-                        WriteIndented = true,
-                        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                    };
-                    string saveJson = JsonSerializer.Serialize(newOverride, writeOpts);
-                    File.WriteAllText(overridePath, saveJson);
-
-                    return Results.Ok();
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"[Server] Failed to save config override: {ex.Message}");
-                    return Results.Problem(ex.Message);
-                }
-            });
-
-            _app.MapPost("/plswk/api/config/evaluate-formula", async (HttpContext ctx) =>
-            {
-                var serverCfg = _data.Config.Server;
-                if (!DashboardAuth.CanEditConfig(ctx, serverCfg))
-                    return Results.StatusCode(403);
-
-                using var reader = new StreamReader(ctx.Request.Body);
-                var body = await reader.ReadToEndAsync();
-                var req = JsonSerializer.Deserialize<JsonElement>(body);
-
-                string formula = req.TryGetProperty("formula", out var f) ? f.GetString() ?? "" : "";
-                string deviceId = req.TryGetProperty("deviceId", out var d) ? d.GetString() ?? "" : "";
-
-                DeviceConfig? dev = _data.Config.Devices.FirstOrDefault(x => x.Id == deviceId);
-
-                try
-                {
-                    // Quick live value resolution using DashboardDataService methods via reflection or public method
-                    var method = _data.GetType().GetMethod("GetLiveValueForFormula", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (method != null)
-                    {
-                        string? val = method.Invoke(_data, new object?[] { formula, null, dev }) as string;
-                        return Results.Json(new { result = val ?? "", success = true });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    return Results.Json(new { error = ex.Message, success = false });
-                }
-                return Results.Json(new { error = "Evaluation not available", success = false });
-            });
-        }
 
         static string? ResolveConfigPath()
         {

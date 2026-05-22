@@ -36,10 +36,10 @@ public class E2eTests : BrowserTestBase
     {
         var navMap = new Dictionary<string, string>
         {
-            ["/plswk/"] = "nav-dashboard",
+            ["/plswk/"] = "nav-home",
             ["/plswk/Dashboards"] = "nav-dashboards",
             ["/plswk/Assets"] = "nav-assets",
-            ["/plswk/AssetsList"] = "nav-assetslist",
+            ["/plswk/TelemetryList"] = "nav-telemetries",
             ["/plswk/Connections"] = "nav-connections",
             ["/plswk/Alarms"] = "nav-alarms",
             ["/plswk/Logs"] = "nav-logs",

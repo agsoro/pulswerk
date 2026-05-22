@@ -2,10 +2,10 @@
 # Diagnostic: find all points showing "---" and cross-check via Properties endpoint
 # Usage: pwsh .\tests\test-binary-zero.ps1
 
-$baseUrl = "http://localhost:5000/plswk/AssetsList"
+$baseUrl = "http://localhost:5000/plswk/api"
 
 Write-Host "`n=== Fetching all points ===" -ForegroundColor Cyan
-$pointsJson = (Invoke-WebRequest -Uri "$baseUrl`?handler=Points" -UseBasicParsing).Content
+$pointsJson = (Invoke-WebRequest -Uri "$baseUrl/telemetries?includeLiveValues=true" -UseBasicParsing).Content
 $points = $pointsJson | ConvertFrom-Json
 
 $dashes = $points | Where-Object { $_.value -eq '---' }
@@ -30,7 +30,7 @@ foreach ($p in $sample) {
     $key = $p.key
     $type = $p.type
     try {
-        $propsJson = (Invoke-WebRequest -Uri "$baseUrl`?handler=Properties&key=$key" -UseBasicParsing -TimeoutSec 5).Content
+        $propsJson = (Invoke-WebRequest -Uri "$baseUrl/properties?key=$key" -UseBasicParsing -TimeoutSec 5).Content
         $props = $propsJson | ConvertFrom-Json
 
         # Find present-value in the properties response

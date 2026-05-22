@@ -27,6 +27,11 @@
         <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_warning">Warning</div>
         <div class="text-4xl font-extrabold leading-none text-slate-400">@Model.AlarmWarning</div>
     </a>
+    <a class="alarm-box bg-gradient-to-br from-violet-950 to-violet-900 border-violet-500 text-violet-300" href="/plswk/Alarms?severity=MAINTENANCE" id="box-maintenance">
+        <div class="text-lg"><i class="fas fa-wrench"></i></div>
+        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_maintenance">Maintenance</div>
+        <div class="text-4xl font-extrabold leading-none text-violet-400">@Model.AlarmMaintenance</div>
+    </a>
     <a class="alarm-box bg-gradient-to-br from-slate-800 to-slate-900 border-white/10 text-slate-200" href="/plswk/Alarms" id="box-total">
         <div class="text-lg"><i class="fas fa-list-ul"></i></div>
         <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_total">Total</div>
@@ -70,10 +75,10 @@
 
 @section Scripts {
     <environment include="Development">
-        <script src="/plswk/js/pages/index.page.js" type="module"></script>
+        <script src="/plswk/js/pages/index.page.js" type="module" asp-append-version="true"></script>
     </environment>
     <environment exclude="Development">
-        <script src="/plswk/dist/js/index.page.bundle.js" type="module"></script>
+        <script src="/plswk/dist/js/index.page.bundle.js" type="module" asp-append-version="true"></script>
     </environment>
 }
 

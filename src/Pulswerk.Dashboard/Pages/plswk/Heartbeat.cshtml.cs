@@ -19,11 +19,5 @@ namespace Pulswerk.Dashboard.Pages
         {
             Stats = await _dataService.GetHeartbeatStatsAsync();
         }
-
-        public async Task<JsonResult> OnGetStatsAsync()
-        {
-            var stats = await _dataService.GetHeartbeatStatsAsync();
-            return new JsonResult(stats);
-        }
     }
 }

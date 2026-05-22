@@ -57,6 +57,8 @@ services:
       bacnet-sim:
         condition: service_started
     volumes:
+      # Mount host's compiled binaries
+      - ./src/Pulswerk.Host/bin/Debug/net8.0:/app
       # Override production config with testing config (Docker DNS for simulators)
       - ./pulswerk.testing.json:/app/pulswerk.json:ro
     # All services share the default compose bridge network.

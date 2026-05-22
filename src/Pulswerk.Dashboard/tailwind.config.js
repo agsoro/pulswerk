@@ -8,6 +8,9 @@ module.exports = {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+      },
       animation: {
         'fade-in': 'fadeIn 0.4s ease-out forwards',
         'slide-up': 'slideUp 0.5s ease-out forwards',

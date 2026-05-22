@@ -27,8 +27,17 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }) {
     };
     useEffect(() => {
         fetchData();
-        const timer = setInterval(fetchData, 10000);
-        return () => clearInterval(timer);
+        const unsubscribe = DashboardService.listenToLiveUpdates([keyName], (newData) => {
+            if (newData[keyName] !== undefined) {
+                const rawVal = newData[keyName] || '---';
+                const display = window.PulswerkValue?.formatDisplay(rawVal, meta.type) || rawVal;
+                setVal(display);
+                if (window.updateHistoryLiveValue) {
+                    window.updateHistoryLiveValue(keyName, display);
+                }
+            }
+        });
+        return unsubscribe;
     }, [keyName]);
     if (!keyName) {
         return (_jsx("div", { class: "empty-state", style: { padding: '1rem' }, children: _jsx("p", { style: { fontSize: '0.8rem' }, children: window.t ? window.t('no_key') : 'No key configured' }) }));

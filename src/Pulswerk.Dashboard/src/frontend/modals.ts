@@ -83,7 +83,7 @@ async function reloadHistory(): Promise<void> {
     loader.classList.add('flex');
     
     try {
-        let url = `?handler=History&key=${currentHistoryKey}`;
+        let url = `/plswk/api/history?key=${encodeURIComponent(currentHistoryKey)}`;
         if (range.mode === 'history') {
             url += `&startTs=${range.startTs}&endTs=${range.endTs}`;
         } else {
@@ -181,7 +181,7 @@ async function refreshHistoryData(): Promise<void> {
     try {
         // Fetch updated history + current value in parallel
         const [histRes, valRes] = await Promise.all([
-            fetch(`?handler=History&key=${currentHistoryKey}&days=${days}`),
+            fetch(`/plswk/api/history?key=${encodeURIComponent(currentHistoryKey)}&days=${days}`),
             fetch(`/plswk/api/latest-value/${encodeURIComponent(currentHistoryKey)}`)
         ]);
 
@@ -321,7 +321,7 @@ async function submitEdit(e?: Event): Promise<void> {
     const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement)?.value || '';
     
     try {
-        const response = await fetch('?handler=Write', {
+        const response = await fetch('/plswk/api/write', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -389,7 +389,7 @@ async function openProperties(key: string): Promise<void> {
     document.getElementById('propsModal')!.style.display = 'flex';
     
     try {
-        const response = await fetch(`?handler=Properties&key=${key}`);
+        const response = await fetch(`/plswk/api/properties?key=${encodeURIComponent(key)}`);
         const props = await response.json();
         
         if (Array.isArray(props) && props.length > 0) {
@@ -482,7 +482,7 @@ async function openScheduleView(key: string): Promise<void> {
     grid.innerHTML = '';
     
     try {
-        const response = await fetch(`?handler=Properties&key=${key}`);
+        const response = await fetch(`/plswk/api/properties?key=${encodeURIComponent(key)}`);
         const props = await response.json();
         const schedProp = props.find((p: any) => p.name === 'Weekly Schedule');
         
@@ -702,7 +702,7 @@ async function saveSchedule(): Promise<void> {
         }));
 
         const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement)?.value || '';
-        const response = await fetch('?handler=WriteComplex', {
+        const response = await fetch('/plswk/api/write-complex', {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',

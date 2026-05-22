@@ -1,8 +1,12 @@
 /// <reference path="../types/pulswerk.d.ts" />
+import { DashboardService } from '../dashboards/api';
 
 let allTrees: any[] = [];
 let selectedNodeId: string | null = null;
 let isResizing = false;
+let liveUnsubscribe: (() => void) | null = null;
+let pointObserver: IntersectionObserver | null = null;
+const visibleKeys = new Set<string>();
 
 export function initAssetsPage(): void {
     // Splitter Logic
@@ -49,7 +53,6 @@ export function initAssetsPage(): void {
     });
 
     loadTree();
-    setInterval(refreshValues, 2000);
 
     window.addEventListener('resize', () => {
         if ((window as any).historyChart) (window as any).historyChart.resize();
@@ -60,7 +63,7 @@ export function initAssetsPage(): void {
 
 async function loadTree(): Promise<void> {
     try {
-        const response = await fetch('?handler=Tree');
+        const response = await fetch('/plswk/api/tree');
         allTrees = await response.json();
         renderTree();
 
@@ -183,6 +186,12 @@ function showNode(node: any, path: any[] = []): void {
     }
     if (row) delete row.dataset.skipPush;
 
+    if (pointObserver) {
+        pointObserver.disconnect();
+        pointObserver = null;
+    }
+    visibleKeys.clear();
+
     emptyView.style.display = 'none';
     contentView.style.display = 'flex';
     assetContent.classList.remove('hidden');
@@ -217,12 +226,16 @@ function showNode(node: any, path: any[] = []): void {
     
     if (!node.telemetries || node.telemetries.length === 0) {
         list.innerHTML = '<div class="h-full flex flex-col items-center justify-center text-slate-400 opacity-50"><i class="fas fa-info-circle text-5xl mb-4"></i><p>No data points in this view</p></div>';
+        subscribeToNodeValues([]);
         return;
     }
 
     node.telemetries.forEach((point: any) => {
         const item = document.createElement('div');
         item.className = 'glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-sky-400 hover:translate-x-1';
+        if (point.key) {
+            item.dataset.observeKey = point.key;
+        }
         
         const icon = getPointIcon(point.type || '');
         let displayName = point.name || 'Unnamed';
@@ -253,31 +266,77 @@ function showNode(node: any, path: any[] = []): void {
         updateStarState(point.key, item.querySelector('.star-btn') as HTMLElement);
         list.appendChild(item);
     });
+
+    const keys = node.telemetries.map((point: any) => point.key).filter(Boolean);
+    if (keys.length > 0) {
+        // Fetch initial latest values right away for all points in this node
+        DashboardService.fetchLatestValues(keys).then(data => {
+            updateVisibleValues(data);
+        }).catch(err => console.error("Failed to fetch initial values:", err));
+
+        // Pre-populate visibleKeys with the first 15 keys to guarantee immediate load
+        keys.slice(0, 15).forEach((k: string) => visibleKeys.add(k));
+        subscribeToNodeValues(Array.from(visibleKeys));
+
+        // Setup observer to only subscribe to live updates for visible keys
+        pointObserver = new IntersectionObserver((entries) => {
+            let changed = false;
+            entries.forEach(entry => {
+                const key = (entry.target as HTMLElement).dataset.observeKey;
+                if (!key) return;
+                if (entry.isIntersecting) {
+                    if (!visibleKeys.has(key)) {
+                        visibleKeys.add(key);
+                        changed = true;
+                    }
+                } else {
+                    if (visibleKeys.has(key)) {
+                        visibleKeys.delete(key);
+                        changed = true;
+                    }
+                }
+            });
+            if (changed) {
+                subscribeToNodeValues(Array.from(visibleKeys));
+            }
+        }, {
+            rootMargin: '100px 0px 100px 0px',
+            threshold: 0.01
+        });
+
+        list.querySelectorAll('[data-observe-key]').forEach(el => {
+            pointObserver!.observe(el);
+        });
+    } else {
+        subscribeToNodeValues([]);
+    }
 }
 
-async function refreshValues(): Promise<void> {
-    try {
-        const response = await fetch('?handler=Tree');
-        const newTrees = await response.json();
-        
-        const updateValues = (nodes: any[]) => {
-            nodes.forEach(node => {
-                if (node.telemetries) {
-                    node.telemetries.forEach((p: any) => {
-                        const el = document.querySelector(`.point-value[data-key="${p.key}"]`) as HTMLElement;
-                        if (el) el.textContent = PulswerkValue.formatDisplay(p.value, el.dataset.type || p.type);
+function subscribeToNodeValues(keys: string[]): void {
+    if (liveUnsubscribe) {
+        liveUnsubscribe();
+        liveUnsubscribe = null;
+    }
+    if (keys.length === 0) return;
 
-                        if (window.currentHistoryKey === p.key && document.getElementById('historyModal')?.style.display === 'flex') {
-                            const lv = document.getElementById('chartLiveValue');
-                            if (lv) lv.textContent = PulswerkValue.formatDisplay(p.value, p.type);
-                        }
-                    });
-                }
-                if (node.children) updateValues(node.children);
-            });
-        };
-        updateValues(newTrees);
-    } catch (e) {}
+    // Subscribe to SSE updates
+    liveUnsubscribe = DashboardService.listenToLiveUpdates(keys, (newData) => {
+        updateVisibleValues(newData);
+    });
+}
+
+function updateVisibleValues(data: Record<string, any>): void {
+    Object.entries(data).forEach(([key, val]) => {
+        const el = document.querySelector(`.point-value[data-key="${key}"]`) as HTMLElement;
+        if (el) {
+            el.textContent = PulswerkValue.formatDisplay(val, el.dataset.type || '');
+        }
+
+        if (window.currentHistoryKey === key && document.getElementById('historyModal')?.style.display === 'flex') {
+            const lv = document.getElementById('chartLiveValue');
+            if (lv) lv.textContent = PulswerkValue.formatDisplay(val, el?.dataset.type || '');
+        }
+    });
 }
 
 initAssetsPage();

@@ -17,6 +17,9 @@ if (typeof (window as any).allKeys === 'undefined') {
 } else {
     _allKeysVal = (window as any).allKeys;
 }
+if (typeof (window as any).allKeysLoaded === 'undefined') {
+    (window as any).allKeysLoaded = false;
+}
 
 /**
  * Resolve key metadata from the allKeys cache.
@@ -41,7 +44,7 @@ function resolveKeyMeta(key: string): ITelemetryMeta {
 async function ensureKeysMeta(): Promise<void> {
     if (allKeys.length) return;
     try {
-        const r = await fetch('?handler=AvailableTelemetries');
+        const r = await fetch('/plswk/api/telemetries');
         if (r.ok) allKeys = await r.json();
     } catch (e) { /* non-critical */ }
 }
@@ -53,7 +56,7 @@ async function ensureKeysMeta(): Promise<void> {
 async function fetchLatestValues(keys: string | string[]): Promise<Record<string, any>> {
     const keyStr = Array.isArray(keys) ? keys.join(',') : keys;
     try {
-        const r = await fetch(`?handler=LatestValues&keys=${encodeURIComponent(keyStr)}`);
+        const r = await fetch(`/plswk/api/latest-values?keys=${encodeURIComponent(keyStr)}`);
         return r.ok ? await r.json() : {};
     } catch (e) { return {}; }
 }

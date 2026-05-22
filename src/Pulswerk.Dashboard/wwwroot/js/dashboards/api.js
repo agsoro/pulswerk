@@ -2,8 +2,8 @@
 export const getCsrfToken = () => {
     return document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
 };
-export const apiCall = async (handler, opts) => {
-    const response = await fetch(`${window.location.pathname}?handler=${handler}`, opts);
+export const apiCall = async (endpoint, opts) => {
+    const response = await fetch(`/plswk/api/${endpoint}`, opts);
     if (!response.ok) {
         throw new Error(`API error: ${response.status} ${response.statusText}`);
     }
@@ -11,20 +11,21 @@ export const apiCall = async (handler, opts) => {
 };
 export class DashboardService {
     static async fetchWidgetData(keys, startTs, endTs) {
-        return await apiCall(`WidgetData&keys=${keys.join(',')}&startTs=${startTs}&endTs=${endTs}`);
+        return await apiCall(`widget-data?keys=${encodeURIComponent(keys.join(','))}&startTs=${startTs}&endTs=${endTs}`);
     }
     static async fetchLatestValues(keys) {
         const keysStr = Array.isArray(keys) ? keys.join(',') : keys;
-        return await apiCall(`LatestValues&keys=${keysStr}`);
+        return await apiCall(`latest-values?keys=${encodeURIComponent(keysStr)}`);
     }
-    static async fetchAvailableTelemetries() {
-        return await apiCall('AvailableTelemetries');
+    static async fetchAvailableTelemetries(keys) {
+        const query = keys && keys.length ? `?keys=${encodeURIComponent(keys.join(','))}` : '';
+        return await apiCall(`telemetries${query}`);
     }
     static async fetchDashboardList() {
-        return await apiCall('List');
+        return await apiCall('dashboards');
     }
     static async saveDashboard(dashboard) {
-        await fetch('/plswk/Dashboards?handler=Save', {
+        await fetch('/plswk/api/dashboards/save', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -34,7 +35,7 @@ export class DashboardService {
         });
     }
     static async createDashboard(name, description) {
-        const response = await fetch('/plswk/Dashboards?handler=Create', {
+        const response = await fetch('/plswk/api/dashboards', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -45,7 +46,7 @@ export class DashboardService {
         return response.json();
     }
     static async deleteDashboard(id) {
-        await fetch('/plswk/Dashboards?handler=Delete', {
+        await fetch('/plswk/api/dashboards/delete', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -53,5 +54,99 @@ export class DashboardService {
             },
             body: JSON.stringify({ id })
         });
+    }
+    static _es = null;
+    static _listeners = new Map();
+    static _reconnectTimeout = null;
+    static _scheduleReconnect() {
+        if (this._reconnectTimeout) {
+            clearTimeout(this._reconnectTimeout);
+        }
+        this._reconnectTimeout = setTimeout(() => {
+            this._reconnectSSE();
+            this._reconnectTimeout = null;
+        }, 50);
+    }
+    static async _reconnectSSE() {
+        if (this._es) {
+            this._es.close();
+            this._es = null;
+        }
+        if (this._listeners.size === 0)
+            return;
+        const allKeys = new Set();
+        for (const keys of this._listeners.values()) {
+            keys.forEach(k => allKeys.add(k));
+        }
+        const keysArray = Array.from(allKeys);
+        if (keysArray.length === 0)
+            return;
+        try {
+            const response = await fetch('/plswk/api/sse/subscribe', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': getCsrfToken()
+                },
+                body: JSON.stringify({ keys: keysArray })
+            });
+            if (!response.ok) {
+                throw new Error(`Subscribe failed: ${response.status}`);
+            }
+            const { subscriptionId } = await response.json();
+            if (this._listeners.size === 0)
+                return;
+            const activeEs = this._es;
+            if (activeEs) {
+                activeEs.close();
+            }
+            this._es = new EventSource(`/plswk/api/sse?subscriptionId=${encodeURIComponent(subscriptionId)}`);
+            this._es.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    this._listeners.forEach((_, cb) => cb(data));
+                }
+                catch (err) {
+                    console.error('Failed to parse SSE data', err);
+                }
+            };
+        }
+        catch (err) {
+            console.warn('SSE subscription failed, falling back to query string:', err);
+            if (this._listeners.size === 0)
+                return;
+            const query = `?keys=${encodeURIComponent(keysArray.join(','))}`;
+            this._es = new EventSource('/plswk/api/sse' + query);
+            this._es.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    this._listeners.forEach((_, cb) => cb(data));
+                }
+                catch (parseErr) {
+                    console.error('Failed to parse SSE data', parseErr);
+                }
+            };
+        }
+    }
+    static listenToLiveUpdates(keys, callback) {
+        const oldKeys = this._listeners.get(callback);
+        let keysChanged = false;
+        if (oldKeys) {
+            if (oldKeys.length !== keys.length || oldKeys.some((k, i) => k !== keys[i])) {
+                keysChanged = true;
+            }
+        }
+        else {
+            keysChanged = true;
+        }
+        this._listeners.set(callback, keys);
+        if (!this._es || keysChanged) {
+            this._scheduleReconnect();
+        }
+        // Return unsubscribe function
+        return () => {
+            this._listeners.delete(callback);
+            this._scheduleReconnect();
+        };
     }
 }

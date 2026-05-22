@@ -10,10 +10,10 @@
         <div class="w-3 h-3 rounded-full bg-amber-500"></div>
         <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
         <select id="logLevelSelect" class="ml-4 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-300 focus:outline-none focus:border-sky-500">
-            <option value="all">All Levels</option>
-            <option value="info">Info & Above</option>
-            <option value="warning">Warning & Error</option>
-            <option value="error">Error Only</option>
+            <option value="all" selected="@(Model.CurrentLevel == "all" ? "selected" : null)">All Levels</option>
+            <option value="info" selected="@(Model.CurrentLevel == "info" ? "selected" : null)">Info & Above</option>
+            <option value="warning" selected="@(Model.CurrentLevel == "warning" ? "selected" : null)">Warning & Error</option>
+            <option value="error" selected="@(Model.CurrentLevel == "error" ? "selected" : null)">Error Only</option>
         </select>
     </div>
     <div class="text-slate-400 text-sm">

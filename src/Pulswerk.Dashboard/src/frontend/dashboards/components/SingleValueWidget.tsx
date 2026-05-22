@@ -36,8 +36,18 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }: SingleValu
 
     useEffect(() => {
         fetchData();
-        const timer = setInterval(fetchData, 10000);
-        return () => clearInterval(timer);
+        const unsubscribe = DashboardService.listenToLiveUpdates([keyName], (newData) => {
+            if (newData[keyName] !== undefined) {
+                const rawVal = newData[keyName] || '---';
+                const display = (window as any).PulswerkValue?.formatDisplay(rawVal, meta.type) || rawVal;
+                setVal(display);
+                
+                if ((window as any).updateHistoryLiveValue) {
+                    (window as any).updateHistoryLiveValue(keyName, display);
+                }
+            }
+        });
+        return unsubscribe;
     }, [keyName]);
 
     if (!keyName) {

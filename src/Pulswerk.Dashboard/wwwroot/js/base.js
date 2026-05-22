@@ -18,6 +18,9 @@ if (typeof window.allKeys === 'undefined') {
 else {
     _allKeysVal = window.allKeys;
 }
+if (typeof window.allKeysLoaded === 'undefined') {
+    window.allKeysLoaded = false;
+}
 /**
  * Resolve key metadata from the allKeys cache.
  * Falls back to basic info derived from the key string.
@@ -42,7 +45,7 @@ async function ensureKeysMeta() {
     if (allKeys.length)
         return;
     try {
-        const r = await fetch('?handler=AvailableTelemetries');
+        const r = await fetch('/plswk/api/telemetries');
         if (r.ok)
             allKeys = await r.json();
     }
@@ -55,7 +58,7 @@ async function ensureKeysMeta() {
 async function fetchLatestValues(keys) {
     const keyStr = Array.isArray(keys) ? keys.join(',') : keys;
     try {
-        const r = await fetch(`?handler=LatestValues&keys=${encodeURIComponent(keyStr)}`);
+        const r = await fetch(`/plswk/api/latest-values?keys=${encodeURIComponent(keyStr)}`);
         return r.ok ? await r.json() : {};
     }
     catch (e) {

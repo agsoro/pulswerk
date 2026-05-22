@@ -118,7 +118,37 @@ export async function showDashboard(): Promise<void> {
         btn.querySelector('i')!.style.color = isFav ? '#fbbf24' : '';
         btn.style.display = (window as any).pwCanEditFavorites ? 'flex' : 'none';
     }
-    if (!(window as any).allKeys?.length) { try { (window as any).allKeys = await DashboardService.fetchAvailableTelemetries(); } catch (e) { (window as any).allKeys = []; } }
+    const keysUsed = new Set<string>();
+    if (DashboardStore.dashboard?.widgets) {
+        DashboardStore.dashboard.widgets.forEach((w: any) => {
+            if (w.config?.keys) w.config.keys.forEach((k: string) => keysUsed.add(k));
+            if (w.config?.key) keysUsed.add(w.config.key);
+            if (w.config?.rules) {
+                w.config.rules.forEach((r: any) => {
+                    if (r.telemetryKeys) r.telemetryKeys.forEach((k: string) => keysUsed.add(k));
+                    if (r.telemetryKey) keysUsed.add(r.telemetryKey);
+                });
+            }
+            if (w.config?.animationRules) {
+                w.config.animationRules.forEach((r: any) => {
+                    if (r.telemetryKeys) r.telemetryKeys.forEach((k: string) => keysUsed.add(k));
+                    if (r.telemetryKey) keysUsed.add(r.telemetryKey);
+                });
+            }
+        });
+    }
+
+    if (keysUsed.size > 0) {
+        try {
+            const neededMeta = await DashboardService.fetchAvailableTelemetries(Array.from(keysUsed));
+            const existing = (window as any).allKeys || [];
+            const merged = [...existing];
+            neededMeta.forEach((m: any) => {
+                if (!merged.some(x => x.key === m.key)) merged.push(m);
+            });
+            (window as any).allKeys = merged;
+        } catch (e) { }
+    }
     initGrid();
     if (DashboardStore.dashboard!.widgets?.length) {
         (window as any).renderAllWidgets();
@@ -187,16 +217,61 @@ export async function saveDashboard(): Promise<void> {
 }
 
 // ── POLLING ──────────────────────────────────────────────────────────────
-export function startPolling(): void { if (DashboardStore.pollTimer) clearInterval(DashboardStore.pollTimer); DashboardStore.pollTimer = setInterval(refreshAllWidgets, 10000); }
+export function startPolling(): void { 
+    if (DashboardStore.pollTimer) {
+        if (typeof DashboardStore.pollTimer === 'function') {
+            DashboardStore.pollTimer(); // unsubscribe
+        } else {
+            clearInterval(DashboardStore.pollTimer);
+        }
+    } 
+    
+    if (!DashboardStore.dashboard?.widgets) return;
+
+    const allKeys = new Set<string>();
+    DashboardStore.dashboard.widgets.forEach((w: any) => {
+        if (w.type === 'timeseries' || w.type === 'scada-point') {
+            if (w.config?.keys) w.config.keys.forEach((k: string) => allKeys.add(k));
+        } else if (w.type === 'background-svg') {
+            if (w.config?.animationRules) {
+                w.config.animationRules.forEach((r: any) => {
+                    if (r.telemetryKeys) r.telemetryKeys.forEach((k: string) => allKeys.add(k));
+                    if (r.telemetryKey) allKeys.add(r.telemetryKey);
+                });
+            }
+        }
+    });
+
+    DashboardStore.pollTimer = DashboardService.listenToLiveUpdates(Array.from(allKeys), (newData) => {
+        if (!DashboardStore.dashboard?.widgets) return;
+        
+        DashboardStore.dashboard.widgets.forEach((w: any) => {
+            if (w.type === 'timeseries' && (!DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime')) {
+                if ((window as any).appendTimeseriesData) {
+                    (window as any).appendTimeseriesData(w, newData);
+                }
+            }
+        });
+
+        if ((window as any).updateAllScadaPointsWithData) {
+            (window as any).updateAllScadaPointsWithData(newData);
+        }
+        
+        if ((window as any).updateAllSvgAnimations) {
+            (window as any).updateAllSvgAnimations(newData);
+        }
+    });
+}
 export function refreshAllWidgets(): void {
     if (!DashboardStore.dashboard?.widgets) return;
     DashboardStore.dashboard.widgets.forEach((w: any) => {
-        if (w.type === 'timeseries' && (!DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime')) (window as any).renderTimeseries(w, document.getElementById('wb_' + w.id)!, w.config || {});
-        else if (w.type === 'latest-values') (window as any).updateLatestValues(w, w.config || {});
-        else if (w.type === 'single-value') (window as any).updateSingleValue(w, w.config || {});
+        if (w.type === 'timeseries') (window as any).renderTimeseries(w, document.getElementById('wb_' + w.id)!, w.config || {});
+        // LatestValuesWidget and SingleValueWidget handle their own initial fetch in Preact
     });
     (window as any).updateAllScadaPoints();
-    (window as any).updateAllSvgAnimations();
+    if ((window as any).updateAllSvgAnimations) {
+        (window as any).updateAllSvgAnimations();
+    }
 }
 
 // ── HELPERS ──────────────────────────────────────────────────────────────
@@ -234,7 +309,7 @@ export function updateHistoryLiveValue(key: string, value: any): void {
 Object.assign(window, {
     initDashboards, loadList, toggleFavoriteDash, createDashboard, confirmCreate, deleteDash,
     showDashboard, initGrid, enterEditMode, cancelEdit, saveDashboard, startPolling, refreshAllWidgets,
-    keyName, hexToRgba, timeAgo, slugify, updateHistoryLiveValue, api, token, COLORS, DashboardStore
+    keyName, hexToRgba, timeAgo, slugify, updateHistoryLiveValue, api, token, COLORS, DashboardStore, DashboardService
 });
 
 // Deprecated Global Accessors (to be removed once all files use DashboardStore directly)

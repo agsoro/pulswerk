@@ -42,9 +42,12 @@ namespace Pulswerk.Dashboard
         private readonly object _statsLock = new();
         private readonly HashSet<string> _bootstrappedKeys = new();
 
+        public event Action<Dictionary<string, string>>? OnTelemetriesUpdated;
+
         // ── Unified health history ───────────────────────────────────────────
         // Sampled every 5 minutes, kept for 24 hours (288 data points max).
         private readonly Queue<HealthSnapshot> _healthHistory = new();
+        private readonly List<(string Key, string Formula, string? Units, DeviceConfig Device)> _virtualTelemetries = new();
         private readonly CalculationEngine _calc;
         private readonly object _healthLock = new();
         private System.Threading.Timer? _healthTimer;
@@ -72,6 +75,25 @@ namespace Pulswerk.Dashboard
 
             // Initial registration of known keys (Modbus)
             RegisterAllKnownKeys();
+
+            // Track all virtual telemetries for live push evaluation
+            if (Config.Devices != null)
+            {
+                foreach (var device in Config.Devices)
+                {
+                    if (device.DeviceType == "virtual" && device.Telemetries != null)
+                    {
+                        foreach (var dp in device.Telemetries)
+                        {
+                            if (!string.IsNullOrWhiteSpace(dp.Formula))
+                            {
+                                string key = $"{device.Id}_{dp.Id}";
+                                _virtualTelemetries.Add((key, dp.Formula, dp.Units, device));
+                            }
+                        }
+                    }
+                }
+            }
 
             // Start unified health sampling (every 5 minutes, first sample after 10s)
             _healthTimer = new System.Threading.Timer(_ => SampleHealthSnapshot(), null, 10_000, 5 * 60_000);
@@ -230,6 +252,7 @@ namespace Pulswerk.Dashboard
             if (values == null) return new Dictionary<string, (double val, DateTime ts)>();
 
             var persistedResults = new Dictionary<string, (double val, DateTime ts)>();
+            var changedValues = new Dictionary<string, string>();
             DateTime now = DateTime.UtcNow;
             long nowMs = new DateTimeOffset(now).ToUnixTimeMilliseconds();
 
@@ -243,6 +266,7 @@ namespace Pulswerk.Dashboard
                     if (kvp.Value is null) continue;
                     LatestValues[kvp.Key] = kvp.Value;
                     LatestTimestamps[kvp.Key] = now;
+                    changedValues[kvp.Key] = vs ?? "---";
 
                     // If it's a numeric value, mark it for persistence
                     if (TryToDouble(kvp.Value, out double d))
@@ -253,8 +277,9 @@ namespace Pulswerk.Dashboard
                         var (live, persisted) = _calc.Process(kvp.Key, kvp.Value, now);
                         foreach (var l in live)
                         {
-                            LatestValues[l.Key] = l.Value;
+                            LatestValues[l.Key] = l.Value!;
                             LatestTimestamps[l.Key] = now;
+                            changedValues[l.Key] = l.Value?.ToString() ?? "---";
                         }
                         foreach (var p in persisted)
                         {
@@ -262,8 +287,33 @@ namespace Pulswerk.Dashboard
                         }
                     }
                 }
+
+                // Evaluate virtual telemetries using updated LatestValues
+                foreach (var vt in _virtualTelemetries)
+                {
+                    try
+                    {
+                        var valStr = GetLiveValueForFormula(vt.Formula, vt.Units, vt.Device);
+                        LatestValues.TryGetValue(vt.Key, out var oldVal);
+                        var oldValStr = oldVal?.ToString();
+                        if (valStr != oldValStr)
+                        {
+                            LatestValues[vt.Key] = valStr;
+                            LatestTimestamps[vt.Key] = now;
+                            changedValues[vt.Key] = valStr;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[Dashboard] Error evaluating virtual telemetry {vt.Key}: {ex.Message}");
+                    }
+                }
             }
             RecordUpdate(values.Count, isPush);
+            if (changedValues.Count > 0)
+            {
+                OnTelemetriesUpdated?.Invoke(changedValues);
+            }
             return persistedResults;
         }
 
@@ -417,83 +467,86 @@ namespace Pulswerk.Dashboard
             // Simple live value resolver for tree view
             try
             {
-                formula = ExpandFormula(formula, device);
-
-                if (formula.StartsWith("pathsum("))
+                lock (LatestValues)
                 {
-                    var keys = ResolvePathSumKeys(formula);
-                    double sum = 0;
-                    foreach (var k in keys)
+                    formula = ExpandFormula(formula, device);
+
+                    if (formula.StartsWith("pathsum("))
                     {
-                        if (LatestValues.TryGetValue(k, out var v) && TryToDouble(v, out double d))
-                            sum += d;
+                        var keys = ResolvePathSumKeys(formula);
+                        double sum = 0;
+                        foreach (var k in keys)
+                        {
+                            if (LatestValues.TryGetValue(k, out var v) && TryToDouble(v, out double d))
+                                sum += d;
+                        }
+                        return Math.Round(sum, 2).ToString(CultureInfo.InvariantCulture);
                     }
-                    return Math.Round(sum, 2).ToString(CultureInfo.InvariantCulture);
-                }
 
-                // Handle consumption modifiers in tree (current hour/day from CalculationEngine)
-                if (formula.Contains(":consumption:"))
-                {
-                    var parts = formula.Split(":consumption:");
-                    var baseKey = parts[0];
-                    var interval = parts[1];
-                    string suffix = interval switch
+                    // Handle consumption modifiers in tree (current hour/day from CalculationEngine)
+                    if (formula.Contains(":consumption:"))
                     {
-                        "1h" => "_hourly",
-                        "1d" => "_daily",
-                        "1m" => "_monthly",
-                        "1y" => "_yearly",
-                        _ => ""
-                    };
-                    if (LatestValues.TryGetValue(baseKey + suffix, out var v))
-                        return v?.ToString() ?? "0";
-                }
-
-                // If formula is just a key, return its value
-                if (LatestValues.TryGetValue(formula, out var rawVal) && TryToDouble(rawVal, out double rawNum))
-                {
-                    return Math.Round(rawNum, 2).ToString(CultureInfo.InvariantCulture);
-                }
-
-                // Mathematical evaluation fallback
-                // Extract keys wrapped in square brackets e.g. [meter_power] - [other_power]
-                string expr = formula;
-                bool hasMath = false;
-
-                expr = System.Text.RegularExpressions.Regex.Replace(expr, @"\[([^\]]+)\]", match =>
-                {
-                    hasMath = true;
-                    string key = match.Groups[1].Value;
-                    if (LatestValues.TryGetValue(key, out var val) && TryToDouble(val, out double num))
-                    {
-                        return num.ToString(CultureInfo.InvariantCulture);
+                        var parts = formula.Split(":consumption:");
+                        var baseKey = parts[0];
+                        var interval = parts[1];
+                        string suffix = interval switch
+                        {
+                            "1h" => "_hourly",
+                            "1d" => "_daily",
+                            "1m" => "_monthly",
+                            "1y" => "_yearly",
+                            _ => ""
+                        };
+                        if (LatestValues.TryGetValue(baseKey + suffix, out var v))
+                            return v?.ToString() ?? "0";
                     }
-                    return "0";
-                });
 
-                // If no square brackets were found, but there are math operators
-                if (!hasMath && (expr.Contains("+") || expr.Contains("-") || expr.Contains("*") || expr.Contains("/")))
-                {
-                    expr = System.Text.RegularExpressions.Regex.Replace(expr, @"[a-zA-Z][a-zA-Z0-9_\-:]*", match =>
+                    // If formula is just a key, return its value
+                    if (LatestValues.TryGetValue(formula, out var rawVal) && TryToDouble(rawVal, out double rawNum))
                     {
-                        string key = match.Value;
-                        if (key == "pathsum" || key == "consumption") return key;
+                        return Math.Round(rawNum, 2).ToString(CultureInfo.InvariantCulture);
+                    }
+
+                    // Mathematical evaluation fallback
+                    // Extract keys wrapped in square brackets e.g. [meter_power] - [other_power]
+                    string expr = formula;
+                    bool hasMath = false;
+
+                    expr = System.Text.RegularExpressions.Regex.Replace(expr, @"\[([^\]]+)\]", match =>
+                    {
+                        hasMath = true;
+                        string key = match.Groups[1].Value;
                         if (LatestValues.TryGetValue(key, out var val) && TryToDouble(val, out double num))
                         {
                             return num.ToString(CultureInfo.InvariantCulture);
                         }
                         return "0";
                     });
-                    hasMath = true;
-                }
 
-                if (hasMath)
-                {
-                    using var dt = new DataTable();
-                    var result = dt.Compute(expr, "");
-                    if (result != DBNull.Value && TryToDouble(result, out double d))
+                    // If no square brackets were found, but there are math operators
+                    if (!hasMath && (expr.Contains("+") || expr.Contains("-") || expr.Contains("*") || expr.Contains("/")))
                     {
-                        return Math.Round(d, 2).ToString(CultureInfo.InvariantCulture);
+                        expr = System.Text.RegularExpressions.Regex.Replace(expr, @"[a-zA-Z][a-zA-Z0-9_\-:]*", match =>
+                        {
+                            string key = match.Value;
+                            if (key == "pathsum" || key == "consumption") return key;
+                            if (LatestValues.TryGetValue(key, out var val) && TryToDouble(val, out double num))
+                            {
+                                return num.ToString(CultureInfo.InvariantCulture);
+                            }
+                            return "0";
+                        });
+                        hasMath = true;
+                    }
+
+                    if (hasMath)
+                    {
+                        using var dt = new DataTable();
+                        var result = dt.Compute(expr, "");
+                        if (result != DBNull.Value && TryToDouble(result, out double d))
+                        {
+                            return Math.Round(d, 2).ToString(CultureInfo.InvariantCulture);
+                        }
                     }
                 }
             }

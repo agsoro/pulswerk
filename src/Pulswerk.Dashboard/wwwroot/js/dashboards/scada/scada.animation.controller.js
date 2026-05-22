@@ -1,4 +1,5 @@
 import { ConditionEvaluator } from './condition.evaluator';
+import { DashboardService } from '../api';
 export class ScadaAnimationController {
     static allClasses = [
         'scada-flow-right', 'scada-flow-left', 'scada-flow-fast',
@@ -69,9 +70,9 @@ export class ScadaAnimationController {
             }
         }
     }
-    static async updateAll() {
+    static cache = {};
+    static async updateAll(newData) {
         const dashboard = window.dashboard;
-        const api = window.api;
         if (!dashboard?.widgets)
             return;
         const svgWidgets = dashboard.widgets.filter((w) => w.type === 'background-svg' && w.config?.animationRules?.length);
@@ -80,16 +81,21 @@ export class ScadaAnimationController {
         const allAnimKeys = [...new Set(svgWidgets.flatMap((w) => w.config.animationRules.flatMap((r) => r.telemetryKeys || (r.telemetryKey ? [r.telemetryKey] : []))).filter(Boolean))];
         if (!allAnimKeys.length)
             return;
-        let data;
-        try {
-            data = await api(`LatestValues&keys=${allAnimKeys.join(',')}`);
+        if (newData) {
+            Object.assign(ScadaAnimationController.cache, newData);
         }
-        catch (e) {
-            return;
+        else {
+            try {
+                const fetchedData = await DashboardService.fetchLatestValues(allAnimKeys);
+                Object.assign(ScadaAnimationController.cache, fetchedData);
+            }
+            catch (e) {
+                return;
+            }
         }
         svgWidgets.forEach((w) => {
             const el = document.querySelector(`.scada-svg-widget[data-wid="${w.id}"]`);
-            ScadaAnimationController.applyAnimationRules(el, w.config.animationRules, data);
+            ScadaAnimationController.applyAnimationRules(el, w.config.animationRules, ScadaAnimationController.cache);
         });
         ScadaAnimationController.updateDotAnimations();
     }

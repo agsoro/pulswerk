@@ -39,6 +39,7 @@ namespace Pulswerk.Dashboard.Pages
                 OnlineDevices = _data.Config.Devices.Count - _data.OfflineDevices.Count,
                 UptimeSeconds = (long)_data.Uptime.Elapsed.TotalSeconds,
                 ConnectorVersion = _data.Version,
+                Version = _data.Version,
                 LogBufferSize = _data.LogBuffer.Count,
                 LogBufferCapacity = _data.LogBuffer.Capacity
             };

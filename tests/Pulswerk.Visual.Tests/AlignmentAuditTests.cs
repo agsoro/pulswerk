@@ -25,6 +25,10 @@ public class AlignmentAuditTests : BrowserTestBase
         await Page.GotoAsync(Url(pg.Path));
         await WaitForDashboard();
 
+        TestContext.Out.WriteLine($"📐 [{pg.Name}] Playwright Viewport: {Page.ViewportSize?.Width}x{Page.ViewportSize?.Height}");
+        TestContext.Out.WriteLine($"📐 [{pg.Name}] JS Viewport clientWidth: {await Page.EvaluateAsync<int>("() => document.documentElement.clientWidth")}");
+        TestContext.Out.WriteLine($"📐 [{pg.Name}] JS window.innerWidth: {await Page.EvaluateAsync<int>("() => window.innerWidth")}");
+
         var json = await Page.EvaluateAsync<JsonElement>(@"() => {
             const vw = document.documentElement.clientWidth;
             const results = [];

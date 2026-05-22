@@ -39,7 +39,7 @@ export async function submitAck(): Promise<void> {
     const comment = (document.getElementById('ackComment') as HTMLTextAreaElement).value.trim();
 
     try {
-        const resp   = await fetch('?handler=Ack', {
+        const resp   = await fetch('/plswk/api/alarm/acknowledge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
             body: JSON.stringify({ alarmId: _ackAlarmId, comment, bacnetAckKey: _bacnetAckKey })
@@ -78,7 +78,7 @@ export async function resetAlarm(btn: HTMLElement): Promise<void> {
     btn.style.opacity = '0.7';
 
     try {
-        const resp = await fetch('?handler=Reset', {
+        const resp = await fetch('/plswk/api/alarm/reset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
             body: JSON.stringify({ alarmId })

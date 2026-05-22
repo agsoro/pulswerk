@@ -49,8 +49,27 @@ export function LatestValuesWidget({ keys, allKeysMeta }: LatestValuesWidgetProp
 
     useEffect(() => {
         fetchData();
-        const timer = setInterval(fetchData, 10000);
-        return () => clearInterval(timer);
+        const unsubscribe = DashboardService.listenToLiveUpdates(keys, (newData) => {
+            setData((prev: any) => {
+                const next = { ...prev };
+                let changed = false;
+                for (const key of keys) {
+                    if (newData[key] !== undefined) {
+                        next[key] = newData[key];
+                        changed = true;
+                        
+                        // Legacy interop
+                        const meta = allKeysMeta.find(k => k.key === key) || {};
+                        const displayVal = (window as any).PulswerkValue?.formatDisplay(newData[key], meta.type) || newData[key];
+                        if ((window as any).updateHistoryLiveValue) {
+                            (window as any).updateHistoryLiveValue(key, displayVal);
+                        }
+                    }
+                }
+                return changed ? next : prev;
+            });
+        });
+        return unsubscribe;
     }, [keys]);
 
     if (!keys.length) {

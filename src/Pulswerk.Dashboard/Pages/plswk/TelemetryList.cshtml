@@ -107,8 +107,11 @@
 
         async function loadPoints() {
             try {
-                const response = await fetch('?handler=AvailableTelemetries');
+                const response = await fetch('/plswk/api/telemetries?includeLiveValues=true');
                 allPoints = await response.json();
+                allPoints.forEach(p => {
+                    p.lastUpdateDate = parseRelativeTime(p.lastUpdate);
+                });
                 window.allKeys = allPoints;
                 filteredPoints = [...allPoints];
                 applySort();
@@ -172,6 +175,10 @@
             if (startIdx === lastRangeStart && endIdx === lastRangeEnd) return;
             lastRangeStart = startIdx;
             lastRangeEnd = endIdx;
+
+            const visibleSlice = filteredPoints.slice(startIdx, endIdx + 1);
+            const visibleKeys = visibleSlice.map(p => p.key).filter(Boolean);
+            subscribeToAllValues(visibleKeys);
 
             const rows = [];
             for (let i = startIdx; i <= endIdx; i++) {
@@ -325,35 +332,139 @@
             });
         }
 
-        // ── Live value updates (DOM-patching, no full re-render) ─────────
-        async function refreshLiveValues() {
+        // ── Parse relative times on startup ──────────────────────────────────
+        function parseRelativeTime(str) {
+            if (!str || str === '-' || str === '---') return null;
+            const matchS = str.match(/^(\d+)s ago$/);
+            if (matchS) {
+                return new Date(Date.now() - parseInt(matchS[1]) * 1000);
+            }
+            const matchM = str.match(/^(\d+)m ago$/);
+            if (matchM) {
+                return new Date(Date.now() - parseInt(matchM[1]) * 60000);
+            }
+            const matchTime = str.match(/^(\d{2}):(\d{2}):(\d{2})$/);
+            if (matchTime) {
+                const d = new Date();
+                d.setHours(parseInt(matchTime[1]), parseInt(matchTime[2]), parseInt(matchTime[3]));
+                return d;
+            }
+            return null;
+        }
+
+        // ── Live value updates (SSE, no full re-render) ──────────────────────
+        let es = null;
+        let reconnectTimeout = null;
+        function subscribeToAllValues(keys) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(() => {
+                reconnectSSE(keys);
+            }, 250);
+        }
+
+        async function reconnectSSE(keys) {
+            if (es) {
+                es.close();
+                es = null;
+            }
+            if (keys.length === 0) return;
+
             try {
-                const response = await fetch('?handler=AvailableTelemetries');
-                const latest = await response.json();
-                
-                // Build a lookup map for O(1) updates
-                const latestMap = new Map();
-                latest.forEach(p => latestMap.set(p.key, p));
+                const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+                const response = await fetch('/plswk/api/sse/subscribe', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify({ keys: keys })
+                });
 
-                // Update master array
-                allPoints.forEach(mp => {
-                    const lp = latestMap.get(mp.key);
-                    if (lp) {
-                        mp.value = lp.value;
-                        mp.lastUpdate = lp.lastUpdate;
+                if (!response.ok) {
+                    throw new Error(`Subscribe failed: ${response.status}`);
+                }
+
+                const { subscriptionId } = await response.json();
+
+                if (es) es.close();
+
+                es = new EventSource(`/plswk/api/sse?subscriptionId=${encodeURIComponent(subscriptionId)}`);
+                es.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        
+                        Object.entries(data).forEach(([key, val]) => {
+                            const mp = allPoints.find(p => p.key === key);
+                            if (mp) {
+                                mp.value = val;
+                                mp.lastUpdate = "0s ago";
+                                mp.lastUpdateDate = new Date();
+                            }
+
+                            // Patch visible DOM elements directly
+                            const valEl = document.querySelector(`.point-value[data-key="${key}"]`);
+                            if (valEl) {
+                                valEl.textContent = PulswerkValue.formatDisplay(val, valEl.dataset.type || '');
+                            }
+                            const tsEl = document.querySelector(`.last-update[data-key="${key}"]`);
+                            if (tsEl) {
+                                tsEl.textContent = "0s ago";
+                            }
+                        });
+                    } catch (err) {
+                        console.error('Failed to parse SSE data', err);
                     }
-                });
+                };
+            } catch (err) {
+                console.warn('SSE subscription failed, falling back to query string:', err);
+                if (es) es.close();
 
-                // Patch visible DOM elements directly (no re-render needed)
-                document.querySelectorAll('.point-value[data-key]').forEach(el => {
-                    const lp = latestMap.get(el.dataset.key);
-                    if (lp) el.textContent = PulswerkValue.formatDisplay(lp.value, el.dataset.type || lp.type);
-                });
-                document.querySelectorAll('.last-update[data-key]').forEach(el => {
-                    const lp = latestMap.get(el.dataset.key);
-                    if (lp) el.textContent = lp.lastUpdate || '-';
-                });
-            } catch (e) {}
+                const query = `?keys=${encodeURIComponent(keys.join(','))}`;
+                es = new EventSource('/plswk/api/sse' + query);
+                es.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        
+                        Object.entries(data).forEach(([key, val]) => {
+                            const mp = allPoints.find(p => p.key === key);
+                            if (mp) {
+                                mp.value = val;
+                                mp.lastUpdate = "0s ago";
+                                mp.lastUpdateDate = new Date();
+                            }
+
+                            // Patch visible DOM elements directly
+                            const valEl = document.querySelector(`.point-value[data-key="${key}"]`);
+                            if (valEl) {
+                                valEl.textContent = PulswerkValue.formatDisplay(val, valEl.dataset.type || '');
+                            }
+                            const tsEl = document.querySelector(`.last-update[data-key="${key}"]`);
+                            if (tsEl) {
+                                tsEl.textContent = "0s ago";
+                            }
+                        });
+                    } catch (parseErr) {
+                        console.error('Failed to parse SSE data', parseErr);
+                    }
+                };
+            }
+        }
+
+        function updateLocalTimeStrings() {
+            document.querySelectorAll('.last-update[data-key]').forEach(el => {
+                const key = el.dataset.key;
+                const mp = allPoints.find(p => p.key === key);
+                if (mp && mp.lastUpdateDate) {
+                    const diff = Math.floor((new Date() - mp.lastUpdateDate) / 1000);
+                    if (diff < 0) return;
+                    if (diff < 60) {
+                        el.textContent = `${diff}s ago`;
+                    } else {
+                        const mins = Math.floor(diff / 60);
+                        el.textContent = `${mins}m ago`;
+                    }
+                }
+            });
         }
 
         // ── Scroll handler ──────────────────────────────────────────────────
@@ -363,6 +474,6 @@
 
         // ── Init ────────────────────────────────────────────────────────────
         loadPoints();
-        setInterval(refreshLiveValues, 3000);
+        setInterval(updateLocalTimeStrings, 5000);
     </script>
 }

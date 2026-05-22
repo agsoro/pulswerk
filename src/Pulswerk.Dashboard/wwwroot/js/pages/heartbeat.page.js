@@ -83,7 +83,7 @@ function initChart() {
 }
 async function updateStats() {
     try {
-        const res = await fetch('?handler=Stats');
+        const res = await fetch('/plswk/api/heartbeat/stats');
         const data = await res.json();
         document.getElementById('upm').textContent = data.updatesPerMinute.toFixed(1);
         document.getElementById('points').textContent = data.totalTelemetries.toLocaleString();

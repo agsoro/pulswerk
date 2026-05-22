@@ -1,13 +1,15 @@
-"use strict";
 // @ts-nocheck
+import { DashboardService } from './api';
 // picker.js – Data key selection and ordering logic
 async function loadKeyPicker() {
-    if (!allKeys.length) {
+    if (!window.allKeysLoaded) {
         try {
-            allKeys = await api('AvailableTelemetries');
+            allKeys = await DashboardService.fetchAvailableTelemetries();
+            window.allKeys = allKeys;
+            window.allKeysLoaded = true;
         }
         catch (e) {
-            allKeys = [];
+            allKeys = window.allKeys || [];
         }
     }
     // Default to rendering selected keys in sorted view

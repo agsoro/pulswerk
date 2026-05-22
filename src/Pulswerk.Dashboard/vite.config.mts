@@ -1,5 +1,17 @@
 import { defineConfig } from 'vite';
 import path from 'path';
+import fs from 'fs';
+
+let version = '1.0.0';
+try {
+  const versionPath = path.resolve(__dirname, '../../version.txt');
+  const versionBuild = fs.readFileSync(versionPath, 'utf8').trim();
+  version = `2.6.${versionBuild}`;
+} catch (e) {
+  console.warn('Could not read version.txt, using fallback version 1.0.0', e);
+}
+
+const bannerComment = `/*! Pulswerk v${version} */`;
 
 export default defineConfig({
   esbuild: {
@@ -31,7 +43,8 @@ export default defineConfig({
       output: {
         entryFileNames: 'js/[name].bundle.js',
         chunkFileNames: 'js/[name].chunk.js',
-        assetFileNames: 'assets/[name][extname]'
+        assetFileNames: 'assets/[name][extname]',
+        banner: bannerComment
       }
     }
   }

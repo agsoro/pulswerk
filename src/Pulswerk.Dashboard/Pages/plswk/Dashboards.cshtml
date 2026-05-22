@@ -91,7 +91,7 @@
       <div class="flex flex-col items-center justify-center gap-4 text-center text-slate-400 p-16 glass rounded-2xl max-w-[500px] w-full pointer-events-auto">
         <i class="fas fa-puzzle-piece text-5xl opacity-30 text-sky-400"></i>
         <p class="text-sm">This dashboard has no widgets yet.</p>
-        <button class="btn-primary btn-sm" onclick="enterEditMode(); openAddWidget();"><i class="fas fa-plus"></i> Add your first widget</button>
+        <button class="btn-primary btn-sm auth-edit-dash-only" onclick="enterEditMode(); openAddWidget();"><i class="fas fa-plus"></i> Add your first widget</button>
       </div>
     </div>
 </div>
@@ -326,15 +326,10 @@
 @section Scripts {
 <script src="/plswk/lib/gridstack-all.js"></script>
 <environment include="Development">
-    <script src="/plswk/js/dashboards/core.js"></script>
-    <script src="/plswk/js/dashboards/scada.js"></script>
-    <script src="/plswk/js/dashboards/widgets.js"></script>
-    <script src="/plswk/js/dashboards/picker.js"></script>
-    <script src="/plswk/js/dashboards/editor.js"></script>
-    <script src="/plswk/js/main.js" type="module"></script>
+    <script src="/plswk/js/dashboards.entry.js" type="module"></script>
 </environment>
 <environment exclude="Development">
-    <script src="/plswk/dist/js/dashboards.bundle.js" type="module"></script>
+    <script src="/plswk/dist/js/dashboards.bundle.js" type="module" asp-append-version="true"></script>
 </environment>
 <script type="module">
     // Bootstrap with server-rendered data
