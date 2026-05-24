@@ -49,3 +49,8 @@ yarn-error.log*
 # Node / NPM
 node_modules/
 .npm
+
+# Playwright
+/src/Pulswerk.Dashboard/playwright-report/
+/src/Pulswerk.Dashboard/test-results/
+/src/Pulswerk.Dashboard/test_output.txt

@@ -7,6 +7,8 @@
     "build:js": "tsc && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "build:css": "npx tailwindcss -i ./wwwroot/css/input.css -o ./wwwroot/css/pulswerk.css --minify",
     "watch:css": "npx tailwindcss -i ./wwwroot/css/input.css -o ./wwwroot/css/pulswerk.css --watch",
     "format": "dotnet format ../../"
@@ -16,6 +18,7 @@
   "license": "ISC",
   "description": "Pulswerk Dashboard Frontend & SCADA Engine",
   "devDependencies": {
+    "@playwright/test": "^1.42.1",
     "@preact/preset-vite": "^2.10.5",
     "@types/node": "^20.11.24",
     "autoprefixer": "^10.5.0",

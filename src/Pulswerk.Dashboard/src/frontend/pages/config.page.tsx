@@ -649,3 +649,5 @@ export function initConfigPage() {
 }
 
 initConfigPage();
+
+export { ConfigPage };

@@ -271,3 +271,5 @@ function applyTranslations(): void {
 (window as any).setLanguage = setLanguage;
 (window as any).t = t;
 (window as any).applyTranslations = applyTranslations;
+
+export { initI18n, setLanguage, t, applyTranslations, currentLang };

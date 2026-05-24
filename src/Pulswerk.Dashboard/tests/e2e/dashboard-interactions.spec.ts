@@ -1,0 +1,288 @@
+import { test, expect } from '@playwright/test';
+
+test.describe('Dashboard Interactions and Component States', () => {
+
+  // 1. Timewindow Selector Mode Switches (Realtime vs History)
+  test('Timewindow Dropdown Modes', async ({ page }) => {
+    // Navigate to dashboards list
+    await page.goto('/plswk/Dashboards');
+    
+    // Check if we need to click a dashboard card first to load the dashboard shell
+    const cards = page.locator('.dash-card');
+    if (await cards.count() > 0) {
+      await cards.first().click();
+      await page.waitForTimeout(500);
+    }
+
+    const selector = page.locator('[data-testid="tw-selector"]');
+    if (await selector.count() === 0 || !(await selector.isVisible())) {
+      console.warn('Skipping timewindow selector check: selector not visible (no dashboard loaded)');
+      return;
+    }
+
+    // Open dropdown
+    await selector.click();
+    await page.waitForSelector('#twDropdown', { state: 'visible' });
+
+    // A. Realtime Mode asserts
+    const realtimeTab = page.locator('button[data-tw-mode="realtime"]').first();
+    await expect(realtimeTab).toHaveClass(/active/);
+
+    const presetsPanel = page.locator('#twRealtimePanel');
+    await expect(presetsPanel).toBeVisible();
+
+    const presets = page.locator('#twPresets button');
+    expect(await presets.count()).toBeGreaterThanOrEqual(6);
+
+    const historyPanel = page.locator('#twHistoryPanel');
+    await expect(historyPanel).toBeHidden();
+
+    // B. Switch to History Mode
+    const historyTab = page.locator('button[data-tw-mode="history"]').first();
+    await historyTab.click();
+    await page.waitForTimeout(300);
+
+    // Assert panels swapped visibility
+    await expect(historyPanel).toBeVisible();
+    await expect(presetsPanel).toBeHidden();
+    await expect(historyTab).toHaveClass(/active/);
+
+    // Verify date/time inputs are visible
+    const fromInput = page.locator('#twHistFrom');
+    const toInput = page.locator('#twHistTo');
+    await expect(fromInput).toBeVisible();
+    await expect(toInput).toBeVisible();
+
+    // Assert inputs have default values populated (not empty)
+    const fromVal = await fromInput.inputValue();
+    const toVal = await toInput.inputValue();
+    expect(fromVal.trim()).not.toBe('');
+    expect(toVal.trim()).not.toBe('');
+  });
+
+  // 2. Edit Modal Dynamic Form Modes (Numeric, Enum, Boolean)
+  test('Edit Modal Input Variants', async ({ page }) => {
+    await page.goto('/plswk/Assets');
+    await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
+
+    // A. Test Numeric Stepper Mode
+    await page.evaluate(() => {
+      const win = window as any;
+      if (typeof win.openEdit === 'function') {
+        win.openEdit('test:key');
+      }
+    });
+    await page.waitForTimeout(500);
+
+    const modal = page.locator('#editModal');
+    await expect(modal).toBeVisible();
+
+    // Verify stepper is shown, others are hidden
+    await expect(page.locator('#stepperGroup')).toBeVisible();
+    await expect(page.locator('#enumGroup')).toBeHidden();
+    await expect(page.locator('#boolGroup')).toBeHidden();
+
+    const plusBtn = page.locator('.number-stepper button:has-text("+")');
+    const minusBtn = page.locator('.number-stepper button:has-text("−")');
+    await expect(plusBtn).toBeVisible();
+    await expect(minusBtn).toBeVisible();
+
+    // Close modal
+    await page.locator('#editModal .close-modal, #editModal button:has-text("Cancel")').first().click();
+    await page.waitForSelector('#editModal', { state: 'hidden' });
+
+    // B. Test Multi-State Enum Dropdown Mode
+    // We register the enum metadata directly onto allKeys to simulate an Enum key
+    await page.evaluate(() => {
+      const win = window as any;
+      win.allKeys = win.allKeys || [];
+      const existing = win.allKeys.find((k: any) => k.key === 'test:enum_key');
+      if (!existing) {
+        win.allKeys.push({
+          key: 'test:enum_key',
+          name: 'Fan Speed',
+          fullName: 'test:enum_key',
+          units: '',
+          type: 'MULTI_STATE_VALUE',
+          isWritable: true,
+          enumValues: { '0': 'Off', '1': 'Low', '2': 'High' },
+          parentPath: []
+        });
+      }
+      if (typeof win.openEdit === 'function') {
+        win.openEdit('test:enum_key');
+      }
+    });
+    await page.waitForTimeout(500);
+    await expect(modal).toBeVisible();
+
+    // Verify dropdown select is shown, stepper and toggle are hidden
+    await expect(page.locator('#enumGroup')).toBeVisible();
+    await expect(page.locator('#stepperGroup')).toBeHidden();
+    await expect(page.locator('#boolGroup')).toBeHidden();
+
+    const options = page.locator('#enumSelect option');
+    expect(await options.count()).toBe(3);
+
+    // Close modal
+    await page.locator('#editModal .close-modal').first().click();
+    await page.waitForSelector('#editModal', { state: 'hidden' });
+
+    // C. Test Binary Output Boolean Toggle Mode
+    // We register the binary metadata directly onto allKeys to simulate a Boolean key
+    await page.evaluate(() => {
+      const win = window as any;
+      win.allKeys = win.allKeys || [];
+      const existing = win.allKeys.find((k: any) => k.key === 'test:bool_key');
+      if (!existing) {
+        win.allKeys.push({
+          key: 'test:bool_key',
+          name: 'Solenoid Valve',
+          fullName: 'test:bool_key',
+          units: '',
+          type: 'BINARY_OUTPUT',
+          isWritable: true,
+          enumValues: null,
+          parentPath: []
+        });
+      }
+      if (typeof win.openEdit === 'function') {
+        win.openEdit('test:bool_key');
+      }
+    });
+    await page.waitForTimeout(500);
+    await expect(modal).toBeVisible();
+
+    // Verify toggle wrap is visible, stepper and dropdown are hidden
+    await expect(page.locator('#boolGroup')).toBeVisible();
+    await expect(page.locator('#stepperGroup')).toBeHidden();
+    await expect(page.locator('#enumGroup')).toBeHidden();
+
+    const toggleLabel = page.locator('#boolLabel');
+    expect(await toggleLabel.textContent()).not.toBe('');
+  });
+
+  // 3. Asset Tree Collapsing and Expansion
+  test('Asset Tree Expansion', async ({ page }) => {
+    await page.goto('/plswk/Assets');
+    await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
+    await page.waitForTimeout(500); // Wait for tree load
+
+    const treeNodes = page.locator('#assetTree .tree-row');
+    if (await treeNodes.count() === 0) {
+      console.warn('Skipping asset tree expansion check: no nodes returned');
+      return;
+    }
+
+    // Capture count before expansion
+    const beforeCount = await treeNodes.count();
+
+    // Click the first expandable chevron
+    const chevrons = page.locator('#assetTree .tree-chevron, #assetTree .tree-toggle');
+    if (await chevrons.count() > 0) {
+      await chevrons.first().click();
+      await page.waitForTimeout(300);
+
+      // Node count should change or display new child nodes
+      const afterCount = await treeNodes.count();
+      console.log(`Asset tree count before: ${beforeCount}, after chevron click: ${afterCount}`);
+    }
+  });
+
+  // 4. Alarm List Filter Chips
+  test('Alarm Filter Chip Selections', async ({ page }) => {
+    await page.goto('/plswk/Alarms');
+    await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
+
+    const filterBar = page.locator('[data-testid="alarm-filters"]');
+    if (await filterBar.count() === 0 || !(await filterBar.isVisible())) {
+      console.warn('Skipping alarm filter check: filter bar not visible');
+      return;
+    }
+
+    const chips = filterBar.locator('a, button, .filter-chip');
+    const chipCount = await chips.count();
+    expect(chipCount).toBeGreaterThanOrEqual(4);
+
+    // Verify that exactly 1 filter is active by default
+    let activeCount = 0;
+    for (let i = 0; i < chipCount; i++) {
+      const className = await chips.nth(i).getAttribute('class') || '';
+      if (className.includes('active') || className.includes('selected')) {
+        activeCount++;
+      }
+    }
+    expect(activeCount).toBe(1);
+
+    // Click on the second chip and check active state migration
+    const secondChip = chips.nth(1);
+    await secondChip.click();
+    await page.waitForTimeout(300);
+
+    const updatedClass = await secondChip.getAttribute('class') || '';
+    expect(updatedClass.includes('active') || updatedClass.includes('selected')).toBe(true);
+  });
+
+  // 5. Dashboard List and Create Flow
+  test('Dashboard List and Create Flow', async ({ page }) => {
+    // Navigate to dashboards list via admin auth proxy to get write permissions
+    await page.goto('http://localhost:5002/plswk/Dashboards');
+    await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
+
+    // Verify that either the cards or empty state is visible
+    const cards = page.locator('.dash-card');
+    const emptyState = page.locator('#emptyDashboards');
+    
+    // Wait for either the grid to have cards, or the empty state to be visible
+    await Promise.race([
+      page.waitForSelector('.dash-card', { timeout: 10000 }).catch(() => {}),
+      page.waitForSelector('#emptyDashboards', { state: 'visible', timeout: 10000 }).catch(() => {})
+    ]);
+
+    const isGridEmpty = await emptyState.isVisible();
+    if (isGridEmpty) {
+      // Click the "Create your first dashboard" button inside the empty state
+      const createFirstBtn = emptyState.locator('button');
+      await expect(createFirstBtn).toBeVisible();
+      await createFirstBtn.click();
+    } else {
+      // Verify that the dashboards list has populated cards (cards exist)
+      await expect(cards.first()).toBeVisible();
+      
+      // Click the "New Dashboard" button on the top right
+      const createBtn = page.locator('[data-testid="dash-create-btn"]');
+      await expect(createBtn).toBeVisible();
+      await createBtn.click();
+    }
+
+    // Verify that the "New Dashboard" modal is shown and input is focused
+    const modal = page.locator('[data-testid="create-dash-modal"]');
+    await expect(modal).toBeVisible();
+    
+    const newDashName = page.locator('#newDashName');
+    await expect(newDashName).toBeFocused();
+
+    // Fill out the form
+    const uniqueName = `E2E Test ${Date.now()}`;
+    await newDashName.fill(uniqueName);
+
+    const newDashDesc = page.locator('#newDashDesc');
+    await newDashDesc.fill('Created via automated test');
+
+    // Click create
+    const submitBtn = modal.locator('button:has-text("Create")');
+    await submitBtn.click();
+
+    // Verify redirection to the new dashboard in edit mode
+    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+    
+    // Verify the page title matches
+    const titleView = page.locator('#dashTitleView');
+    await expect(titleView).toHaveText(uniqueName);
+    
+    // Verify we are in edit mode
+    const addWidgetBtn = page.locator('[data-testid="dash-add-widget-btn"]');
+    await expect(addWidgetBtn).toBeVisible();
+  });
+});

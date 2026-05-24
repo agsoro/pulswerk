@@ -1,4 +1,3 @@
-"use strict";
 // @ts-nocheck
 const TRANSLATIONS = {
     'en': {
@@ -273,3 +272,4 @@ window.initI18n = initI18n;
 window.setLanguage = setLanguage;
 window.t = t;
 window.applyTranslations = applyTranslations;
+export { initI18n, setLanguage, t, applyTranslations, currentLang };

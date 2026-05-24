@@ -64,8 +64,7 @@ export async function loadFavorites(): Promise<void> {
     empty.style.display = 'none';
 
     try {
-        const response = await fetch(`/plswk/api/telemetries?keys=${encodeURIComponent(favKeys.join(','))}&includeLiveValues=true`);
-        allPoints = await response.json();
+        allPoints = await DashboardService.fetchAvailableTelemetries(favKeys, true);
 
         list.innerHTML = '';
         allPoints.forEach(point => {

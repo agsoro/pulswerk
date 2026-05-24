@@ -14,11 +14,31 @@ export class DashboardService {
         return await apiCall(`widget-data?keys=${encodeURIComponent(keys.join(','))}&startTs=${startTs}&endTs=${endTs}`);
     }
     static async fetchLatestValues(keys) {
-        const keysStr = Array.isArray(keys) ? keys.join(',') : keys;
-        return await apiCall(`latest-values?keys=${encodeURIComponent(keysStr)}`);
+        const keysArray = Array.isArray(keys) ? keys : (keys ? keys.split(',') : []);
+        if (keysArray.length > 0) {
+            return await apiCall('latest-values', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': getCsrfToken()
+                },
+                body: JSON.stringify({ keys: keysArray })
+            });
+        }
+        return await apiCall('latest-values?keys=');
     }
-    static async fetchAvailableTelemetries(keys) {
-        const query = keys && keys.length ? `?keys=${encodeURIComponent(keys.join(','))}` : '';
+    static async fetchAvailableTelemetries(keys, includeLiveValues = false) {
+        const query = includeLiveValues ? '?includeLiveValues=true' : '';
+        if (keys && keys.length > 0) {
+            return await apiCall(`telemetries${query}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': getCsrfToken()
+                },
+                body: JSON.stringify({ keys })
+            });
+        }
         return await apiCall(`telemetries${query}`);
     }
     static async fetchDashboardList() {

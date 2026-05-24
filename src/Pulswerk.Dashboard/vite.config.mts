@@ -30,15 +30,7 @@ export default defineConfig({
     manifest: true,
     rollupOptions: {
         input: {
-        layout: './src/frontend/layout.entry.ts',
-        dashboards: './src/frontend/dashboards.entry.ts',
-        'index.page': './src/frontend/pages/index.page.ts',
-        'favorites.page': './src/frontend/pages/favorites.page.ts',
-        'assets.page': './src/frontend/pages/assets.page.ts',
-        'alarms.page': './src/frontend/pages/alarms.page.ts',
-        'heartbeat.page': './src/frontend/pages/heartbeat.page.ts',
-        'logs.page': './src/frontend/pages/logs.page.ts',
-        'config.page': './src/frontend/pages/config.page.tsx'
+        app: './src/frontend/app.entry.tsx'
       },
       output: {
         entryFileNames: 'js/[name].bundle.js',
@@ -47,5 +39,14 @@ export default defineConfig({
         banner: bannerComment
       }
     }
+  },
+  // @ts-ignore
+  test: {
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/tests/e2e/**',
+      '**/.{idea,git,cache,output,temp}/**'
+    ]
   }
 });

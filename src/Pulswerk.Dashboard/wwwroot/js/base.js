@@ -56,9 +56,18 @@ async function ensureKeysMeta() {
  * Returns the raw data object: { key: value, ... }
  */
 async function fetchLatestValues(keys) {
-    const keyStr = Array.isArray(keys) ? keys.join(',') : keys;
+    const keysArray = Array.isArray(keys) ? keys : (keys ? keys.split(',') : []);
+    if (keysArray.length === 0)
+        return {};
     try {
-        const r = await fetch(`/plswk/api/latest-values?keys=${encodeURIComponent(keyStr)}`);
+        const r = await fetch('/plswk/api/latest-values', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+            },
+            body: JSON.stringify({ keys: keysArray })
+        });
         return r.ok ? await r.json() : {};
     }
     catch (e) {
@@ -263,7 +272,7 @@ window.pw_fav = {
 };
 async function loadUserIdentity() {
     try {
-        const r = await fetch('/plswk/api/user');
+        const r = await fetch('/plswk/api/user/identity');
         if (!r.ok)
             return;
         _currentUser = await r.json();

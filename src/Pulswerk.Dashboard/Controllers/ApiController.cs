@@ -181,6 +181,12 @@ namespace Pulswerk.Dashboard.Controllers
             public List<string> Keys { get; set; } = new();
         }
 
+        public class KeysRequestDto
+        {
+            [JsonPropertyName("keys")]
+            public List<string> Keys { get; set; } = new();
+        }
+
         [HttpPost("sse/subscribe")]
         public IActionResult SubscribeSse([FromBody] SseSubscriptionRequestDto request)
         {
@@ -486,6 +492,14 @@ namespace Pulswerk.Dashboard.Controllers
             return Ok(result);
         }
 
+        [HttpGet("dashboards/{id}")]
+        public IActionResult GetDashboard(string id)
+        {
+            var dash = _store.GetById(id);
+            if (dash == null) return NotFound();
+            return Ok(dash);
+        }
+
         [HttpPost("dashboards")]
         public IActionResult CreateDashboard([FromBody] CreateDashboardRequestDto req)
         {
@@ -538,6 +552,19 @@ namespace Pulswerk.Dashboard.Controllers
             return Ok(all);
         }
 
+        [HttpPost("telemetries")]
+        public IActionResult GetTelemetriesPost([FromBody] KeysRequestDto request, [FromQuery] bool includeLiveValues = false)
+        {
+            var all = _data.GetAvailableTelemetries(includeLiveValues);
+            if (request != null && request.Keys != null && request.Keys.Count > 0)
+            {
+                var requestedKeys = new HashSet<string>(request.Keys.Select(k => k.Trim()));
+                var filtered = all.Where(t => requestedKeys.Contains(t.Key)).ToList();
+                return Ok(filtered);
+            }
+            return Ok(all);
+        }
+
         [HttpGet("widget-data")]
         public async Task<IActionResult> GetWidgetData([FromQuery] string keys, [FromQuery] long startTs, [FromQuery] long endTs)
         {
@@ -557,6 +584,14 @@ namespace Pulswerk.Dashboard.Controllers
             var keyList = keys?.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
                           ?? new List<string>();
 
+            var values = _data.GetCurrentValues(keyList);
+            return Ok(values);
+        }
+
+        [HttpPost("latest-values")]
+        public IActionResult GetLatestValuesPost([FromBody] KeysRequestDto request)
+        {
+            var keyList = request?.Keys ?? new List<string>();
             var values = _data.GetCurrentValues(keyList);
             return Ok(values);
         }
@@ -671,6 +706,180 @@ namespace Pulswerk.Dashboard.Controllers
         {
             var stats = await _data.GetHeartbeatStatsAsync();
             return Ok(stats);
+        }
+
+        [HttpGet("user/identity")]
+        public IActionResult GetUserIdentity()
+        {
+            var user = DashboardAuth.GetUser(HttpContext, _data.Config.Server?.Auth);
+            var groups = DashboardAuth.GetGroups(HttpContext, _data.Config.Server?.Auth);
+            
+            var email = HttpContext.Request.Headers["Remote-Email"].FirstOrDefault() ?? "Not authenticated";
+            var name = HttpContext.Request.Headers["Remote-Name"].FirstOrDefault() ?? (user ?? "Public");
+
+            return Ok(new
+            {
+                username = user ?? "Public",
+                email = email,
+                name = name,
+                groups = groups,
+                permissions = new
+                {
+                    canWriteValue = DashboardAuth.CanWriteValue(HttpContext, _data.Config.Server),
+                    canAckAlarm = DashboardAuth.CanAckAlarm(HttpContext, _data.Config.Server),
+                    canEditDashboard = DashboardAuth.CanEditDashboard(HttpContext, _data.Config.Server),
+                    canEditFavorites = DashboardAuth.CanEditFavorites(HttpContext, _data.Config.Server),
+                    canEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server)
+                }
+            });
+        }
+
+        [HttpGet("alarms")]
+        public IActionResult GetAlarms([FromQuery] string? severity)
+        {
+            try
+            {
+                var allRecords = _data.AlarmStore.GetAllActive();
+                var all = allRecords.Select(a => new
+                {
+                    alarmId = a.Id,
+                    type = a.Type,
+                    severity = a.Severity,
+                    status = a.Status,
+                    message = a.Message,
+                    originator = a.Originator,
+                    time = DateTimeOffset.FromUnixTimeMilliseconds(a.CreatedAt).ToString("o"),
+                    ackComment = a.AckComment,
+                    bacnetAckKey = a.BacnetAckKey,
+                    telemetryKey = a.Details != null && a.Details.Contains("\"telemetryKey\"") 
+                        ? JsonSerializer.Deserialize<JsonElement>(a.Details).GetProperty("telemetryKey").GetString() 
+                        : null
+                }).ToList();
+
+                var unacked = all.Where(a => a.status == "ACTIVE_UNACK").ToList();
+
+                int countCritical = unacked.Count(a => a.severity == "CRITICAL");
+                int countMajor = unacked.Count(a => a.severity == "MAJOR");
+                int countMinor = unacked.Count(a => a.severity == "MINOR");
+                int countWarning = unacked.Count(a => a.severity != "CRITICAL" && a.severity != "MAJOR" && a.severity != "MINOR" && a.severity != "MAINTENANCE");
+                int countMaintenance = unacked.Count(a => a.severity == "MAINTENANCE");
+                int countAcked = all.Count(a => a.status.StartsWith("ACTIVE_ACK"));
+
+                var filtered = severity switch
+                {
+                    "ACKED" => all.Where(a => a.status.StartsWith("ACTIVE_ACK")).ToList(),
+                    { } s when !string.IsNullOrEmpty(s) => unacked.Where(a => string.Equals(a.severity, s, StringComparison.OrdinalIgnoreCase)).ToList(),
+                    _ => all
+                };
+
+                return Ok(new
+                {
+                    alarms = filtered,
+                    countCritical,
+                    countMajor,
+                    countMinor,
+                    countWarning,
+                    countMaintenance,
+                    countAcked,
+                    countTotal = countCritical + countMajor + countMinor + countWarning + countMaintenance + countAcked
+                });
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[Dashboard] Failed to fetch alarms: {ex.Message}");
+                return StatusCode(500, ex.Message);
+            }
+        }
+
+        [HttpGet("connections")]
+        public IActionResult GetConnections()
+        {
+            var connectionsList = new List<object>();
+
+            foreach (var conn in _data.Config.Connections)
+            {
+                var connDevices = _data.Config.Devices
+                    .Where(d => d.ConnectionId == conn.Id)
+                    .ToList();
+
+                bool isOffline = connDevices.Count > 0 &&
+                                 connDevices.All(d => _data.OfflineDevices.ContainsKey(d.Name));
+
+                var lastPolled = connDevices
+                    .Select(d => _data.LastPolledAtMap.TryGetValue(d.Name, out var t) ? t : default)
+                    .Where(t => t != default)
+                    .DefaultIfEmpty(default)
+                    .Max();
+
+                string tbType = conn.Type switch
+                {
+                    "bacnet-ip" => "BACnet Gateway",
+                    "modbus-tcp" => "Modbus Gateway",
+                    _ => conn.Type
+                };
+
+                var deviceRows = connDevices.Select(d =>
+                {
+                    bool offline = _data.OfflineDevices.ContainsKey(d.Name);
+                    _data.LastPolledAtMap.TryGetValue(d.Name, out var polledAt);
+
+                    bool stale = !offline &&
+                                 (polledAt == default ||
+                                  (System.DateTime.UtcNow - polledAt).TotalMinutes > 5);
+
+                    string protocol = d.DeviceType.ToLowerInvariant() switch
+                    {
+                        "janitza" => "Modbus",
+                        "glueck" => "Modbus",
+                        "abb" => "Modbus",
+                        "sunspec" => "Modbus",
+                        "bacnet" => "BACnet",
+                        "deziko" => "Deziko (BACnet)",
+                        _ => d.DeviceType
+                    };
+
+                    string address = d.DeviceId.HasValue ? $"ID {d.DeviceId}" : "–";
+
+                    return new
+                    {
+                        name = d.Name,
+                        deviceType = d.DeviceType,
+                        protocol = protocol,
+                        address = address,
+                        assetType = d.AssetType,
+                        status = offline ? "offline" : stale ? "stale" : "online",
+                        lastSeen = polledAt == default
+                                       ? "Never"
+                                       : polledAt.ToString("HH:mm:ss")
+                    };
+                }).ToList();
+
+                string connStatus = isOffline && connDevices.Count > 0
+                    ? "offline"
+                    : deviceRows.Any(d => d.status == "stale") ? "stale" : "online";
+
+                connectionsList.Add(new
+                {
+                    id = conn.Id,
+                    name = conn.EffectiveName,
+                    type = tbType,
+                    address = (conn.Type == "bacnet-ip" ? conn.LocalAddress : conn.Address) ?? "",
+                    port = (conn.Type == "bacnet-ip" ? conn.LocalPort : conn.Port) ?? 0,
+                    status = connStatus,
+                    lastSeen = lastPolled == default
+                                    ? "Never"
+                                    : lastPolled.ToString("yyyy-MM-dd HH:mm:ss UTC"),
+                    deviceCount = connDevices.Count,
+                    onlineCount = deviceRows.Count(d => d.status == "online"),
+                    devices = deviceRows
+                });
+            }
+
+            return Ok(new
+            {
+                connections = connectionsList,
+                canEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server)
+            });
         }
 
         private static string? ResolveConfigPath()

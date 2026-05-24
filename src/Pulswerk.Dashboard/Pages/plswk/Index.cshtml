@@ -1,86 +1,206 @@
-@page
+@page "{*url}"
 @model Pulswerk.Dashboard.Pages.IndexModel
 @{
-    ViewData["Title"] = "Home";
+    Layout = null;
 }
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pulswerk</title>
+    <link rel="stylesheet" href="/plswk/lib/fontawesome.min.css">
+    <link rel="stylesheet" href="/plswk/lib/flowbite.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/plswk/css/pulswerk.css?v=3">
+    <style>
+        .page-enter {
+            animation: fadeIn 0.2s ease-out forwards;
+        }
+        @@keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-50 flex min-h-screen font-sans antialiased">
+    <div id="app" class="w-full flex min-h-screen"></div>
 
+    <!-- History Modal -->
+    <div class="modal-overlay" id="historyModal" data-testid="history-modal">
+        <div class="modal-content animate-fade-in">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-path" id="chartPath"></div>
+                    <h2 id="chartTitle" data-i18n="history">History</h2>
+                    <div class="flex gap-4 items-center">
+                        <div class="text-xs text-slate-400 font-mono" id="chartMeta"></div>
+                        <div class="flex items-baseline gap-1.5">
+                            <div id="chartLiveValue"
+                                 class="font-bold text-sky-400 bg-sky-400/10 px-2 py-0.5 rounded text-sm">---</div>
+                            <div class="edit-unit font-semibold text-slate-400 text-sm" id="chartUnit"></div>
+                        </div>
+                    </div>
+                </div>
+                <button class="close-modal" onclick="closeHistory()">&times;</button>
+            </div>
+            
+            <div class="chart-controls">
+                <div id="historyTwContainer"></div>
+                <div id="chartLoading" class="hidden items-center gap-2 text-sky-400">
+                    <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading">Loading...</span>
+                </div>
+            </div>
 
-<!-- ── Alarm priority boxes ──────────────────────────────────────────────── -->
-<div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4 mb-8 animate-fade-in" data-testid="alarm-boxes">
-    <a class="alarm-box bg-gradient-to-br from-red-950 to-red-900 border-red-500 text-red-300" href="/plswk/Alarms?severity=CRITICAL" id="box-critical">
-        <div class="text-lg"><i class="fas fa-skull-crossbones"></i></div>
-        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_critical">Critical</div>
-        <div class="text-4xl font-extrabold leading-none text-red-500">@Model.AlarmCritical</div>
-    </a>
-    <a class="alarm-box bg-gradient-to-br from-amber-950 to-amber-900 border-amber-500 text-amber-300" href="/plswk/Alarms?severity=MAJOR" id="box-major">
-        <div class="text-lg"><i class="fas fa-exclamation-triangle"></i></div>
-        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_major">Major</div>
-        <div class="text-4xl font-extrabold leading-none text-amber-500">@Model.AlarmMajor</div>
-    </a>
-    <a class="alarm-box bg-gradient-to-br from-sky-950 to-sky-900 border-sky-400 text-sky-200" href="/plswk/Alarms?severity=MINOR" id="box-minor">
-        <div class="text-lg"><i class="fas fa-exclamation-circle"></i></div>
-        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_minor">Minor</div>
-        <div class="text-4xl font-extrabold leading-none text-sky-400">@Model.AlarmMinor</div>
-    </a>
-    <a class="alarm-box bg-gradient-to-br from-slate-800 to-slate-700 border-slate-500 text-slate-400" href="/plswk/Alarms?severity=WARNING" id="box-warning">
-        <div class="text-lg"><i class="fas fa-bell"></i></div>
-        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_warning">Warning</div>
-        <div class="text-4xl font-extrabold leading-none text-slate-400">@Model.AlarmWarning</div>
-    </a>
-    <a class="alarm-box bg-gradient-to-br from-violet-950 to-violet-900 border-violet-500 text-violet-300" href="/plswk/Alarms?severity=MAINTENANCE" id="box-maintenance">
-        <div class="text-lg"><i class="fas fa-wrench"></i></div>
-        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_maintenance">Maintenance</div>
-        <div class="text-4xl font-extrabold leading-none text-violet-400">@Model.AlarmMaintenance</div>
-    </a>
-    <a class="alarm-box bg-gradient-to-br from-slate-800 to-slate-900 border-white/10 text-slate-200" href="/plswk/Alarms" id="box-total">
-        <div class="text-lg"><i class="fas fa-list-ul"></i></div>
-        <div class="text-[0.7rem] font-bold uppercase tracking-widest opacity-75" data-i18n="severity_total">Total</div>
-        <div class="text-4xl font-extrabold leading-none text-slate-50">@Model.AlarmTotal</div>
-    </a>
-</div>
-
-<!-- ── Favorite Dashboards ─────────────────────────────────────────────────── -->
-<div class="animate-fade-in mb-10" style="animation-delay: 0.05s">
-    <div class="flex items-center gap-3 text-base font-bold text-slate-50 mb-5">
-        <i class="fas fa-th-large text-sky-400"></i> <span data-i18n="fav_dashboards">Favorite Dashboards</span>
-        <button class="btn-icon ml-auto" title="Refresh" data-i18n-title="btn_refresh" onclick="loadFavoriteDashboards()">
-            <i class="fas fa-sync-alt"></i>
-        </button>
-    </div>
-    <div id="favoriteDashList" class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5"></div>
-    <div id="emptyFavoriteDash" class="hidden flex-col items-center justify-center gap-3 text-center text-slate-400 p-12 glass rounded-2xl">
-        <i class="fas fa-th-large text-4xl opacity-20"></i>
-        <p data-i18n="no_fav_dashboards">No favorite dashboards yet.</p>
-        <p class="text-xs">Go to <a href="/plswk/Dashboards" class="text-sky-400 hover:underline" data-i18n="nav_dashboards">Dashboards</a> and click the ★ to pin one.</p>
-    </div>
-</div>
-
-<!-- ── data point Favorites ──────────────────────────────────────────────────── -->
-<div class="animate-fade-in" style="animation-delay: 0.15s">
-    <div class="flex items-center gap-3 text-base font-bold text-slate-50 mb-5">
-        <i class="fas fa-star text-sky-400"></i> <span data-i18n="favorites">Favorites</span>
-        <button class="btn-icon ml-auto" title="Refresh" data-i18n-title="btn_refresh" onclick="loadFavorites()">
-            <i class="fas fa-sync-alt"></i>
-        </button>
+            <div class="chart-container">
+                <div id="historyChart" style="height: 100%"></div>
+            </div>
+        </div>
     </div>
 
-    <div id="favoritesList" class="grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-5" data-testid="favorites-list"></div>
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="editModal" data-testid="edit-modal">
+        <div class="modal-content edit-modal-content animate-fade-in">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-path" id="editPath"></div>
+                    <h2 id="editTitle" data-i18n="edit_value">Edit Value</h2>
+                    <div class="text-xs text-slate-400 font-mono" id="editMeta"></div>
+                </div>
+                <button class="close-modal" onclick="closeEdit()">&times;</button>
+            </div>
 
-    <div id="emptyFavorites" class="hidden flex-col items-center justify-center gap-3 text-center text-slate-400 p-12 glass rounded-2xl">
-        <i class="fas fa-star text-4xl opacity-20"></i>
-        <p data-i18n="no_favorites">No favorites yet.</p>
-        <p class="text-xs">Go to <a href="/plswk/Assets" class="text-sky-400 hover:underline" data-i18n="nav_assets">Assets</a> and click the ★ to pin a point.</p>
+            <div class="edit-form">
+                <div class="input-group" id="stepperGroup" style="display:none">
+                    <label data-i18n="new_value">New Value</label>
+                    <div class="number-stepper">
+                        <button class="stepper-btn" onclick="step(-1)">−</button>
+                        <input type="number" id="editValue" class="stepper-input">
+                        <button class="stepper-btn" onclick="step(1)">+</button>
+                    </div>
+                    <div class="text-right text-xs text-slate-500 font-medium mt-1">
+                        <span data-i18n="current_value">Current</span>: <span id="currentVal"
+                                                                              class="text-slate-300">---</span> <span id="editUnitLabel"></span>
+                    </div>
+                </div>
+
+                <div class="input-group" id="enumGroup" style="display:none">
+                    <label data-i18n="new_value">New Value</label>
+                    <select id="enumSelect" class="enum-select"></select>
+                </div>
+
+                <div class="input-group" id="boolGroup" style="display:none">
+                    <div class="bool-toggle-wrap">
+                        <div class="bool-toggle-label" id="boolLabel">OFF</div>
+                        <label class="bool-toggle">
+                            <input type="checkbox" id="boolInput" onchange="updateBoolLabel()">
+                            <span class="bool-toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="editStatus" class="status-msg"></div>
+
+                <button type="button" class="save-btn auth-write-only" id="saveBtn" onclick="submitEdit(event)">
+                    <i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>
+                </button>
+            </div>
+        </div>
     </div>
-</div>
 
-@section Scripts {
-    <environment include="Development">
-        <script src="/plswk/js/pages/index.page.js" type="module" asp-append-version="true"></script>
-    </environment>
-    <environment exclude="Development">
-        <script src="/plswk/dist/js/index.page.bundle.js" type="module" asp-append-version="true"></script>
-    </environment>
-}
+    <!-- Properties Modal -->
+    <div class="modal-overlay" id="propsModal" data-testid="props-modal">
+        <div class="modal-content animate-fade-in">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-path" id="propsPath"></div>
+                    <h2 id="propsTitle" data-i18n="properties">Properties</h2>
+                    <div class="text-xs text-slate-400 font-mono" id="propsMeta"></div>
+                </div>
+                <button class="close-modal" onclick="closeProperties()">&times;</button>
+            </div>
 
-@await Html.PartialAsync("_AssetModals")
-@Html.AntiForgeryToken()
+            <div id="propsLoading" class="flex-1 flex flex-col items-center justify-center text-sky-400 gap-3">
+                <i class="fas fa-spinner fa-spin text-4xl"></i>
+                <span data-i18n="loading">Loading...</span>
+            </div>
+
+            <div id="propsEmpty" class="hidden flex-1 flex flex-col items-center justify-center text-slate-400 gap-3">
+                <i class="fas fa-search text-4xl opacity-20"></i>
+                <span data-i18n="no_properties_found">No extended properties found.</span>
+            </div>
+
+            <div id="propsTable" class="props-table-container hidden">
+                <table class="props-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="prop_name">Property</th>
+                            <th data-i18n="prop_value">Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="propsBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Modal -->
+    <div class="modal-overlay" id="scheduleModal" data-testid="schedule-modal">
+        <div class="modal-content animate-fade-in w-[600px] max-w-[95vw]">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-path" id="schedulePath"></div>
+                    <h2 data-i18n="weekly_schedule">Weekly Schedule</h2>
+                    <div class="text-xs text-slate-400 font-mono" id="scheduleMeta"></div>
+                </div>
+                <button class="close-modal" onclick="closeSchedule()">&times;</button>
+            </div>
+
+            <div id="scheduleLoading" class="p-12 flex flex-col items-center justify-center text-sky-400 gap-3">
+                <i class="fas fa-spinner fa-spin text-4xl"></i>
+                <span data-i18n="loading">Loading Schedule...</span>
+            </div>
+
+            <div id="scheduleView" class="hidden p-4">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-xs text-slate-500 uppercase tracking-wider font-bold"
+                          data-i18n="schedule_configuration">Schedule Configuration</span>
+                    <button class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded transition-colors auth-write-only"
+                            id="btnEditSchedule" onclick="toggleScheduleEdit(true)">
+                        <i class="fas fa-edit mr-1"></i> <span data-i18n="edit">Edit</span>
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 gap-3" id="scheduleGrid">
+                    <!-- Day rows injected here -->
+                </div>
+
+                <div class="status-msg mt-4" id="scheduleStatus"></div>
+
+                <div id="editScheduleActions" class="hidden flex justify-end gap-2 mt-4 pt-4 border-t border-white/5">
+                    <button
+                        class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded transition-colors"
+                        onclick="toggleScheduleEdit(false)">
+                        <span data-i18n="cancel">Cancel</span>
+                    </button>
+                    <button id="scheduleSaveBtn"
+                            class="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-xs rounded transition-colors"
+                            onclick="saveSchedule()">
+                        <i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/plswk/lib/jquery.min.js"></script>
+    <script src="/plswk/lib/flowbite.min.js"></script>
+    <script src="/plswk/lib/apexcharts.js"></script>
+    <script src="/plswk/lib/gridstack-all.js"></script>
+    
+    @Html.AntiForgeryToken()
+    <script type="module" src="/plswk/dist/js/app.bundle.js"></script>
+</body>
+</html>
