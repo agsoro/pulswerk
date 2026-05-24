@@ -236,9 +236,10 @@ export function TelemetryListPage() {
                                                     top: `${topPos}px`, 
                                                     height: `${ROW_HEIGHT}px`,
                                                     left: 0, 
-                                                    right: 0 
+                                                    right: 0,
+                                                    borderBottom: '1px solid rgba(255, 255, 255, 0.03)'
                                                 }}
-                                                class="flex items-center w-full transition-colors duration-150 hover:bg-white/[0.03] border-b border-white/[0.03]"
+                                                class="flex items-center w-full transition-colors duration-150 hover:bg-white/[0.03]"
                                             >
                                                 <td class="px-6 py-3 align-middle truncate font-semibold text-slate-100" style={{ width: '10%' }}>
                                                     {point.connection || '–'}

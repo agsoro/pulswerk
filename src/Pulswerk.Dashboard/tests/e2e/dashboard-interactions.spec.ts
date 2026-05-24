@@ -285,4 +285,235 @@ test.describe('Dashboard Interactions and Component States', () => {
     const addWidgetBtn = page.locator('[data-testid="dash-add-widget-btn"]');
     await expect(addWidgetBtn).toBeVisible();
   });
+
+  // 6. Verify telemetry fetching optimization (no full telemetries fetch on load/view)
+  test('Telemetry Metadata Lazy-Loading Optimization', async ({ page }) => {
+    // Collect all requests to the telemetries endpoint
+    const telemetriesRequests: { url: string; method: string; postData: string | null }[] = [];
+    await page.on('request', request => {
+      const url = request.url();
+      if (url.includes('/api/telemetries')) {
+        telemetriesRequests.push({
+          url,
+          method: request.method(),
+          postData: request.postData()
+        });
+      }
+    });
+
+    // Navigate to dashboards list
+    await page.goto('/plswk/Dashboards');
+    await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
+
+    // Assert that no request to the telemetries endpoint was made
+    // (specifically, no full fetch like `/plswk/api/telemetries` or `/plswk/api/telemetries?includeLiveValues=true`)
+    const fullFetchRequests = telemetriesRequests.filter(req => {
+      if (req.method === 'GET') {
+        const parsed = new URL(req.url);
+        return !parsed.searchParams.get('keys');
+      }
+      if (req.method === 'POST') {
+        if (!req.postData) return true;
+        try {
+          const body = JSON.parse(req.postData);
+          return !body.keys || body.keys.length === 0;
+        } catch {
+          return true;
+        }
+      }
+      return false;
+    });
+    expect(fullFetchRequests.length).toBe(0);
+
+    // If there's a dashboard card, click it to load the dashboard shell
+    const cards = page.locator('.dash-card');
+    if (await cards.count() > 0) {
+      await cards.first().click();
+      await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+      await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+
+      // After loading a dashboard, it should only query metadata for the keys actually used,
+      // not a full fetch.
+      const fullFetchAfterLoad = telemetriesRequests.filter(req => {
+        if (req.method === 'GET') {
+          const parsed = new URL(req.url);
+          return !parsed.searchParams.get('keys');
+        }
+        if (req.method === 'POST') {
+          if (!req.postData) return true;
+          try {
+            const body = JSON.parse(req.postData);
+            return !body.keys || body.keys.length === 0;
+          } catch {
+            return true;
+          }
+        }
+        return false;
+      });
+      expect(fullFetchAfterLoad.length).toBe(0);
+    }
+  });
+
+  // 7. E2E test for drag, resize, and position persistence of dashboard widgets
+  test('Dashboard Widget Drag, Resize, and Position Persistence', async ({ page }) => {
+    // Navigate to dashboards list
+    await page.goto('http://localhost:5002/plswk/Dashboards');
+    await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
+
+    // Open create dashboard modal
+    const createBtn = page.locator('[data-testid="dash-create-btn"]');
+    if (await createBtn.count() > 0) {
+      await createBtn.click();
+    } else {
+      await page.locator('#emptyDashboards button').click();
+    }
+
+    const modal = page.locator('[data-testid="create-dash-modal"]');
+    await expect(modal).toBeVisible();
+
+    const uniqueName = `Drag Test ${Date.now()}`;
+    await page.locator('#newDashName').fill(uniqueName);
+    await page.locator('#newDashDesc').fill('E2E Drag and Resize Test');
+    await modal.locator('button:has-text("Create")').click();
+
+    // Verify redirection to the new dashboard in edit mode
+    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+
+    // Click "Add your first widget" or "Add Widget" on the top right
+    const addFirstWidgetBtn = page.locator('button:has-text("Add your first widget")');
+    if (await addFirstWidgetBtn.count() > 0) {
+      await addFirstWidgetBtn.click();
+    } else {
+      await page.locator('[data-testid="dash-add-widget-btn"]').click();
+    }
+
+    // Wait for the Add Widget modal
+    const addWidgetModal = page.locator('#addWidgetModal');
+    await expect(addWidgetModal).toBeVisible();
+
+    // Fill title
+    await page.locator('#widgetTitle').fill('Test Timeseries Widget');
+
+    // Open the key selector first
+    await page.locator('#btnKeyPickerOpen').click();
+
+    // Select the first available telemetry key (e.g. check the first checkbox in key list)
+    // Wait for key picker to load
+    await page.waitForSelector('#keyList input[name="wkey"]');
+    const firstCheckbox = page.locator('#keyList input[name="wkey"]').first();
+    await firstCheckbox.check();
+
+    // Click "OK" to close the key picker
+    await page.locator('#keyPickerWrapper button:has-text("OK")').click();
+
+    // Click "Add Widget" confirm button
+    await page.locator('#btnAddWidgetConfirm').click();
+    await expect(addWidgetModal).toBeHidden();
+
+    // Wait for widget to be added to grid
+    const widgetItem = page.locator('.grid-stack-item').first();
+    await expect(widgetItem).toBeVisible();
+
+    // Verify default coordinates (usually x=0, y=0, w=6, h=4)
+    await expect(widgetItem).toHaveAttribute('gs-x', '0');
+    await expect(widgetItem).toHaveAttribute('gs-y', '0');
+    await expect(widgetItem).toHaveAttribute('gs-w', '6');
+    await expect(widgetItem).toHaveAttribute('gs-h', '4');
+
+    // Wait for resize handle to be attached
+    const resizeHandle = widgetItem.locator('.ui-resizable-se');
+    await expect(resizeHandle).toBeVisible();
+
+    await page.screenshot({ path: 'edit_mode.png' });
+
+    // Perform Resize: drag resize handle down-right
+    const handleBox = await resizeHandle.boundingBox();
+    console.log('Handle box:', handleBox);
+    expect(handleBox).not.toBeNull();
+    const resizeGridContainer = page.locator('#dashGrid2');
+    const resizeGridBox = await resizeGridContainer.boundingBox();
+    expect(resizeGridBox).not.toBeNull();
+    if (handleBox && resizeGridBox) {
+      // Hover over the handle to ensure the mouse is exactly on it
+      await resizeHandle.hover();
+      await page.waitForTimeout(100);
+      await page.mouse.down();
+      await page.waitForTimeout(100);
+      // Move 10px first to trigger the drag start threshold
+      await page.mouse.move(handleBox.x + handleBox.width / 2 + 10, handleBox.y + handleBox.height / 2 + 10, { steps: 5 });
+      await page.waitForTimeout(100);
+      // Move to absolute target coordinates for w=12, h=6
+      const targetX = resizeGridBox.x + resizeGridBox.width - 20;
+      const targetY = resizeGridBox.y + 480; // mathematically safe midpoint for 6 rows
+      await page.mouse.move(targetX, targetY, { steps: 15 });
+      await page.waitForTimeout(100);
+      await page.mouse.up();
+    }
+
+    // Wait for layout to update
+    await page.waitForTimeout(500);
+
+    // Verify resize succeeded
+    const resizedW = await widgetItem.getAttribute('gs-w');
+    const resizedH = await widgetItem.getAttribute('gs-h');
+    console.log(`After resize: w=${resizedW}, h=${resizedH}`);
+    expect(resizedW).toBe('12');
+    expect(resizedH).toBe('6');
+
+    // Perform Drag: drag the widget by its header to cell
+    const header = widgetItem.locator('.widget-header');
+    const headerBox = await header.boundingBox();
+    expect(headerBox).not.toBeNull();
+    if (headerBox) {
+      await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y + headerBox.height / 2);
+      await page.mouse.down();
+      // Drag down-right
+      await page.mouse.move(headerBox.x + headerBox.width / 2 + 300, headerBox.y + headerBox.height / 2 + 300, { steps: 10 });
+      await page.mouse.up();
+    }
+
+    // Wait for layout to settle
+    await page.waitForTimeout(500);
+
+    // Read updated coordinates from DOM attributes
+    const updatedX = await widgetItem.getAttribute('gs-x');
+    const updatedY = await widgetItem.getAttribute('gs-y');
+    const updatedW = await widgetItem.getAttribute('gs-w');
+    const updatedH = await widgetItem.getAttribute('gs-h');
+
+    // Assert coordinates are not default or snapped back to 0,0
+    console.log(`Updated coordinates: x=${updatedX}, y=${updatedY}, w=${updatedW}, h=${updatedH}`);
+    expect(updatedY).not.toBe('0');
+    expect(updatedW).toBe('12');
+    expect(updatedH).toBe('6');
+
+    // Save dashboard
+    await page.locator('#btnSave').click();
+    await page.waitForURL(new RegExp(`/plswk/Dashboards/[^/]+`));
+    // Wait for view mode to load
+    await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+
+    // Assert view mode reloads the widget at the same coordinates
+    const savedWidget = page.locator('.grid-stack-item').first();
+    await page.screenshot({ path: '/home/helsperger/.gemini/antigravity-ide/brain/446a50f0-82f0-4952-b3f5-2174ccb124c6/scratch/edit_mode.png' });
+    await expect(savedWidget).toHaveAttribute('gs-x', updatedX!);
+    await expect(savedWidget).toHaveAttribute('gs-y', updatedY!);
+    await expect(savedWidget).toHaveAttribute('gs-w', updatedW!);
+    await expect(savedWidget).toHaveAttribute('gs-h', updatedH!);
+
+    // Verify visual layout: ensure the widget's bounding box is placed down-grid
+    const savedBox = await savedWidget.boundingBox();
+    expect(savedBox).not.toBeNull();
+    const gridContainer = page.locator('#dashGrid2');
+    const gridBox = await gridContainer.boundingBox();
+    expect(gridBox).not.toBeNull();
+    if (savedBox && gridBox) {
+      const relativeTop = savedBox.y - gridBox.y;
+      console.log(`Widget relative top in view mode: ${relativeTop}px`);
+      // Since it is saved at y=4, cellHeight=80, margin=8, 
+      // relativeTop should be around 4 * 88 = 352px. Verify it's positioned down.
+      expect(relativeTop).toBeGreaterThan(200);
+    }
+  });
 });

@@ -383,11 +383,17 @@ function updateAllScadaPointsWithData(newData: Record<string, string>): void {
 async function showScadaPopup(key: string, triggerEl: HTMLElement): Promise<void> {
     hideScadaPopup();
     const popup = document.getElementById('scadaPopup'), content = document.getElementById('scadaPopupContent'); if (!popup || !content) return;
-    if (!(window as any).allKeysLoaded && !allKeys.some(k => k.key === key)) {
+    if (!allKeys.some(k => k.key === key)) {
         try {
-            allKeys = await DashboardService.fetchAvailableTelemetries();
-            (window as any).allKeys = allKeys;
-            (window as any).allKeysLoaded = true;
+            const singleMeta = await DashboardService.fetchAvailableTelemetries([key]);
+            if (singleMeta && singleMeta.length > 0) {
+                const merged = [...((window as any).allKeys || [])];
+                if (!merged.some(x => x.key === singleMeta[0].key)) {
+                    merged.push(singleMeta[0]);
+                }
+                (window as any).allKeys = merged;
+                allKeys = merged;
+            }
         } catch (e) {
             allKeys = (window as any).allKeys || [];
         }

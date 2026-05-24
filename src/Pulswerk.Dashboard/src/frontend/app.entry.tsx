@@ -107,7 +107,6 @@ export function App() {
 
     useEffect(() => {
         const init = async () => {
-            await (window as any).ensureKeysMeta();
             await loadUser();
         };
         init();

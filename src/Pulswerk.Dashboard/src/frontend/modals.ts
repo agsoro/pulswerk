@@ -31,7 +31,7 @@ function ensureHistoryTw(): void {
 async function openHistory(key: string): Promise<void> {
     currentHistoryKey = key;
     ensureHistoryTw();
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
     
@@ -209,7 +209,7 @@ async function refreshHistoryData(): Promise<void> {
 // --- Edit Modal ---
 async function openEdit(key: string): Promise<void> {
     currentEditKey = key;
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
     const enums = meta.enumValues || null;
@@ -368,7 +368,7 @@ async function submitEdit(e?: Event): Promise<void> {
 // --- Properties Modal ---
 async function openProperties(key: string): Promise<void> {
     currentPropsKey = key;
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
     
@@ -463,7 +463,7 @@ async function openScheduleView(key: string): Promise<void> {
     const loading = document.getElementById('scheduleLoading')!;
     const view = document.getElementById('scheduleView')!;
     
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     
     currentScheduleKey = key;

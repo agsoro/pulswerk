@@ -15,7 +15,12 @@ export const token = () => (document.querySelector('input[name="__RequestVerific
 export const api = async (handler: string, opts?: any) => { const r = await fetch(`${window.location.pathname}?handler=${handler}`, opts); return r.json(); };
 
 export function initDashboards(initial: IDashboard | null, editMode: boolean): void {
-    if (initial) { DashboardStore.dashboard = initial; showDashboard(); if (editMode) enterEditMode(); }
+    if (initial) { 
+        DashboardStore.dashboard = initial; 
+        DashboardStore.isEditing = editMode;
+        showDashboard(); 
+        if (editMode) enterEditMode(); 
+    }
     else loadList();
     // Init TW module
     const twContainer = document.getElementById('dashTwContainer');
@@ -152,6 +157,9 @@ export async function showDashboard(): Promise<void> {
     initGrid();
     if (DashboardStore.dashboard!.widgets?.length) {
         (window as any).renderAllWidgets();
+        if (DashboardStore.grid && !DashboardStore.isEditing) {
+            DashboardStore.grid.setStatic(true);
+        }
         setTimeout(() => {
             if ((window as any).updateAllSvgAnimations) {
                 (window as any).updateAllSvgAnimations();
@@ -164,7 +172,7 @@ export async function showDashboard(): Promise<void> {
 
 export function initGrid(): void {
     if (DashboardStore.grid) DashboardStore.grid.destroy(false);
-    DashboardStore.grid = (window as any).GridStack.init({ column: 12, cellHeight: 80, margin: 8, disableResize: true, disableDrag: true, float: true }, '#dashGrid2');
+    DashboardStore.grid = (window as any).GridStack.init({ column: 12, cellHeight: 80, margin: 8, staticGrid: false, float: true }, '#dashGrid2');
     DashboardStore.grid.on('resizestop', function (_event: Event, el: HTMLElement) {
         const id = el.getAttribute('gs-id');
         if (id && DashboardStore.charts[id]) {
@@ -175,7 +183,7 @@ export function initGrid(): void {
 
 export function enterEditMode(): void {
     DashboardStore.isEditing = true;
-    if (DashboardStore.grid) { DashboardStore.grid.enableMove(true); DashboardStore.grid.enableResize(true); }
+    if (DashboardStore.grid) { DashboardStore.grid.setStatic(false); }
     document.getElementById('dashTitle')!.style.display = ''; document.getElementById('dashTitleView')!.style.display = 'none';
     document.getElementById('btnEdit')!.style.display = 'none';
     document.getElementById('btnSave')!.style.display = ''; document.getElementById('btnCancel')!.style.display = ''; document.getElementById('btnAddWidget')!.style.display = '';

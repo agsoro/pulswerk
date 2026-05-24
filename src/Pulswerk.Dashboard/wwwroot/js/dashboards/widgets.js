@@ -8,8 +8,10 @@ import { SingleValueWidget } from './components/SingleValueWidget';
 // widgets.ts – Widget rendering and data fetching
 // ── WIDGET RENDERING ─────────────────────────────────────────────────────
 export function renderAllWidgets() {
-    if (DashboardStore.grid)
+    if (DashboardStore.grid) {
+        DashboardStore.grid.batchUpdate();
         DashboardStore.grid.removeAll();
+    }
     DashboardStore.charts = {};
     const bgLayer = document.getElementById('scadaBg');
     if (bgLayer)
@@ -26,6 +28,9 @@ export function renderAllWidgets() {
             else
                 addWidgetToGrid(w);
         });
+    }
+    if (DashboardStore.grid) {
+        DashboardStore.grid.commit();
     }
 }
 const WTYPE_ICONS = { 'timeseries': 'fa-chart-line', 'latest-values': 'fa-table', 'single-value': 'fa-digital-tachograph', 'scada-point': 'fa-map-pin', 'background-svg': 'fa-drafting-compass' };
@@ -48,7 +53,14 @@ export function addWidgetToGrid(w) {
         </div>
         <div class="widget-body" id="wb_${w.id}"></div>
     </div>`;
-    DashboardStore.grid.addWidget(el, { id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, minW: 3, minH: 2 });
+    el.setAttribute('gs-id', w.id);
+    el.setAttribute('gs-x', String(w.x !== undefined ? w.x : 0));
+    el.setAttribute('gs-y', String(w.y !== undefined ? w.y : 0));
+    el.setAttribute('gs-w', String(w.w || 6));
+    el.setAttribute('gs-h', String(w.h || 4));
+    el.setAttribute('gs-min-w', '3');
+    el.setAttribute('gs-min-h', '2');
+    DashboardStore.grid.addWidget(el, { id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, minW: 3, minH: 2, autoPosition: false });
     renderWidgetContent(w);
 }
 export function renderWidgetContent(w) {

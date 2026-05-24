@@ -31,7 +31,7 @@ function ensureHistoryTw() {
 async function openHistory(key) {
     currentHistoryKey = key;
     ensureHistoryTw();
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
     document.getElementById('chartTitle').textContent = meta.name || key;
@@ -199,7 +199,7 @@ async function refreshHistoryData() {
 // --- Edit Modal ---
 async function openEdit(key) {
     currentEditKey = key;
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
     const enums = meta.enumValues || null;
@@ -354,7 +354,7 @@ async function submitEdit(e) {
 // --- Properties Modal ---
 async function openProperties(key) {
     currentPropsKey = key;
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     const path = meta.parentPath || [];
     document.getElementById('propsTitle').textContent = meta.name || key;
@@ -440,7 +440,7 @@ async function openScheduleView(key) {
     const grid = document.getElementById('scheduleGrid');
     const loading = document.getElementById('scheduleLoading');
     const view = document.getElementById('scheduleView');
-    await ensureKeysMeta();
+    await ensureKeysMeta(key);
     const meta = resolveKeyMeta(key);
     currentScheduleKey = key;
     isEditingSchedule = false;

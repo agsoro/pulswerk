@@ -40,16 +40,42 @@ function resolveKeyMeta(key) {
 }
 /**
  * Lazily load allKeys from the AvailableTelemetries API if not already populated.
+ * If specific keys are requested, only fetch those missing from the cache.
  */
-async function ensureKeysMeta() {
-    if (allKeys.length)
-        return;
-    try {
-        const r = await fetch('/plswk/api/telemetries');
-        if (r.ok)
-            allKeys = await r.json();
+async function ensureKeysMeta(keys) {
+    const keysArray = keys
+        ? (Array.isArray(keys) ? keys : [keys])
+        : [];
+    if (keysArray.length > 0) {
+        const missingKeys = keysArray.filter(k => !allKeys.some(meta => meta.key === k));
+        if (missingKeys.length === 0)
+            return; // All requested keys are already cached
+        try {
+            const r = await fetch(`/plswk/api/telemetries?keys=${encodeURIComponent(missingKeys.join(','))}`);
+            if (r.ok) {
+                const data = await r.json();
+                const merged = [...allKeys];
+                data.forEach((m) => {
+                    if (!merged.some(x => x.key === m.key))
+                        merged.push(m);
+                });
+                allKeys = merged;
+            }
+        }
+        catch (e) { /* non-critical */ }
     }
-    catch (e) { /* non-critical */ }
+    else {
+        if (window.allKeysLoaded)
+            return;
+        try {
+            const r = await fetch('/plswk/api/telemetries');
+            if (r.ok) {
+                allKeys = await r.json();
+                window.allKeysLoaded = true;
+            }
+        }
+        catch (e) { /* non-critical */ }
+    }
 }
 /**
  * Fetch current value(s) for one or more keys from the LatestValues API.

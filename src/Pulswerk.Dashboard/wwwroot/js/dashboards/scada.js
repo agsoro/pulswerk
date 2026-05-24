@@ -435,11 +435,17 @@ async function showScadaPopup(key, triggerEl) {
     const popup = document.getElementById('scadaPopup'), content = document.getElementById('scadaPopupContent');
     if (!popup || !content)
         return;
-    if (!window.allKeysLoaded && !allKeys.some(k => k.key === key)) {
+    if (!allKeys.some(k => k.key === key)) {
         try {
-            allKeys = await DashboardService.fetchAvailableTelemetries();
-            window.allKeys = allKeys;
-            window.allKeysLoaded = true;
+            const singleMeta = await DashboardService.fetchAvailableTelemetries([key]);
+            if (singleMeta && singleMeta.length > 0) {
+                const merged = [...(window.allKeys || [])];
+                if (!merged.some(x => x.key === singleMeta[0].key)) {
+                    merged.push(singleMeta[0]);
+                }
+                window.allKeys = merged;
+                allKeys = merged;
+            }
         }
         catch (e) {
             allKeys = window.allKeys || [];

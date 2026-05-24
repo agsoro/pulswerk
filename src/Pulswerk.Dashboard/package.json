@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "inspect": "node ../../scratch/inspect.js",
     "dev:js": "vite",
     "build:js": "tsc && vite build",
     "test": "vitest run",

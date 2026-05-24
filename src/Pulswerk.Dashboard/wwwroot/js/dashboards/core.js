@@ -13,6 +13,7 @@ export const api = async (handler, opts) => { const r = await fetch(`${window.lo
 export function initDashboards(initial, editMode) {
     if (initial) {
         DashboardStore.dashboard = initial;
+        DashboardStore.isEditing = editMode;
         showDashboard();
         if (editMode)
             enterEditMode();
@@ -172,6 +173,9 @@ export async function showDashboard() {
     initGrid();
     if (DashboardStore.dashboard.widgets?.length) {
         window.renderAllWidgets();
+        if (DashboardStore.grid && !DashboardStore.isEditing) {
+            DashboardStore.grid.setStatic(true);
+        }
         setTimeout(() => {
             if (window.updateAllSvgAnimations) {
                 window.updateAllSvgAnimations();
@@ -185,7 +189,7 @@ export async function showDashboard() {
 export function initGrid() {
     if (DashboardStore.grid)
         DashboardStore.grid.destroy(false);
-    DashboardStore.grid = window.GridStack.init({ column: 12, cellHeight: 80, margin: 8, disableResize: true, disableDrag: true, float: true }, '#dashGrid2');
+    DashboardStore.grid = window.GridStack.init({ column: 12, cellHeight: 80, margin: 8, staticGrid: false, float: true }, '#dashGrid2');
     DashboardStore.grid.on('resizestop', function (_event, el) {
         const id = el.getAttribute('gs-id');
         if (id && DashboardStore.charts[id]) {
@@ -196,8 +200,7 @@ export function initGrid() {
 export function enterEditMode() {
     DashboardStore.isEditing = true;
     if (DashboardStore.grid) {
-        DashboardStore.grid.enableMove(true);
-        DashboardStore.grid.enableResize(true);
+        DashboardStore.grid.setStatic(false);
     }
     document.getElementById('dashTitle').style.display = '';
     document.getElementById('dashTitleView').style.display = 'none';

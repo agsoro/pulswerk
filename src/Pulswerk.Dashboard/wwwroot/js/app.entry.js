@@ -85,7 +85,6 @@ export function App() {
     };
     useEffect(() => {
         const init = async () => {
-            await window.ensureKeysMeta();
             await loadUser();
         };
         init();
