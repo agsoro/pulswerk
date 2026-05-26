@@ -110,7 +110,8 @@ function renderChart(data) {
             foreColor: '#94a3b8',
             toolbar: { show: false },
             zoom: { enabled: false },
-            animations: { enabled: false }
+            animations: { enabled: false },
+            accessibility: { enabled: false }
         },
         colors: ['#38bdf8'],
         fill: {

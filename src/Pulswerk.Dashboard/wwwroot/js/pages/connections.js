@@ -83,7 +83,8 @@ export function ConnectionsPage({ initialConnId }) {
                             stacked: true,
                             animations: { enabled: true, easing: 'easeinout', speed: 400 },
                             toolbar: { show: false },
-                            zoom: { enabled: false }
+                            zoom: { enabled: false },
+                            accessibility: { enabled: false }
                         },
                         colors: ['#10b981', '#ef4444'],
                         fill: {

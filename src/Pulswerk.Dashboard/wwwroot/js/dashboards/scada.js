@@ -672,7 +672,10 @@ window.addEventListener('message', function (evt) {
         let svgContent = msg.data || '';
         if (svgContent.startsWith('data:image/svg+xml;base64,')) {
             try {
-                svgContent = atob(svgContent.split(',')[1]);
+                const base64 = svgContent.split(',')[1];
+                const binString = atob(base64);
+                const bytes = Uint8Array.from(binString, (m) => m.charCodeAt(0));
+                svgContent = new TextDecoder().decode(bytes);
             }
             catch (_) { }
         }

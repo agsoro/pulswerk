@@ -52,6 +52,11 @@ namespace Pulswerk.Dashboard
         private readonly object _healthLock = new();
         private System.Threading.Timer? _healthTimer;
 
+        // Cache fields for telemetry metadata
+        private List<AvailableTelemetryDto>? _cachedTelemetries;
+        private DateTime _cacheTimestamp = DateTime.MinValue;
+        private readonly object _cacheLock = new();
+
         public DashboardDataService(LogBuffer logBuffer, AppConfig config,
             TelemetryStore dataStore, AlarmStore alarmStore,
             ConcurrentDictionary<string, byte> offlineDevices, ConcurrentDictionary<string, DateTime> lastPolledAtMap,
@@ -462,7 +467,7 @@ namespace Pulswerk.Dashboard
             return root.Children;
         }
 
-        private string GetLiveValueForFormula(string formula, string? units, DeviceConfig? device = null)
+        private string GetLiveValueForFormula(string formula, string? units, DeviceConfig? device = null, List<AvailableTelemetryDto>? allKeys = null)
         {
             // Simple live value resolver for tree view
             try
@@ -473,7 +478,7 @@ namespace Pulswerk.Dashboard
 
                     if (formula.StartsWith("pathsum("))
                     {
-                        var keys = ResolvePathSumKeys(formula);
+                        var keys = ResolvePathSumKeys(formula, allKeys);
                         double sum = 0;
                         foreach (var k in keys)
                         {
@@ -671,26 +676,61 @@ namespace Pulswerk.Dashboard
                 }
             }
 
+            // Intercept direct calculated consumption keys (e.g. {baseKey}_hourly)
+            if (key.EndsWith("_hourly") || key.EndsWith("_daily") || key.EndsWith("_monthly") || key.EndsWith("_yearly"))
+            {
+                string interval = key.Substring(key.LastIndexOf('_') + 1) switch
+                {
+                    "hourly" => "1h",
+                    "daily" => "1d",
+                    "monthly" => "1m",
+                    "yearly" => "1y",
+                    _ => ""
+                };
+                if (!string.IsNullOrEmpty(interval))
+                {
+                    string baseKey = key.Substring(0, key.LastIndexOf('_'));
+                    return await GetConsumptionHistoryAsync(baseKey, interval, key, startTs, endTs);
+                }
+            }
+
             return await DataStore.QueryAsync(key, startTs, endTs, limit: 5000);
         }
 
-        private async Task<List<TsPoint>> GetVirtualTelemetryHistoryAsync(string formula, DeviceConfig device, long startTs, long endTs)
+        private async Task<List<TsPoint>> GetVirtualTelemetryHistoryAsync(string formula, DeviceConfig device, long startTs, long endTs, List<AvailableTelemetryDto>? allKeys = null)
         {
-            var keys = new HashSet<string>();
             formula = ExpandFormula(formula, device);
 
-            if (formula.StartsWith("pathsum("))
-            {
-                var pathSumKeys = ResolvePathSumKeys(formula);
-                foreach (var k in pathSumKeys) keys.Add(k);
-            }
-            else if (formula.Contains(":consumption:"))
+            if (formula.Contains(":consumption:"))
             {
                 var parts = formula.Split(":consumption:");
                 var baseKey = parts[0];
                 var interval = parts[1];
                 string suffix = interval switch { "1h" => "_hourly", "1d" => "_daily", "1m" => "_monthly", "1y" => "_yearly", _ => "" };
-                keys.Add(baseKey + suffix);
+                string persistedKey = baseKey + suffix;
+                if (baseKey.StartsWith("pathsum("))
+                {
+                    var point = device.Telemetries?.FirstOrDefault(t => ExpandFormula(t.Formula, device) == formula);
+                    if (point != null)
+                    {
+                        persistedKey = $"{device.Id}_{point.Id}";
+                    }
+                }
+                return await GetConsumptionHistoryAsync(baseKey, interval, persistedKey, startTs, endTs, allKeys, isConsumption: true);
+            }
+
+            if (formula.StartsWith("pathsum("))
+            {
+                var point = device.Telemetries?.FirstOrDefault(t => ExpandFormula(t.Formula, device) == formula);
+                string persistedKey = point != null ? $"{device.Id}_{point.Id}" : "pathsum_history";
+                return await GetConsumptionHistoryAsync(formula, "5m", persistedKey, startTs, endTs, allKeys, isConsumption: false);
+            }
+
+            var keys = new HashSet<string>();
+            if (formula.StartsWith("pathsum("))
+            {
+                var pathSumKeys = ResolvePathSumKeys(formula, allKeys);
+                foreach (var k in pathSumKeys) keys.Add(k);
             }
             else
             {
@@ -719,6 +759,28 @@ namespace Pulswerk.Dashboard
 
             var keyList = keys.ToList();
             if (keyList.Count == 0) return new List<TsPoint>();
+
+            // Pre-warm/backfill any calculated keys in keyList
+            for (int i = 0; i < keyList.Count; i++)
+            {
+                string k = keyList[i];
+                if (k.EndsWith("_hourly") || k.EndsWith("_daily") || k.EndsWith("_monthly") || k.EndsWith("_yearly"))
+                {
+                    string kInterval = k.Substring(k.LastIndexOf('_') + 1) switch
+                    {
+                        "hourly" => "1h",
+                        "daily" => "1d",
+                        "monthly" => "1m",
+                        "yearly" => "1y",
+                        _ => ""
+                    };
+                    if (!string.IsNullOrEmpty(kInterval))
+                    {
+                        string kBaseKey = k.Substring(0, k.LastIndexOf('_'));
+                        await GetConsumptionHistoryAsync(kBaseKey, kInterval, k, startTs, endTs, allKeys);
+                    }
+                }
+            }
 
             if (keyList.Count == 1 && (formula == keyList[0] || formula == $"[{keyList[0]}]"))
             {
@@ -908,8 +970,99 @@ namespace Pulswerk.Dashboard
         /// <summary>
         /// Returns all available data point keys with metadata for the dashboard widget key picker.
         /// Flattens the asset tree into a list of selectable keys.
+        /// Uses a fast in-memory cache to prevent O(N^2) tree-building recursion when resolving virtual points.
         /// </summary>
         public List<AvailableTelemetryDto> GetAvailableTelemetries(bool includeLiveValues = false)
+        {
+            List<AvailableTelemetryDto> baseList;
+            lock (_cacheLock)
+            {
+                if (_cachedTelemetries == null || (DateTime.UtcNow - _cacheTimestamp).TotalSeconds > 10)
+                {
+                    _cachedTelemetries = BuildAvailableTelemetriesInternal(false);
+                    _cacheTimestamp = DateTime.UtcNow;
+                }
+                baseList = _cachedTelemetries;
+            }
+
+            // Return a cloned list with fresh live values
+            return baseList.Select(item =>
+            {
+                var clone = new AvailableTelemetryDto
+                {
+                    Key = item.Key,
+                    Name = item.Name,
+                    FullName = item.FullName,
+                    Units = item.Units,
+                    Type = item.Type,
+                    Path = item.Path,
+                    ParentId = item.ParentId,
+                    ParentPath = item.ParentPath,
+                    Device = item.Device,
+                    Connection = item.Connection,
+                    IsWritable = item.IsWritable,
+                    EnumValues = item.EnumValues
+                };
+
+                if (item.Type == "Calculated")
+                {
+                    if (includeLiveValues)
+                    {
+                        // Check if we already have the pre-calculated value stored in LatestValues
+                        string? cachedVal = null;
+                        lock (LatestValues)
+                        {
+                            if (LatestValues.TryGetValue(item.Key, out var v))
+                            {
+                                cachedVal = v?.ToString();
+                            }
+                        }
+
+                        if (cachedVal != null)
+                        {
+                            clone.Value = cachedVal;
+                            clone.LastUpdate = "Live";
+                            return clone;
+                        }
+
+                        var device = IdentifyDeviceFromTelemetryKey(item.Key);
+                        if (device != null && device.Telemetries != null)
+                        {
+                            string pointKey = item.Key.Substring(device.Id.Length + 1);
+                            var dp = device.Telemetries.FirstOrDefault(t => t.Id == pointKey);
+                            if (dp != null && !string.IsNullOrWhiteSpace(dp.Formula))
+                            {
+                                var computed = GetLiveValueForFormula(dp.Formula, dp.Units, device, baseList);
+                                lock (LatestValues)
+                                {
+                                    LatestValues[item.Key] = computed;
+                                    LatestTimestamps[item.Key] = DateTime.UtcNow;
+                                }
+                                clone.Value = computed;
+                                clone.LastUpdate = "Live";
+                                return clone;
+                            }
+                        }
+                        clone.Value = "---";
+                        clone.LastUpdate = "Live";
+                    }
+                    else
+                    {
+                        clone.Value = "---";
+                        clone.LastUpdate = "Live";
+                    }
+                }
+                else
+                {
+                    clone.Value = GetLatestValue(item.Key);
+                    clone.LastUpdate = FormatLastUpdate(item.Key);
+                }
+
+                return clone;
+            }).ToList();
+        }
+
+        private List<AvailableTelemetryDto> BuildAvailableTelemetriesInternal(bool includeLiveValues = false)
         {
             var keys = new List<AvailableTelemetryDto>();
             var trees = GetAssetTrees(includeLiveValues);
@@ -963,6 +1116,7 @@ namespace Pulswerk.Dashboard
             var result = new Dictionary<string, List<TsPoint>>();
             var realKeys = new List<string>();
             var realKeyMap = new Dictionary<string, string>(); // Requested Key -> Expanded Key
+            List<AvailableTelemetryDto>? allKeys = null;
 
             foreach (var key in telemetryKeys)
             {
@@ -1005,16 +1159,26 @@ namespace Pulswerk.Dashboard
 
                 if (baseKey.StartsWith("pathsum("))
                 {
-                    var resolvedKeys = ResolvePathSumKeys(baseKey);
-                    result[key] = await DataStore.QuerySumAsync(resolvedKeys, startTs, endTs, consumptionInterval);
+                    allKeys ??= GetAvailableTelemetries();
+                    if (consumptionInterval != null)
+                    {
+                        result[key] = await GetConsumptionHistoryAsync(baseKey, consumptionInterval, key, startTs, endTs, allKeys, isConsumption: true);
+                    }
+                    else
+                    {
+                        result[key] = await GetConsumptionHistoryAsync(baseKey, "5m", key, startTs, endTs, allKeys, isConsumption: false);
+                    }
                 }
                 else if (consumptionInterval != null)
                 {
-                    result[key] = await DataStore.QueryConsumptionAsync(baseKey, consumptionInterval, startTs, endTs);
+                    string suffix = consumptionInterval switch { "1h" => "_hourly", "1d" => "_daily", "1m" => "_monthly", "1y" => "_yearly", _ => "" };
+                    string persistedKey = baseKey + suffix;
+                    result[key] = await GetConsumptionHistoryAsync(baseKey, consumptionInterval, persistedKey, startTs, endTs, allKeys, isConsumption: true);
                 }
                 else if (!System.Text.RegularExpressions.Regex.IsMatch(baseKey, @"^[a-zA-Z0-9_\-\.:]+$"))
                 {
-                    result[key] = await GetVirtualTelemetryHistoryAsync(baseKey, vdev!, startTs, endTs);
+                    allKeys ??= GetAvailableTelemetries();
+                    result[key] = await GetVirtualTelemetryHistoryAsync(baseKey, vdev!, startTs, endTs, allKeys);
                 }
                 else
                 {
@@ -1025,6 +1189,28 @@ namespace Pulswerk.Dashboard
 
             if (realKeys.Count > 0)
             {
+                // Pre-warm/backfill any calculated keys in the widget keys
+                for (int i = 0; i < realKeys.Count; i++)
+                {
+                    string rk = realKeys[i];
+                    if (rk.EndsWith("_hourly") || rk.EndsWith("_daily") || rk.EndsWith("_monthly") || rk.EndsWith("_yearly"))
+                    {
+                        string rkInterval = rk.Substring(rk.LastIndexOf('_') + 1) switch
+                        {
+                            "hourly" => "1h",
+                            "daily" => "1d",
+                            "monthly" => "1m",
+                            "yearly" => "1y",
+                            _ => ""
+                        };
+                        if (!string.IsNullOrEmpty(rkInterval))
+                        {
+                            string rkBaseKey = rk.Substring(0, rk.LastIndexOf('_'));
+                            await GetConsumptionHistoryAsync(rkBaseKey, rkInterval, rk, startTs, endTs, allKeys);
+                        }
+                    }
+                }
+
                 var realData = await DataStore.QueryMultipleAsync(realKeys, startTs, endTs);
                 foreach (var entry in realKeyMap)
                 {
@@ -1036,7 +1222,214 @@ namespace Pulswerk.Dashboard
             return result;
         }
 
-        private List<string> ResolvePathSumKeys(string pathSumExpr)
+        public async Task<List<TsPoint>> GetConsumptionHistoryAsync(string baseKey, string interval, string persistedKey, long startTs, long endTs, List<AvailableTelemetryDto>? allKeys = null, bool isConsumption = true)
+        {
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // 1. Query existing pre-calculated points
+            var existingPoints = await DataStore.QueryAsync(persistedKey, startTs, endTs, limit: 5000);
+
+            // 2. Determine interval in milliseconds
+            long intervalMs = interval switch
+            {
+                "5m" => 300000L,
+                "1h" => 3600000L,
+                "1d" => 86400000L,
+                "1m" or "1mo" => 30L * 86400000L,
+                "1y" => 365L * 86400000L,
+                _ => 3600000L
+            };
+
+            // 3. Find gaps in the requested range [startTs, endTs]
+            var gaps = new List<(long Start, long End)>();
+            
+            if (existingPoints.Count == 0)
+            {
+                gaps.Add((startTs, endTs));
+            }
+            else
+            {
+                // Gap at the beginning
+                if (existingPoints[0].Ts - startTs > intervalMs * 1.5)
+                {
+                    gaps.Add((startTs, existingPoints[0].Ts - 1));
+                }
+
+                // Gaps in the middle
+                for (int i = 1; i < existingPoints.Count; i++)
+                {
+                    if (existingPoints[i].Ts - existingPoints[i - 1].Ts > intervalMs * 1.5)
+                    {
+                        long gapStart = isConsumption ? existingPoints[i - 1].Ts + intervalMs : existingPoints[i - 1].Ts + 1;
+                        gaps.Add((gapStart, existingPoints[i].Ts - 1));
+                    }
+                }
+
+                // Gap at the end (cap at current time)
+                long targetEnd = Math.Min(endTs, nowMs);
+                if (isConsumption)
+                {
+                    if (targetEnd > existingPoints.Last().Ts + intervalMs)
+                    {
+                        gaps.Add((existingPoints.Last().Ts + intervalMs, targetEnd));
+                    }
+                }
+                else
+                {
+                    if (targetEnd - existingPoints.Last().Ts > intervalMs * 1.5)
+                    {
+                        gaps.Add((existingPoints.Last().Ts + 1, targetEnd));
+                    }
+                }
+            }
+
+            if (gaps.Count == 0)
+            {
+                return existingPoints;
+            }
+
+            // 4. Calculate total duration of gaps
+            long totalGapDurationMs = gaps.Sum(g => g.End - g.Start);
+            const long ThirtyDaysMs = 30L * 24 * 60 * 60 * 1000;
+
+            if (totalGapDurationMs > ThirtyDaysMs)
+            {
+                // It would take long. Trigger background lazy updates for all gaps.
+                foreach (var gap in gaps)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await BackfillConsumptionAsync(baseKey, interval, persistedKey, gap.Start, gap.End, allKeys, isConsumption);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"[Dashboard] Lazy backfill failed for {persistedKey} ({gap.Start} to {gap.End}): {ex.Message}");
+                        }
+                    });
+                }
+
+                // Synchronously, calculate the last 7 days of the latest gap so the user sees some recent data immediately.
+                var lastGap = gaps.Last();
+                long recentStart = Math.Max(lastGap.Start, endTs - 7L * 24 * 60 * 60 * 1000);
+                if (recentStart < lastGap.End)
+                {
+                    string cleanInterval = interval == "1m" ? "1mo" : interval;
+                    List<TsPoint>? recentPoints = null;
+                    if (baseKey.StartsWith("pathsum("))
+                    {
+                        var resolvedKeys = ResolvePathSumKeys(baseKey, allKeys);
+                        recentPoints = await DataStore.QuerySumAsync(resolvedKeys, recentStart, lastGap.End, cleanInterval, isConsumption: isConsumption);
+                    }
+                    else
+                    {
+                        recentPoints = await DataStore.QueryConsumptionAsync(baseKey, cleanInterval, recentStart, lastGap.End);
+                    }
+
+                    if (recentPoints != null && recentPoints.Count > 0)
+                    {
+                        existingPoints.AddRange(recentPoints);
+                    }
+                }
+
+                return existingPoints.OrderBy(p => p.Ts).ToList();
+            }
+            else
+            {
+                // Small gap, calculate on the fly synchronously and save to database
+                var allCalculated = new List<TsPoint>();
+                string cleanInterval = interval == "1m" ? "1mo" : interval;
+
+                List<string>? resolvedKeys = null;
+                if (baseKey.StartsWith("pathsum("))
+                {
+                    resolvedKeys = ResolvePathSumKeys(baseKey, allKeys);
+                }
+
+                foreach (var gap in gaps)
+                {
+                    List<TsPoint>? calculated = null;
+                    if (resolvedKeys != null)
+                    {
+                        calculated = await DataStore.QuerySumAsync(resolvedKeys, gap.Start, gap.End, cleanInterval, isConsumption: isConsumption);
+                    }
+                    else
+                    {
+                        calculated = await DataStore.QueryConsumptionAsync(baseKey, cleanInterval, gap.Start, gap.End);
+                    }
+
+                    if (calculated != null && calculated.Count > 0)
+                    {
+                        allCalculated.AddRange(calculated);
+                        foreach (var p in calculated)
+                        {
+                            if (p.Value.HasValue)
+                            {
+                                if (!isConsumption || p.Ts + intervalMs <= nowMs)
+                                {
+                                    DataStore.Insert(persistedKey, p.Ts, p.Value.Value);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (allCalculated.Count > 0)
+                {
+                    DataStore.Flush();
+                    existingPoints.AddRange(allCalculated);
+                }
+
+                return existingPoints.OrderBy(p => p.Ts).ToList();
+            }
+        }
+
+        private async Task BackfillConsumptionAsync(string baseKey, string interval, string persistedKey, long startTs, long endTs, List<AvailableTelemetryDto>? allKeys = null, bool isConsumption = true)
+        {
+            Log.Info($"[Dashboard] Starting lazy backfill for {persistedKey} ({startTs} to {endTs})");
+            string cleanInterval = interval == "1m" ? "1mo" : interval;
+            
+            List<TsPoint>? points = null;
+            if (baseKey.StartsWith("pathsum("))
+            {
+                var resolvedKeys = ResolvePathSumKeys(baseKey, allKeys);
+                points = await DataStore.QuerySumAsync(resolvedKeys, startTs, endTs, cleanInterval, isConsumption: isConsumption);
+            }
+            else
+            {
+                points = await DataStore.QueryConsumptionAsync(baseKey, cleanInterval, startTs, endTs);
+            }
+
+            if (points != null && points.Count > 0)
+            {
+                long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                long intervalMs = interval switch
+                {
+                    "5m" => 300000L,
+                    "1h" => 3600000L,
+                    "1d" => 86400000L,
+                    "1m" or "1mo" => 30L * 86400000L,
+                    "1y" => 365L * 86400000L,
+                    _ => 3600000L
+                };
+
+                foreach (var p in points)
+                {
+                    if (p.Value.HasValue)
+                    {
+                        if (!isConsumption || p.Ts + intervalMs <= nowMs)
+                        {
+                            DataStore.Insert(persistedKey, p.Ts, p.Value.Value);
+                        }
+                    }
+                }
+                DataStore.Flush();
+                Log.Info($"[Dashboard] Lazy backfill completed for {persistedKey}: wrote {points.Count} points");
+            }
+        }
+
+        private List<string> ResolvePathSumKeys(string pathSumExpr, List<AvailableTelemetryDto>? allKeys = null)
         {
             var match = System.Text.RegularExpressions.Regex.Match(pathSumExpr,
                 @"pathsum\s*\(\s*['""](.+?)['""]\s*,\s*['""](.+?)['""]\s*\)",
@@ -1078,8 +1471,8 @@ namespace Pulswerk.Dashboard
             }
 
             var resolved = new List<string>();
-            var allKeys = GetAvailableTelemetries();
-            foreach (var ak in allKeys)
+            var keysList = allKeys ?? GetAvailableTelemetries();
+            foreach (var ak in keysList)
             {
                 // Match the path
                 if (IsMatch(pathPattern, ak.Path ?? ""))
@@ -1103,6 +1496,7 @@ namespace Pulswerk.Dashboard
             var result = new Dictionary<string, string>();
             lock (LatestValues)
             {
+                List<AvailableTelemetryDto>? allKeys = null;
                 foreach (var key in keys)
                 {
                     if (LatestValues.TryGetValue(key, out var val))
@@ -1119,7 +1513,11 @@ namespace Pulswerk.Dashboard
                         var dp = device.Telemetries.FirstOrDefault(t => t.Id == pointKey);
                         if (dp != null && !string.IsNullOrWhiteSpace(dp.Formula))
                         {
-                            result[key] = GetLiveValueForFormula(dp.Formula, dp.Units, device);
+                            allKeys ??= GetAvailableTelemetries();
+                            var computed = GetLiveValueForFormula(dp.Formula, dp.Units, device, allKeys);
+                            LatestValues[key] = computed;
+                            LatestTimestamps[key] = DateTime.UtcNow;
+                            result[key] = computed;
                             continue;
                         }
                     }
@@ -1127,7 +1525,11 @@ namespace Pulswerk.Dashboard
                     // Handle direct consumption, pathsum, or inline math formulas requested by widgets
                     if (key.Contains(":consumption:") || !System.Text.RegularExpressions.Regex.IsMatch(key, @"^[a-zA-Z0-9_\-\.:]+$"))
                     {
-                        result[key] = GetLiveValueForFormula(key, null, null);
+                        allKeys ??= GetAvailableTelemetries();
+                        var computed = GetLiveValueForFormula(key, null, null, allKeys);
+                        LatestValues[key] = computed;
+                        LatestTimestamps[key] = DateTime.UtcNow;
+                        result[key] = computed;
                         continue;
                     }
 

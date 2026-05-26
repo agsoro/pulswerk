@@ -23,7 +23,7 @@ using Pulswerk.Core;
 
 namespace Pulswerk.Storage
 {
-    public sealed class TelemetryStore : IDisposable
+    public class TelemetryStore : IDisposable
     {
         private readonly InfluxDBClient _client;
         private readonly WriteApi _writeApi;
@@ -154,7 +154,7 @@ namespace Pulswerk.Storage
 
         // ── Write ────────────────────────────────────────────────────────────
 
-        public void Insert(string key, long tsMs, object value)
+        public virtual void Insert(string key, long tsMs, object value)
         {
             var point = BuildPoint(key, tsMs, value);
             _writeApi.WritePoint(point, _bucket, _org);
@@ -167,7 +167,7 @@ namespace Pulswerk.Storage
         }
 
         /// <summary>Insert a batch of key-value pairs with the same timestamp.</summary>
-        public void InsertBatch(Dictionary<string, object> values, long? tsMs = null)
+        public virtual void InsertBatch(Dictionary<string, object> values, long? tsMs = null)
         {
             if (values == null || values.Count == 0) return;
             long ts = tsMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -216,7 +216,7 @@ namespace Pulswerk.Storage
         /// Query time-series data for a single key within a time range.
         /// Transparently queries the downsampled bucket for data older than the compaction threshold.
         /// </summary>
-        public async Task<List<TsPoint>> QueryAsync(string key, long startTs, long endTs, int limit = 1000, bool descending = false)
+        public virtual async Task<List<TsPoint>> QueryAsync(string key, long startTs, long endTs, int limit = 1000, bool descending = false)
         {
             long compactionCutoff = DateTimeOffset.UtcNow.AddDays(-_compactionAfterDays).ToUnixTimeMilliseconds();
             var allPoints = new List<TsPoint>();
@@ -261,7 +261,7 @@ namespace Pulswerk.Storage
         /// <summary>Query time-series data for multiple keys within a time range.
         /// Automatically downsamples via aggregateWindow when the range exceeds ~15 minutes
         /// to keep chart payloads lean (~300 points per series max).</summary>
-        public async Task<Dictionary<string, List<TsPoint>>> QueryMultipleAsync(
+        public virtual async Task<Dictionary<string, List<TsPoint>>> QueryMultipleAsync(
             List<string> keys, long startTs, long endTs, int maxPointsPerKey = 300)
         {
             var result = new Dictionary<string, List<TsPoint>>();
@@ -322,9 +322,9 @@ namespace Pulswerk.Storage
 
         /// <summary>
         /// Queries multiple keys and returns a single time-series representing their sum.
-        /// If consumptionInterval is provided, it calculates the total consumption (deltas) across all keys.
+        /// If isConsumption is true, it calculates the total consumption (deltas) across all keys.
         /// </summary>
-        public async Task<List<TsPoint>> QuerySumAsync(List<string> keys, long startTs, long endTs, string? consumptionInterval = null, int maxPoints = 300)
+        public virtual async Task<List<TsPoint>> QuerySumAsync(List<string> keys, long startTs, long endTs, string? interval = null, bool isConsumption = false, int maxPoints = 300)
         {
             if (keys == null || keys.Count == 0) return new List<TsPoint>();
 
@@ -332,10 +332,10 @@ namespace Pulswerk.Storage
                 keys.Select(k => $"r.key == \"{EscapeFlux(k)}\""));
 
             long spanMs = endTs - startTs;
-            string windowDur = consumptionInterval ?? FormatFluxDuration(Math.Max(1000, spanMs / maxPoints));
+            string windowDur = interval ?? FormatFluxDuration(Math.Max(1000, spanMs / maxPoints));
 
             string flux;
-            if (consumptionInterval != null)
+            if (isConsumption)
             {
                 // Unified: Sum of consumption (deltas)
                 flux = $"""
@@ -344,7 +344,7 @@ namespace Pulswerk.Storage
                       |> filter(fn: (r) => r._measurement == "telemetry" and ({keyFilter}))
                       |> filter(fn: (r) => r._field == "value")
                       |> difference(nonNegative: true)
-                      |> aggregateWindow(every: {windowDur}, fn: sum, createEmpty: true)
+                      |> aggregateWindow(every: {windowDur}, fn: sum, timeSrc: "_start", createEmpty: true)
                       |> fill(value: 0.0)
                       |> group(columns: ["_time"])
                       |> sum()
@@ -376,7 +376,7 @@ namespace Pulswerk.Storage
         /// Queries a meter key and calculates consumption (deltas) on-the-fly.
         /// Uses non_negative_difference() to handle counter resets.
         /// </summary>
-        public async Task<List<TsPoint>> QueryConsumptionAsync(string key, string interval, long startTs, long endTs, int maxPoints = 300)
+        public virtual async Task<List<TsPoint>> QueryConsumptionAsync(string key, string interval, long startTs, long endTs, int maxPoints = 300)
         {
             var flux = $"""
                 from(bucket: "{_bucket}")
@@ -384,7 +384,7 @@ namespace Pulswerk.Storage
                   |> filter(fn: (r) => r._measurement == "telemetry" and r.key == "{EscapeFlux(key)}")
                   |> filter(fn: (r) => r._field == "value")
                   |> difference(nonNegative: true)
-                  |> aggregateWindow(every: {interval}, fn: sum, createEmpty: false)
+                  |> aggregateWindow(every: {interval}, fn: sum, timeSrc: "_start", createEmpty: false)
                   |> yield(name: "consumption")
                 """;
 

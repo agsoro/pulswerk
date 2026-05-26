@@ -513,7 +513,14 @@ window.addEventListener('message', function (evt: MessageEvent) {
     else if (msg.event === 'save') { _drawioExitAfterSave = !!msg.exit; target.postMessage(JSON.stringify({ action: 'export', format: 'xmlsvg', border: 0 }), '*'); }
     else if (msg.event === 'export') {
         let svgContent = msg.data || '';
-        if (svgContent.startsWith('data:image/svg+xml;base64,')) { try { svgContent = atob(svgContent.split(',')[1]); } catch (_) { } }
+        if (svgContent.startsWith('data:image/svg+xml;base64,')) {
+            try {
+                const base64 = svgContent.split(',')[1];
+                const binString = atob(base64);
+                const bytes = Uint8Array.from(binString, (m) => m.charCodeAt(0));
+                svgContent = new TextDecoder().decode(bytes);
+            } catch (_) { }
+        }
         else if (svgContent.startsWith('data:image/svg+xml,')) { try { svgContent = decodeURIComponent(svgContent.split(',')[1]); } catch (_) { } }
         if (drawioCallback && svgContent) drawioCallback(svgContent);
         if (_drawioExitAfterSave) closeDrawioEditor();

@@ -151,6 +151,7 @@ export async function renderTimeseries(w, body, cfg) {
             toolbar: { show: false },
             sparkline: { enabled: false },
             stacked: isStacked,
+            accessibility: { enabled: false },
         },
         colors: usedColors,
         stroke: {

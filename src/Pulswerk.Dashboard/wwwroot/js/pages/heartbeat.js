@@ -61,7 +61,8 @@ export function HeartbeatPage() {
                     stacked: true,
                     animations: { enabled: false },
                     toolbar: { show: false },
-                    sparkline: { enabled: false }
+                    sparkline: { enabled: false },
+                    accessibility: { enabled: false }
                 },
                 colors: ['#8b5cf6', '#10b981'],
                 fill: {

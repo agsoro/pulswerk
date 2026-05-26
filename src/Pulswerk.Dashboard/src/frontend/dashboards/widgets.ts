@@ -161,6 +161,7 @@ export async function renderTimeseries(w: IWidget, body: HTMLElement, cfg: IWidg
             toolbar: { show: false },
             sparkline: { enabled: false },
             stacked: isStacked,
+            accessibility: { enabled: false },
         },
         colors: usedColors,
         stroke: {
