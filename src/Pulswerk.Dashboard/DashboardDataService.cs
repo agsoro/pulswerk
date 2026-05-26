@@ -52,6 +52,11 @@ namespace Pulswerk.Dashboard
         private readonly object _healthLock = new();
         private System.Threading.Timer? _healthTimer;
 
+        // Cache fields for telemetry metadata
+        private List<AvailableTelemetryDto>? _cachedTelemetries;
+        private DateTime _cacheTimestamp = DateTime.MinValue;
+        private readonly object _cacheLock = new();
+
         public DashboardDataService(LogBuffer logBuffer, AppConfig config,
             TelemetryStore dataStore, AlarmStore alarmStore,
             ConcurrentDictionary<string, byte> offlineDevices, ConcurrentDictionary<string, DateTime> lastPolledAtMap,
@@ -462,7 +467,7 @@ namespace Pulswerk.Dashboard
             return root.Children;
         }
 
-        private string GetLiveValueForFormula(string formula, string? units, DeviceConfig? device = null)
+        private string GetLiveValueForFormula(string formula, string? units, DeviceConfig? device = null, List<AvailableTelemetryDto>? allKeys = null)
         {
             // Simple live value resolver for tree view
             try
@@ -473,7 +478,7 @@ namespace Pulswerk.Dashboard
 
                     if (formula.StartsWith("pathsum("))
                     {
-                        var keys = ResolvePathSumKeys(formula);
+                        var keys = ResolvePathSumKeys(formula, allKeys);
                         double sum = 0;
                         foreach (var k in keys)
                         {
@@ -674,14 +679,14 @@ namespace Pulswerk.Dashboard
             return await DataStore.QueryAsync(key, startTs, endTs, limit: 5000);
         }
 
-        private async Task<List<TsPoint>> GetVirtualTelemetryHistoryAsync(string formula, DeviceConfig device, long startTs, long endTs)
+        private async Task<List<TsPoint>> GetVirtualTelemetryHistoryAsync(string formula, DeviceConfig device, long startTs, long endTs, List<AvailableTelemetryDto>? allKeys = null)
         {
             var keys = new HashSet<string>();
             formula = ExpandFormula(formula, device);
 
             if (formula.StartsWith("pathsum("))
             {
-                var pathSumKeys = ResolvePathSumKeys(formula);
+                var pathSumKeys = ResolvePathSumKeys(formula, allKeys);
                 foreach (var k in pathSumKeys) keys.Add(k);
             }
             else if (formula.Contains(":consumption:"))
@@ -908,8 +913,99 @@ namespace Pulswerk.Dashboard
         /// <summary>
         /// Returns all available data point keys with metadata for the dashboard widget key picker.
         /// Flattens the asset tree into a list of selectable keys.
+        /// Uses a fast in-memory cache to prevent O(N^2) tree-building recursion when resolving virtual points.
         /// </summary>
         public List<AvailableTelemetryDto> GetAvailableTelemetries(bool includeLiveValues = false)
+        {
+            List<AvailableTelemetryDto> baseList;
+            lock (_cacheLock)
+            {
+                if (_cachedTelemetries == null || (DateTime.UtcNow - _cacheTimestamp).TotalSeconds > 10)
+                {
+                    _cachedTelemetries = BuildAvailableTelemetriesInternal(false);
+                    _cacheTimestamp = DateTime.UtcNow;
+                }
+                baseList = _cachedTelemetries;
+            }
+
+            // Return a cloned list with fresh live values
+            return baseList.Select(item =>
+            {
+                var clone = new AvailableTelemetryDto
+                {
+                    Key = item.Key,
+                    Name = item.Name,
+                    FullName = item.FullName,
+                    Units = item.Units,
+                    Type = item.Type,
+                    Path = item.Path,
+                    ParentId = item.ParentId,
+                    ParentPath = item.ParentPath,
+                    Device = item.Device,
+                    Connection = item.Connection,
+                    IsWritable = item.IsWritable,
+                    EnumValues = item.EnumValues
+                };
+
+                if (item.Type == "Calculated")
+                {
+                    if (includeLiveValues)
+                    {
+                        // Check if we already have the pre-calculated value stored in LatestValues
+                        string? cachedVal = null;
+                        lock (LatestValues)
+                        {
+                            if (LatestValues.TryGetValue(item.Key, out var v))
+                            {
+                                cachedVal = v?.ToString();
+                            }
+                        }
+
+                        if (cachedVal != null)
+                        {
+                            clone.Value = cachedVal;
+                            clone.LastUpdate = "Live";
+                            return clone;
+                        }
+
+                        var device = IdentifyDeviceFromTelemetryKey(item.Key);
+                        if (device != null && device.Telemetries != null)
+                        {
+                            string pointKey = item.Key.Substring(device.Id.Length + 1);
+                            var dp = device.Telemetries.FirstOrDefault(t => t.Id == pointKey);
+                            if (dp != null && !string.IsNullOrWhiteSpace(dp.Formula))
+                            {
+                                var computed = GetLiveValueForFormula(dp.Formula, dp.Units, device, baseList);
+                                lock (LatestValues)
+                                {
+                                    LatestValues[item.Key] = computed;
+                                    LatestTimestamps[item.Key] = DateTime.UtcNow;
+                                }
+                                clone.Value = computed;
+                                clone.LastUpdate = "Live";
+                                return clone;
+                            }
+                        }
+                        clone.Value = "---";
+                        clone.LastUpdate = "Live";
+                    }
+                    else
+                    {
+                        clone.Value = "---";
+                        clone.LastUpdate = "Live";
+                    }
+                }
+                else
+                {
+                    clone.Value = GetLatestValue(item.Key);
+                    clone.LastUpdate = FormatLastUpdate(item.Key);
+                }
+
+                return clone;
+            }).ToList();
+        }
+
+        private List<AvailableTelemetryDto> BuildAvailableTelemetriesInternal(bool includeLiveValues = false)
         {
             var keys = new List<AvailableTelemetryDto>();
             var trees = GetAssetTrees(includeLiveValues);
@@ -963,6 +1059,7 @@ namespace Pulswerk.Dashboard
             var result = new Dictionary<string, List<TsPoint>>();
             var realKeys = new List<string>();
             var realKeyMap = new Dictionary<string, string>(); // Requested Key -> Expanded Key
+            List<AvailableTelemetryDto>? allKeys = null;
 
             foreach (var key in telemetryKeys)
             {
@@ -1005,7 +1102,8 @@ namespace Pulswerk.Dashboard
 
                 if (baseKey.StartsWith("pathsum("))
                 {
-                    var resolvedKeys = ResolvePathSumKeys(baseKey);
+                    allKeys ??= GetAvailableTelemetries();
+                    var resolvedKeys = ResolvePathSumKeys(baseKey, allKeys);
                     result[key] = await DataStore.QuerySumAsync(resolvedKeys, startTs, endTs, consumptionInterval);
                 }
                 else if (consumptionInterval != null)
@@ -1014,7 +1112,8 @@ namespace Pulswerk.Dashboard
                 }
                 else if (!System.Text.RegularExpressions.Regex.IsMatch(baseKey, @"^[a-zA-Z0-9_\-\.:]+$"))
                 {
-                    result[key] = await GetVirtualTelemetryHistoryAsync(baseKey, vdev!, startTs, endTs);
+                    allKeys ??= GetAvailableTelemetries();
+                    result[key] = await GetVirtualTelemetryHistoryAsync(baseKey, vdev!, startTs, endTs, allKeys);
                 }
                 else
                 {
@@ -1036,7 +1135,7 @@ namespace Pulswerk.Dashboard
             return result;
         }
 
-        private List<string> ResolvePathSumKeys(string pathSumExpr)
+        private List<string> ResolvePathSumKeys(string pathSumExpr, List<AvailableTelemetryDto>? allKeys = null)
         {
             var match = System.Text.RegularExpressions.Regex.Match(pathSumExpr,
                 @"pathsum\s*\(\s*['""](.+?)['""]\s*,\s*['""](.+?)['""]\s*\)",
@@ -1078,8 +1177,8 @@ namespace Pulswerk.Dashboard
             }
 
             var resolved = new List<string>();
-            var allKeys = GetAvailableTelemetries();
-            foreach (var ak in allKeys)
+            var keysList = allKeys ?? GetAvailableTelemetries();
+            foreach (var ak in keysList)
             {
                 // Match the path
                 if (IsMatch(pathPattern, ak.Path ?? ""))
@@ -1103,6 +1202,7 @@ namespace Pulswerk.Dashboard
             var result = new Dictionary<string, string>();
             lock (LatestValues)
             {
+                List<AvailableTelemetryDto>? allKeys = null;
                 foreach (var key in keys)
                 {
                     if (LatestValues.TryGetValue(key, out var val))
@@ -1119,7 +1219,11 @@ namespace Pulswerk.Dashboard
                         var dp = device.Telemetries.FirstOrDefault(t => t.Id == pointKey);
                         if (dp != null && !string.IsNullOrWhiteSpace(dp.Formula))
                         {
-                            result[key] = GetLiveValueForFormula(dp.Formula, dp.Units, device);
+                            allKeys ??= GetAvailableTelemetries();
+                            var computed = GetLiveValueForFormula(dp.Formula, dp.Units, device, allKeys);
+                            LatestValues[key] = computed;
+                            LatestTimestamps[key] = DateTime.UtcNow;
+                            result[key] = computed;
                             continue;
                         }
                     }
@@ -1127,7 +1231,11 @@ namespace Pulswerk.Dashboard
                     // Handle direct consumption, pathsum, or inline math formulas requested by widgets
                     if (key.Contains(":consumption:") || !System.Text.RegularExpressions.Regex.IsMatch(key, @"^[a-zA-Z0-9_\-\.:]+$"))
                     {
-                        result[key] = GetLiveValueForFormula(key, null, null);
+                        allKeys ??= GetAvailableTelemetries();
+                        var computed = GetLiveValueForFormula(key, null, null, allKeys);
+                        LatestValues[key] = computed;
+                        LatestTimestamps[key] = DateTime.UtcNow;
+                        result[key] = computed;
                         continue;
                     }
 
