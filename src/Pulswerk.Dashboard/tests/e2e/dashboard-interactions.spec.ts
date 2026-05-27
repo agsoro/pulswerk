@@ -516,4 +516,78 @@ test.describe('Dashboard Interactions and Component States', () => {
       expect(relativeTop).toBeGreaterThan(200);
     }
   });
+
+  // 8. E2E test for Telemetry Key Picker Dialog Expansion layout and overlay
+  test('Telemetry Key Picker Dialog Expansion layout and overlay', async ({ page }) => {
+    // Navigate to dashboards list via admin auth proxy to get write permissions
+    await page.goto('http://localhost:5002/plswk/Dashboards');
+    await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
+
+    // Open create dashboard modal
+    const createBtn = page.locator('[data-testid="dash-create-btn"]');
+    if (await createBtn.count() > 0) {
+      await createBtn.click();
+    } else {
+      await page.locator('#emptyDashboards button').click();
+    }
+
+    const modal = page.locator('[data-testid="create-dash-modal"]');
+    await expect(modal).toBeVisible();
+
+    const uniqueName = `Picker Test ${Date.now()}`;
+    await page.locator('#newDashName').fill(uniqueName);
+    await modal.locator('button:has-text("Create")').click();
+
+    // Verify redirection to the new dashboard in edit mode
+    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+
+    // Click "Add your first widget" or "Add Widget" on the top right
+    const addFirstWidgetBtn = page.locator('button:has-text("Add your first widget")');
+    if (await addFirstWidgetBtn.count() > 0) {
+      await addFirstWidgetBtn.click();
+    } else {
+      await page.locator('[data-testid="dash-add-widget-btn"]').click();
+    }
+
+    // Wait for the Add Widget modal
+    const addWidgetModal = page.locator('#addWidgetModal');
+    await expect(addWidgetModal).toBeVisible();
+
+    // Confirm that the key picker is NOT expanded by default
+    const wrapper = page.locator('#keyPickerWrapper');
+    await expect(wrapper).not.toHaveClass(/key-picker-expanded/);
+    const keyPicker = page.locator('#keyPicker');
+    
+    // Check initial height constraint (should be around max-height: 250px)
+    const initialBox = await keyPicker.boundingBox();
+    expect(initialBox).not.toBeNull();
+    if (initialBox) {
+      expect(initialBox.height).toBeLessThanOrEqual(260); // 250px plus border/padding
+    }
+
+    // Open the key selector
+    await page.locator('#btnKeyPickerOpen').click();
+
+    // Assert that the wrapper has the expanded class
+    await expect(wrapper).toHaveClass(/key-picker-expanded/);
+
+    // Verify that search wrapper is visible inside the picker
+    const searchWrapper = page.locator('#keySearchWrapper');
+    await expect(searchWrapper).toBeVisible();
+
+    // Assert that the expanded key picker dialog is "big" (positioned absolute/fixed)
+    // Its height should now be much larger than 250px (e.g. up to 600px/650px depending on viewport/content)
+    const expandedBox = await keyPicker.boundingBox();
+    expect(expandedBox).not.toBeNull();
+    if (expandedBox) {
+      expect(expandedBox.height).toBeGreaterThan(300);
+      expect(expandedBox.width).toBeGreaterThan(500); // 90vw should be quite wide, default width is 1280
+    }
+
+    // Close the key selector
+    await page.locator('#keyPickerWrapper button:has-text("OK")').click();
+    await expect(wrapper).not.toHaveClass(/key-picker-expanded/);
+    await expect(searchWrapper).toBeHidden();
+  });
 });

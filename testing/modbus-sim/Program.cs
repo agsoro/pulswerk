@@ -2,7 +2,7 @@
 //
 // Janitza (slaves 1–4) register map (float32 big-endian = 2 × uint16):
 //   19026  power_w     → connector divides by 1000 → power_kw
-//   19062  import_wh   → connector divides by 1000 → import_kwh
+//   19060  import_wh   → connector divides by 1000 → import_kwh
 //   19076  export_wh   → always 0 (no export on test meter)
 //
 // Glück (slave 5) register map:
@@ -21,7 +21,7 @@ using System.Threading.Tasks;
 using NModbus;
 
 const ushort REG_POWER_W   = 19026;
-const ushort REG_IMPORT_WH = 19062;
+const ushort REG_IMPORT_WH = 19060;
 const ushort REG_EXPORT_WH = 19076;
 
 const double POWER_MIN_W    = 2_000;

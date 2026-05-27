@@ -1146,3 +1146,49 @@ aside:hover .user-name {
 .scada-id-item-noname {
     font-size: 0.72rem; color: #475569; font-style: italic;
 }
+
+/* Expanded Key Picker Dialog */
+.key-picker-expanded::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-color: rgba(2, 6, 23, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 1040;
+}
+
+.key-picker-expanded #keyPicker {
+    position: fixed;
+    z-index: 1050;
+    background-color: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90vw;
+    max-width: 850px;
+    height: 80vh;
+    max-height: 650px !important;
+    overflow: hidden !important;
+}
+
+.key-picker-expanded #keyPicker #keySearchWrapper {
+    position: relative;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    margin-bottom: 1rem;
+}
+
+.key-picker-expanded #keyPicker #keyList {
+    flex: 1 1 0%;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}

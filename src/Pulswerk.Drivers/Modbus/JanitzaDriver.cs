@@ -4,9 +4,9 @@
 //
 //    Address  Data point key    Unit   Conversion
 //    ───────  ───────────────  ─────  ──────────
-//    19020    power_kw         W      ÷ 1000
+//    19026    power_kw         W      ÷ 1000
 //    19060    import_kwh       Wh     ÷ 1000
-//    19062    export_kwh       Wh     ÷ 1000
+//    19076    export_kwh       Wh     ÷ 1000
 //
 //  ⚠  Verify addresses for your exact model:
 //     https://www.janitza.com/en/downloads/modbus-address-list
@@ -23,7 +23,7 @@ namespace Pulswerk.Drivers.Modbus
     class JanitzaDriver : BaseModbusDriver
     {
         const ushort REG_POWER_SUM_W = 19026;
-        const ushort REG_IMPORT_SUM_WH = 19062;
+        const ushort REG_IMPORT_SUM_WH = 19060;
         const ushort REG_EXPORT_SUM_WH = 19076;
 
         public override string DriverName => "Janitza";
