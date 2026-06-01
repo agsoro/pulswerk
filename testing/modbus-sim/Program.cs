@@ -1,9 +1,9 @@
 // Program.cs – Modbus TCP simulator (Janitza + Glück)
 //
 // Janitza (slaves 1–4) register map (float32 big-endian = 2 × uint16):
-//   19026  power_w     → connector divides by 1000 → power_kw
-//   19060  import_wh   → connector divides by 1000 → import_kwh
-//   19076  export_wh   → always 0 (no export on test meter)
+//   19026  _P_SUML13         power_w      → connector divides by 1000 → power_kw
+//   19068  _G_WH_VSUML13     import_wh    → connector divides by 1000 → import_kwh
+//   19076  _G_WH_RSUML13     export_wh    → always 0 (no export on test meter)
 //
 // Glück (slave 5) register map:
 //   Input  1901       uint16         utility_limit_pct
@@ -21,8 +21,8 @@ using System.Threading.Tasks;
 using NModbus;
 
 const ushort REG_POWER_W   = 19026;
-const ushort REG_IMPORT_WH = 19060;
-const ushort REG_EXPORT_WH = 19076;
+const ushort REG_IMPORT_WH = 19068;   // _G_WH_VSUML13: consumed (import) L1+L2+L3
+const ushort REG_EXPORT_WH = 19076;   // _G_WH_RSUML13: delivered (export) L1+L2+L3
 
 const double POWER_MIN_W    = 2_000;
 const double POWER_MAX_W    = 8_000;

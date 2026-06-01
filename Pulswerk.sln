@@ -23,6 +23,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{FDDA8951
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulswerk.Drivers.Tests", "tests\Pulswerk.Drivers.Tests\Pulswerk.Drivers.Tests.csproj", "{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{283AD569-FDEC-43A1-BEB8-783FE0F57B01}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulswerk.Billing", "src\Pulswerk.Billing\Pulswerk.Billing.csproj", "{9D414EE4-EA2C-4684-AC27-033AA90DF2EC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulswerk.Ems", "src\Pulswerk.Ems\Pulswerk.Ems.csproj", "{F1C628B5-3600-4E93-9A37-E1BA2045DE3A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulswerk.Billing.Tests", "tests\Pulswerk.Billing.Tests\Pulswerk.Billing.Tests.csproj", "{CEE60D3C-2C38-4982-B3C9-4C6584264C0D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -65,8 +73,23 @@ Global
 		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9D414EE4-EA2C-4684-AC27-033AA90DF2EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9D414EE4-EA2C-4684-AC27-033AA90DF2EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9D414EE4-EA2C-4684-AC27-033AA90DF2EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9D414EE4-EA2C-4684-AC27-033AA90DF2EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F1C628B5-3600-4E93-9A37-E1BA2045DE3A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F1C628B5-3600-4E93-9A37-E1BA2045DE3A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F1C628B5-3600-4E93-9A37-E1BA2045DE3A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F1C628B5-3600-4E93-9A37-E1BA2045DE3A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CEE60D3C-2C38-4982-B3C9-4C6584264C0D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CEE60D3C-2C38-4982-B3C9-4C6584264C0D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CEE60D3C-2C38-4982-B3C9-4C6584264C0D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CEE60D3C-2C38-4982-B3C9-4C6584264C0D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{F8F97FC2-5C34-4240-9E6A-79CE893C9DD6} = {FDDA8951-1236-4E6C-A103-EEA5DE622980}
+		{9D414EE4-EA2C-4684-AC27-033AA90DF2EC} = {283AD569-FDEC-43A1-BEB8-783FE0F57B01}
+		{F1C628B5-3600-4E93-9A37-E1BA2045DE3A} = {283AD569-FDEC-43A1-BEB8-783FE0F57B01}
+		{CEE60D3C-2C38-4982-B3C9-4C6584264C0D} = {FDDA8951-1236-4E6C-A103-EEA5DE622980}
 	EndGlobalSection
 EndGlobal

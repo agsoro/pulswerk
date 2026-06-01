@@ -17,6 +17,10 @@ import { ConnectionsPage } from './pages/connections';
 import { AlarmsPage } from './pages/alarms';
 import { LogsPage } from './pages/logs';
 import { HeartbeatPage } from './pages/heartbeat';
+import { WallboxesPage } from './pages/wallboxes';
+import { BillingPage } from './pages/billing';
+import { TrajectoryPage } from './pages/trajectory';
+import { TelemetryCrudPage } from './pages/telemetryCrud';
 
 // Imports of i18n
 import { initI18n, setLanguage, t, currentLang } from './i18n';
@@ -32,6 +36,30 @@ interface UserIdentity {
         canEditDashboard: boolean;
         canEditFavorites: boolean;
         canEditConfig: boolean;
+        canAccessEms?: boolean;
+        canAccessBilling?: boolean;
+        canAccessWallbox?: boolean;
+        canAccessHistoricalData?: boolean;
+        canAccessAlarms?: boolean;
+        canAccessLogs?: boolean;
+        canAccessHeartbeat?: boolean;
+        canAccessDashboards?: boolean;
+        canAccessAssets?: boolean;
+        canAccessTelemetry?: boolean;
+        canAccessConnections?: boolean;
+    };
+    modules?: {
+        ems?: boolean;
+        billing?: boolean;
+        wallbox?: boolean;
+        historicalData?: boolean;
+        alarms?: boolean;
+        logs?: boolean;
+        heartbeat?: boolean;
+        dashboards?: boolean;
+        assets?: boolean;
+        telemetry?: boolean;
+        connections?: boolean;
     };
 }
 
@@ -110,6 +138,14 @@ export function App() {
             await loadUser();
         };
         init();
+
+        // When the system config page saves module changes (same or other tab),
+        // re-fetch identity so the nav reflects the new module state immediately.
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === 'pw_modules_updated') loadUser();
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
     }, []);
 
     // Close user popover when clicking outside
@@ -146,8 +182,9 @@ export function App() {
     let pageComponent = null;
     let pageTitle = 'Home';
 
+
     const dashboardDetailMatch = routePath.match(/^\/Dashboards\/([^/]+)(?:\/([^/]+))?$/);
-    if (dashboardDetailMatch) {
+    if (dashboardDetailMatch && user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false) {
         pageTitle = 'Dashboards';
         pageComponent = (
             <DashboardsPage 
@@ -155,27 +192,39 @@ export function App() {
                 slug={dashboardDetailMatch[2] || undefined} 
             />
         );
-    } else if (routePath === '/Dashboards') {
+    } else if (routePath === '/Dashboards' && user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false) {
         pageTitle = 'Dashboards';
         pageComponent = <DashboardsPage />;
-    } else if (routePath === '/Assets') {
+    } else if (routePath === '/Assets' && user?.modules?.assets !== false && user?.permissions?.canAccessAssets !== false) {
         pageTitle = 'Assets';
         pageComponent = <AssetsPage initialNodeId={searchParams.get('node')} />;
-    } else if (routePath === '/TelemetryList' || routePath === '/AssetsList') {
+    } else if ((routePath === '/TelemetryList' || routePath === '/AssetsList') && user?.modules?.telemetry !== false && user?.permissions?.canAccessTelemetry !== false) {
         pageTitle = 'Data Points';
         pageComponent = <TelemetryListPage />;
-    } else if (routePath === '/Connections') {
+    } else if (routePath === '/Connections' && user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false) {
         pageTitle = 'Connections';
         pageComponent = <ConnectionsPage initialConnId={searchParams.get('conn')} />;
-    } else if (routePath === '/Alarms') {
+    } else if (routePath === '/Alarms' && user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false) {
         pageTitle = 'Active Alarms';
         pageComponent = <AlarmsPage />;
-    } else if (routePath === '/Logs') {
+    } else if (routePath === '/Logs' && user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false) {
         pageTitle = 'System Logs';
         pageComponent = <LogsPage />;
-    } else if (routePath === '/Heartbeat') {
+    } else if (routePath === '/Heartbeat' && user?.modules?.heartbeat !== false && user?.permissions?.canAccessHeartbeat !== false) {
         pageTitle = 'System Heartbeat';
         pageComponent = <HeartbeatPage />;
+    } else if (routePath === '/Wallboxes' && user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false) {
+        pageTitle = 'Wallboxes';
+        pageComponent = <WallboxesPage />;
+    } else if (routePath === '/Billing' && user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false) {
+        pageTitle = 'Billing';
+        pageComponent = <BillingPage />;
+    } else if (routePath === '/Trajectory' && user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false) {
+        pageTitle = 'Trajectory';
+        pageComponent = <TrajectoryPage />;
+    } else if (routePath === '/TelemetryCrud' && user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false) {
+        pageTitle = 'Historical Data';
+        pageComponent = <TelemetryCrudPage />;
     } else {
         pageTitle = 'Home';
         pageComponent = <FavoritesPage />;
@@ -193,14 +242,18 @@ export function App() {
 
     const navItems = [
         { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home', title: 'Home' },
-        { id: 'dashboards', path: '/plswk/Dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards', title: 'Dashboards' },
-        { id: 'assets', path: '/plswk/Assets', icon: 'fa-sitemap', labelKey: 'nav_assets', title: 'Assets' },
-        { id: 'telemetry', path: '/plswk/TelemetryList', icon: 'fa-table', labelKey: 'nav_telemetries', title: 'Data Points' },
-        { id: 'connections', path: '/plswk/Connections', icon: 'fa-network-wired', labelKey: 'nav_connections', title: 'Connections' },
-        { id: 'alarms', path: '/plswk/Alarms', icon: 'fa-bell', labelKey: 'nav_alarms', title: 'Alarms' },
-        { id: 'logs', path: '/plswk/Logs', icon: 'fa-terminal', labelKey: 'nav_logs', title: 'Logs' },
-        { id: 'heartbeat', path: '/plswk/Heartbeat', icon: 'fa-heartbeat', labelKey: 'nav_heartbeat', title: 'Heartbeat' }
-    ];
+        user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false ? { id: 'dashboards', path: '/plswk/Dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards', title: 'Dashboards' } : null,
+        user?.modules?.assets !== false && user?.permissions?.canAccessAssets !== false ? { id: 'assets', path: '/plswk/Assets', icon: 'fa-sitemap', labelKey: 'nav_assets', title: 'Assets' } : null,
+        user?.modules?.telemetry !== false && user?.permissions?.canAccessTelemetry !== false ? { id: 'telemetry', path: '/plswk/TelemetryList', icon: 'fa-table', labelKey: 'nav_telemetries', title: 'Data Points' } : null,
+        user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false ? { id: 'connections', path: '/plswk/Connections', icon: 'fa-network-wired', labelKey: 'nav_connections', title: 'Connections' } : null,
+        user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false ? { id: 'wallboxes', path: '/plswk/Wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes', title: 'Wallboxes' } : null,
+        user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false ? { id: 'billing', path: '/plswk/Billing', icon: 'fa-file-invoice-dollar', labelKey: 'nav_billing', title: 'Billing' } : null,
+        user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false ? { id: 'trajectory', path: '/plswk/Trajectory', icon: 'fa-chart-line', labelKey: 'nav_trajectory', title: 'Trajectory' } : null,
+        user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false ? { id: 'telemetryCrud', path: '/plswk/TelemetryCrud', icon: 'fa-history', labelKey: 'nav_historical_data', title: 'Historical Data' } : null,
+        user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false ? { id: 'alarms', path: '/plswk/Alarms', icon: 'fa-bell', labelKey: 'nav_alarms', title: 'Alarms' } : null,
+        user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false ? { id: 'logs', path: '/plswk/Logs', icon: 'fa-terminal', labelKey: 'nav_logs', title: 'Logs' } : null,
+        user?.modules?.heartbeat !== false && user?.permissions?.canAccessHeartbeat !== false ? { id: 'heartbeat', path: '/plswk/Heartbeat', icon: 'fa-heartbeat', labelKey: 'nav_heartbeat', title: 'Heartbeat' } : null
+    ].filter(Boolean) as any[];
 
     // Determine current navigation tab for active highlighting
     const getActiveNavId = () => {
@@ -208,6 +261,10 @@ export function App() {
         if (path.startsWith('/plswk/Assets')) return 'assets';
         if (path.startsWith('/plswk/TelemetryList') || path.startsWith('/plswk/AssetsList')) return 'telemetry';
         if (path.startsWith('/plswk/Connections')) return 'connections';
+        if (path.startsWith('/plswk/Wallboxes')) return 'wallboxes';
+        if (path.startsWith('/plswk/Billing')) return 'billing';
+        if (path.startsWith('/plswk/Trajectory')) return 'trajectory';
+        if (path.startsWith('/plswk/TelemetryCrud')) return 'telemetryCrud';
         if (path.startsWith('/plswk/Alarms')) return 'alarms';
         if (path.startsWith('/plswk/Logs')) return 'logs';
         if (path.startsWith('/plswk/Heartbeat')) return 'heartbeat';
@@ -350,7 +407,7 @@ export function App() {
                         </button>
                     </div>
 
-                    <span class="sidebar-version opacity-0 transition-opacity duration-200">v2.6.0</span>
+                    <span class="sidebar-version opacity-0 transition-opacity duration-200">{__APP_VERSION__}</span>
                 </footer>
             </aside>
 
@@ -365,6 +422,10 @@ export function App() {
                          pageTitle === 'Connections' ? t('nav_connections') :
                          pageTitle === 'Active Alarms' ? t('nav_alarms') :
                          pageTitle === 'System Logs' ? t('nav_logs') :
+                         pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
+                         pageTitle === 'Billing' ? t('nav_billing') :
+                         pageTitle === 'Trajectory' ? t('nav_trajectory') :
+                         pageTitle === 'Historical Data' ? t('nav_historical_data') :
                          pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle}
                     </h1>
                 </header>

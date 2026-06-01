@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Pulswerk.Core;
 using Pulswerk.Storage;
 using Xunit;

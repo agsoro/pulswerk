@@ -21,9 +21,9 @@
     "logBufferSize": 5000,
     "auth": {
       "enabled": true,
-      "defaultUser": "operator",
+      "defaultUser": "testadmin",
       "defaultGroups": [
-        "operators"
+        "admins"
       ],
       // Trust Docker-internal proxies (compose network)
       "trustedProxies": [
@@ -35,20 +35,49 @@
       "enabled": true,
       "allowAssetValueEdit": [
         "users",
-        "admins"
+        "admins",
+        "testadmin"
       ],
       "allowAlarmAck": [
         "users",
-        "admins"
+        "admins",
+        "testadmin"
       ],
       "allowDashboardEdit": [
-        "admins"
+        "admins",
+        "testadmin"
       ],
       "allowFavoriteEdit": [
         "users",
-        "admins"
-      ]
+        "admins",
+        "testadmin"
+      ],
+      "allowEms": ["admins", "operators", "testadmin"],
+      "allowBilling": ["admins", "testadmin"],
+      "allowWallbox": ["users", "admins", "testadmin"],
+      "allowHistoricalData": ["admins", "testadmin"],
+      "allowAlarms": ["users", "admins", "testadmin"],
+      "allowLogs": ["admins", "testadmin"],
+      "allowHeartbeat": ["users", "admins", "testadmin"],
+      "allowDashboards": ["users", "admins", "testadmin"],
+      "allowAssets": ["users", "admins", "testadmin"],
+      "allowTelemetry": ["users", "admins", "testadmin"],
+      "allowConnections": ["admins", "testadmin"],
+      "allowConfigEdit": ["admins", "testadmin"]
     }
+  },
+  "modules": {
+    "ems": true,
+    "billing": true,
+    "wallbox": true,
+    "historicalData": true,
+    "alarms": true,
+    "logs": true,
+    "heartbeat": true,
+    "dashboards": true,
+    "assets": true,
+    "telemetry": true,
+    "connections": true
   },
   // ── Connections ──────────────────────────────────────────────────────────
   "connections": [
@@ -70,9 +99,16 @@
       "id": "bacnet-deziko",
       "type": "bacnet-ip",
       "localAddress": "0.0.0.0",
-      "localPort": 47809, // different from simulator
+      "localPort": 47809,
       "localDeviceId": 1234,
       "name": "Deziko BACnet"
+    },
+    {
+      "id": "ocpp-central",
+      "type": "ocpp",
+      "localPort": 5000,
+      "localAddress": "/plswk/ocpp/",
+      "name": "OCPP Central System"
     }
   ],
   // ── Devices ──────────────────────────────────────────────────────────────
@@ -200,6 +236,19 @@
           "units": "kWh/h"
         }
       ]
+    },
+    {
+      "id": "wallbox-sim-01",
+      "name": "Garage Wallbox 1",
+      "deviceType": "ocpp",
+      "connectionId": "ocpp-central",
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "Garage",
+        "Wallbox 1"
+      ],
+      "assetType": "Wallbox"
     }
   ]
 }

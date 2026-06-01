@@ -15,13 +15,21 @@ namespace Pulswerk.Dashboard.Tests
     public class FakeTelemetryStore : TelemetryStore
     {
         public List<(string Key, long Ts, double Val)> InsertedPoints { get; } = new();
-        public Func<string, long, long, Task<List<TsPoint>>> QueryAsyncHandler { get; set; }
-        public Func<string, string, long, long, Task<List<TsPoint>>> QueryConsumptionAsyncHandler { get; set; }
-        public Func<List<string>, long, long, string, bool, Task<List<TsPoint>>> QuerySumAsyncHandler { get; set; }
+        public List<(string Key, long StartTs, long EndTs)> DeletedRanges { get; } = new();
+        public Func<string, long, long, Task<List<TsPoint>>>? QueryAsyncHandler { get; set; }
+        public Func<string, string, long, long, Task<List<TsPoint>>>? QueryConsumptionAsyncHandler { get; set; }
+        public Func<List<string>, long, long, string, bool, Task<List<TsPoint>>>? QuerySumAsyncHandler { get; set; }
 
         public FakeTelemetryStore() : base("http://localhost:9999", "token", "org", "bucket")
         {
         }
+
+        public override Task DeleteAsync(string key, long startTs, long endTs)
+        {
+            DeletedRanges.Add((key, startTs, endTs));
+            return Task.CompletedTask;
+        }
+
 
         public override void Insert(string key, long tsMs, object value)
         {
@@ -45,7 +53,7 @@ namespace Pulswerk.Dashboard.Tests
 
         public override Task<List<TsPoint>> QuerySumAsync(List<string> keys, long startTs, long endTs, string? interval = null, bool isConsumption = false, int maxPoints = 300)
         {
-            if (QuerySumAsyncHandler != null) return QuerySumAsyncHandler(keys, startTs, endTs, interval, isConsumption);
+            if (QuerySumAsyncHandler != null) return QuerySumAsyncHandler(keys, startTs, endTs, interval!, isConsumption);
             return Task.FromResult(new List<TsPoint>());
         }
     }

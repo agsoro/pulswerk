@@ -32,6 +32,13 @@
       "localAddress": "0.0.0.0",
       "localPort": 47808,
       "localDeviceId": 1234
+    },
+    {
+      "id": "ocpp-central",
+      "type": "ocpp",
+      "localPort": 5000,
+      "localAddress": "/plswk/ocpp/",
+      "name": "OCPP Central System"
     }
   ],
   "devices": [
@@ -161,6 +168,19 @@
           "units": "kWh"
         }
       ]
+    },
+    {
+      "id": "wallbox-sim-01",
+      "name": "Garage Wallbox 1",
+      "deviceType": "ocpp",
+      "connectionId": "ocpp-central",
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "Garage",
+        "Wallbox 1"
+      ],
+      "assetType": "Wallbox"
     }
   ],
   "server": {
@@ -201,7 +221,31 @@
       "allowFavoriteEdit": [
         "users",
         "admins"
-      ]
+      ],
+      "allowEms": ["admins", "operators"],
+      "allowBilling": ["admins"],
+      "allowWallbox": ["users", "admins"],
+      "allowHistoricalData": ["admins"],
+      "allowAlarms": ["users", "admins"],
+      "allowLogs": ["admins"],
+      "allowHeartbeat": ["users", "admins"],
+      "allowDashboards": ["users", "admins"],
+      "allowAssets": ["users", "admins"],
+      "allowTelemetry": ["users", "admins"],
+      "allowConnections": ["admins"]
     }
+  },
+  "modules": {
+    "ems": true,
+    "billing": true,
+    "wallbox": true,
+    "historicalData": true,
+    "alarms": true,
+    "logs": true,
+    "heartbeat": true,
+    "dashboards": true,
+    "assets": true,
+    "telemetry": true,
+    "connections": true
   }
 }

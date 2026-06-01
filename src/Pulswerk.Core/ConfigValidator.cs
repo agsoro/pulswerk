@@ -31,8 +31,8 @@ namespace Pulswerk.Core
                     else if (!connIds.Add(conn.Id))
                         errors.Add($"Duplicate connection ID found: '{conn.Id}'.");
 
-                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip")
-                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip'.");
+                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp")
+                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp'.");
 
                     if (conn.Type == "bacnet-ip")
                     {
@@ -43,6 +43,15 @@ namespace Pulswerk.Core
                     {
                         if (string.IsNullOrWhiteSpace(conn.Address) && !cfg.Devices.Any(d => d.ConnectionId == conn.Id && !string.IsNullOrWhiteSpace(d.Address)))
                             errors.Add($"Modbus connection '{conn.Id}' has no address and no devices provide one.");
+                    }
+                    else if (conn.Type == "ocpp")
+                    {
+                        if (conn.LocalPort == null)
+                            errors.Add($"OCPP connection '{conn.Id}' is missing 'localPort'.");
+                        if (string.IsNullOrWhiteSpace(conn.LocalAddress))
+                            errors.Add($"OCPP connection '{conn.Id}' is missing 'localAddress' (path).");
+                        else if (!conn.LocalAddress.StartsWith('/') || !conn.LocalAddress.EndsWith('/'))
+                            errors.Add($"OCPP connection '{conn.Id}' has invalid 'localAddress' '{conn.LocalAddress}'. It must start and end with a '/' (e.g., '/plswk/ocpp/').");
                     }
                 }
             }
@@ -67,7 +76,7 @@ namespace Pulswerk.Core
                     if (string.IsNullOrWhiteSpace(dev.Name))
                         errors.Add($"Device '{dev.Id}' is missing a name.");
 
-                    if (dev.DeviceType != "virtual")
+                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ocpp")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
@@ -76,6 +85,13 @@ namespace Pulswerk.Core
 
                         if (dev.DeviceId == null)
                             errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
+                    }
+                    else if (dev.DeviceType == "ocpp")
+                    {
+                        if (string.IsNullOrWhiteSpace(dev.ConnectionId))
+                            errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
+                        else if (!connections.ContainsKey(dev.ConnectionId))
+                            errors.Add($"Device '{dev.Id}' references unknown connectionId '{dev.ConnectionId}'.");
                     }
                     if (dev.Telemetries != null)
                     {

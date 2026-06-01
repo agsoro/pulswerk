@@ -39,9 +39,24 @@ interface ConnectionConfig {
     name?: string;
 }
 
+interface ModulesConfig {
+    ems?: boolean;
+    billing?: boolean;
+    wallbox?: boolean;
+    historicalData?: boolean;
+    alarms?: boolean;
+    logs?: boolean;
+    heartbeat?: boolean;
+    dashboards?: boolean;
+    assets?: boolean;
+    telemetry?: boolean;
+    connections?: boolean;
+}
+
 interface AppConfig {
     connections?: ConnectionConfig[];
     devices?: DeviceConfig[];
+    modules?: ModulesConfig;
     server?: unknown;
     influxdb?: unknown;
 }
@@ -58,6 +73,91 @@ interface EditorModalProps {
     onSave: () => void;
     children: ComponentChildren;
 }
+
+// ── Module metadata ──────────────────────────────────────────────────────────
+
+const MODULE_META: Array<{ key: keyof ModulesConfig; label: string; icon: string; description: string }> = [
+    { key: 'dashboards',    label: 'Dashboards',      icon: 'fa-table-cells-large', description: 'Custom dashboard builder & widget layout' },
+    { key: 'assets',        label: 'Assets',           icon: 'fa-sitemap',          description: 'Asset hierarchy browser & property editor' },
+    { key: 'telemetry',     label: 'Telemetry',        icon: 'fa-database',         description: 'Telemetry list, search, and CRUD management' },
+    { key: 'historicalData',label: 'Historical Data',  icon: 'fa-chart-line',       description: 'Time-series query, charts, and data export' },
+    { key: 'alarms',        label: 'Alarms',           icon: 'fa-bell',             description: 'Active alarm monitoring and acknowledgement' },
+    { key: 'logs',          label: 'System Logs',      icon: 'fa-scroll',           description: 'Live system log stream and log history' },
+    { key: 'heartbeat',     label: 'Heartbeat',        icon: 'fa-heart-pulse',      description: 'System health, uptime, and performance stats' },
+    { key: 'billing',       label: 'Billing',          icon: 'fa-dollar-sign',      description: 'RFID card billing and tenant energy invoicing' },
+    { key: 'wallbox',       label: 'Wallboxes',        icon: 'fa-charging-station', description: 'OCPP EV chargepoint management and monitoring' },
+    { key: 'ems',           label: 'Energy Management',icon: 'fa-bolt',             description: 'Trajectory control, targets, and curtailment' },
+    { key: 'connections',   label: 'Connections',      icon: 'fa-network-wired',    description: 'Device connection management and diagnostics' },
+];
+
+const DEFAULT_MODULES: Required<ModulesConfig> = {
+    ems: true, billing: true, wallbox: true, historicalData: true,
+    alarms: true, logs: true, heartbeat: true, dashboards: true,
+    assets: true, telemetry: true, connections: true,
+};
+
+// ── Modules panel ─────────────────────────────────────────────────────────────
+
+interface ModulesPanelProps {
+    modules: Required<ModulesConfig>;
+    onChange: (key: keyof ModulesConfig, enabled: boolean) => void;
+}
+
+const ModulesPanel = ({ modules, onChange }: ModulesPanelProps) => (
+    <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm">
+        <div class="flex items-center gap-3 mb-6 border-b border-slate-700 pb-4">
+            <h2 class="text-xl font-bold text-slate-100 flex-1">
+                <i class="fas fa-puzzle-piece mr-2 text-violet-400"></i>Feature Modules
+            </h2>
+            <span class="text-xs text-slate-500">
+                {Object.values(modules).filter(Boolean).length} / {MODULE_META.length} enabled
+            </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {MODULE_META.map(({ key, label, icon, description }) => {
+                const enabled = modules[key];
+                return (
+                    <div
+                        key={key}
+                        class={`flex items-start gap-3 p-4 rounded-lg border transition-all cursor-pointer select-none ${
+                            enabled
+                                ? 'bg-slate-700/40 border-slate-600 hover:border-slate-500'
+                                : 'bg-slate-900/40 border-slate-700/50 opacity-60 hover:opacity-75'
+                        }`}
+                        onClick={() => onChange(key, !enabled)}
+                    >
+                        {/* Icon */}
+                        <div class={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
+                            enabled ? 'bg-violet-500/20 text-violet-400' : 'bg-slate-700/50 text-slate-500'
+                        }`}>
+                            <i class={`fas ${icon} text-sm`}></i>
+                        </div>
+
+                        {/* Text */}
+                        <div class="flex-1 min-w-0">
+                            <div class={`font-semibold text-sm ${enabled ? 'text-slate-100' : 'text-slate-400'}`}>{label}</div>
+                            <div class="text-xs text-slate-500 mt-0.5 leading-relaxed">{description}</div>
+                        </div>
+
+                        {/* Toggle */}
+                        <div class="flex-shrink-0 mt-0.5">
+                            <div class={`w-9 h-5 rounded-full relative transition-colors ${
+                                enabled ? 'bg-violet-500' : 'bg-slate-600'
+                            }`}>
+                                <div class={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-md transition-transform ${
+                                    enabled ? 'translate-x-4' : 'translate-x-0.5'
+                                }`} />
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    </div>
+);
+
+// ── Editor modal ──────────────────────────────────────────────────────────────
 
 const EditorModal = ({ title, isOpen, onClose, onSave, children }: EditorModalProps) => {
     if (!isOpen) return null;
@@ -233,6 +333,7 @@ const ConfigPage = () => {
     const [availableKeys, setAvailableKeys] = useState<TelemetryKey[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [modules, setModules] = useState<Required<ModulesConfig>>({ ...DEFAULT_MODULES });
 
     const getAvailablePaths = () => {
         if (!config) return [];
@@ -266,6 +367,11 @@ const ConfigPage = () => {
             if (!data.base.devices) data.base.devices = [];
             if (!data.base.connections) data.base.connections = [];
             setConfig(data);
+
+            // Derive effective module state: base defaults → override patch
+            const baseModules: Required<ModulesConfig> = { ...DEFAULT_MODULES, ...(data.base.modules ?? {}) };
+            const effective: Required<ModulesConfig> = { ...baseModules, ...(data.override.modules ?? {}) };
+            setModules(effective);
             
             const keysRes = await fetch('/plswk/api/telemetry-keys');
             if (keysRes.ok) {
@@ -289,14 +395,20 @@ const ConfigPage = () => {
         if (!config) return;
         setSaving(true);
         try {
+            // Include the current module toggles in the override payload
+            const payload = { ...config.override, modules };
             const res = await fetch('/plswk/api/config/override', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config.override)
+                body: JSON.stringify(payload)
             });
             if (res.ok) {
-                window.pwToast("Configuration saved successfully.");
-                await loadConfig(); // reload to get merged views
+                // Notify other tabs/windows (main SPA) that modules changed
+                try { localStorage.setItem('pw_modules_updated', Date.now().toString()); } catch (_) {}
+                window.pwToast("Configuration saved. Applying module changes…");
+                // Brief pause so the toast is visible, then hard-reload so the main
+                // SPA re-fetches /api/user/identity and the nav reflects the new state.
+                setTimeout(() => { window.location.reload(); }, 800);
             } else {
                 window.pwToast("Failed to save configuration.", "error");
             }
@@ -305,6 +417,10 @@ const ConfigPage = () => {
         } finally {
             setSaving(false);
         }
+    };
+
+    const handleModuleToggle = (key: keyof ModulesConfig, enabled: boolean) => {
+        setModules(prev => ({ ...prev, [key]: enabled }));
     };
 
     const handleSaveDevice = () => {
@@ -414,6 +530,8 @@ const ConfigPage = () => {
                     {saving ? <span><i class="fas fa-spinner fa-spin mr-2"></i>Saving...</span> : <span><i class="fas fa-save mr-2"></i>Save & Apply</span>}
                 </button>
             </div>
+
+            <ModulesPanel modules={modules} onChange={handleModuleToggle} />
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm">

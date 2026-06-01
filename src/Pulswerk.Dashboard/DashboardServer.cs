@@ -17,6 +17,8 @@ using Microsoft.Extensions.Hosting;
 using Pulswerk.Core;
 using Pulswerk.Drivers;
 using Pulswerk.Storage;
+using Pulswerk.Billing;
+using Pulswerk.Ems;
 
 namespace Pulswerk.Dashboard
 {
@@ -29,7 +31,7 @@ namespace Pulswerk.Dashboard
         private readonly DashboardDataService _data;
         private readonly DashboardStore _store;
 
-        public DashboardServer(DashboardDataService data, DashboardStore dashboardStore)
+        public DashboardServer(DashboardDataService data, DashboardStore dashboardStore, BillingStore billingStore)
         {
             _data = data;
             _store = dashboardStore;
@@ -38,8 +40,21 @@ namespace Pulswerk.Dashboard
             {
                 var builder = WebApplication.CreateBuilder();
                 var port = _data.Config.Server?.Port ?? 5000;
+                var ports = new HashSet<int> { port };
 
-                builder.WebHost.UseUrls($"http://*:{port}");
+                if (_data.Config.Connections != null)
+                {
+                    foreach (var c in _data.Config.Connections)
+                    {
+                        if (c.Type.Equals("ocpp", StringComparison.OrdinalIgnoreCase) && c.LocalPort.HasValue)
+                        {
+                            ports.Add(c.LocalPort.Value);
+                        }
+                    }
+                }
+
+                var urls = string.Join(";", ports.Select(p => $"http://*:{p}"));
+                builder.WebHost.UseUrls(urls);
 
                 // Limit noisy ASP.NET/Kestrel logs to Errors only
                 builder.Logging.AddFilter("Microsoft.AspNetCore", Microsoft.Extensions.Logging.LogLevel.Error);
@@ -56,6 +71,7 @@ namespace Pulswerk.Dashboard
                 builder.Services.AddRazorPages();
                 builder.Services.AddSingleton(_data);
                 builder.Services.AddSingleton(dashboardStore);
+                builder.Services.AddSingleton(billingStore);
 
                 // Persistent storage for encryption keys (shared volume)
                 string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
@@ -104,6 +120,70 @@ namespace Pulswerk.Dashboard
                 if (ctx.Request.Path.StartsWithSegments("/plswk/api"))
                 {
                     ctx.Response.Headers.Append("X-Pulswerk-Version", _data.Version);
+                }
+                await next();
+            });
+
+            _app.UseWebSockets();
+
+            _app.Use(async (ctx, next) =>
+            {
+                var path = ctx.Request.Path.Value;
+                if (path != null)
+                {
+                    var ocppConn = _data.Config.Connections?.FirstOrDefault(c =>
+                        c.Type.Equals("ocpp", StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrEmpty(c.LocalAddress) &&
+                        path.StartsWith(c.LocalAddress, StringComparison.OrdinalIgnoreCase) &&
+                        (c.LocalPort == null || c.LocalPort == ctx.Connection.LocalPort)
+                    );
+
+                    if (ocppConn != null)
+                    {
+                        var modules = _data.Config.Modules ?? new Pulswerk.Core.ModulesConfig();
+                        if (!modules.Wallbox)
+                        {
+                            ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                            await ctx.Response.WriteAsync("OCPP Wallbox module is disabled.");
+                            return;
+                        }
+
+                        // ChargePointId is the remainder of the path after LocalAddress
+                        string chargePointId = path.Substring(ocppConn.LocalAddress!.Length).TrimStart('/');
+
+                        if (string.IsNullOrWhiteSpace(chargePointId))
+                        {
+                            ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                            await ctx.Response.WriteAsync("ChargePointId is missing from path.");
+                            return;
+                        }
+
+                        // Verify that a device exists with this ID and matches this connection
+                        var device = _data.Config.Devices?.FirstOrDefault(d =>
+                            d.DeviceType.Equals("ocpp", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(d.Id, chargePointId, StringComparison.OrdinalIgnoreCase)
+                        );
+
+                        if (device == null || device.ConnectionId != ocppConn.Id)
+                        {
+                            ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                            await ctx.Response.WriteAsync($"Charger '{chargePointId}' is not configured on OCPP connection '{ocppConn.Id}'.");
+                            return;
+                        }
+
+                        if (ctx.WebSockets.IsWebSocketRequest)
+                        {
+                            using var webSocket = await ctx.WebSockets.AcceptWebSocketAsync();
+                            await Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.HandleConnectionAsync(chargePointId, webSocket, ctx.RequestAborted);
+                            return;
+                        }
+                        else
+                        {
+                            ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                            await ctx.Response.WriteAsync("Only WebSocket connections are accepted on this endpoint.");
+                            return;
+                        }
+                    }
                 }
                 await next();
             });

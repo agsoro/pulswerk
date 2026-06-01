@@ -261,7 +261,14 @@ async function openEdit(key: string): Promise<void> {
         updateBoolLabel();
         document.getElementById('boolGroup')!.style.display = 'block';
     } else {
-        (document.getElementById('editValue') as HTMLInputElement).value = String(parseFloat(currentVal) || 0);
+        const editInput = document.getElementById('editValue') as HTMLInputElement;
+        editInput.value = String(parseFloat(currentVal) || 0);
+        const units = (meta.units || '').trim().toLowerCase();
+        if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
+            editInput.step = '0.5';
+        } else {
+            editInput.step = '1';
+        }
         document.getElementById('stepperGroup')!.style.display = 'block';
     }
     
@@ -278,7 +285,9 @@ function closeEdit(): void {
     document.getElementById('editMeta')!.textContent = '';
     document.getElementById('editUnitLabel')!.textContent = '';
     document.getElementById('currentVal')!.textContent = '---';
-    (document.getElementById('editValue') as HTMLInputElement).value = '0';
+    const editInput = document.getElementById('editValue') as HTMLInputElement;
+    editInput.value = '0';
+    editInput.step = '1';
     const status = document.getElementById('editStatus')!;
     status.textContent = '';
     status.className = 'status-msg';
@@ -288,7 +297,17 @@ function closeEdit(): void {
 
 function step(n: number): void {
     const input = document.getElementById('editValue') as HTMLInputElement;
-    input.value = String((parseFloat(input.value) || 0) + n);
+    let stepVal = 1.0;
+    if (currentEditKey) {
+        const meta = resolveKeyMeta(currentEditKey);
+        const units = (meta.units || '').trim().toLowerCase();
+        if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
+            stepVal = 0.5;
+        }
+    }
+    const current = parseFloat(input.value) || 0;
+    const nextVal = current + (n * stepVal);
+    input.value = String(Math.round(nextVal * 10) / 10);
 }
 
 function updateBoolLabel(): void {

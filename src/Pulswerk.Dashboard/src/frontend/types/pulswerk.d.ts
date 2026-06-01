@@ -142,6 +142,10 @@ declare var isKeySelectorOpen: boolean;
 declare var dashTw: ITimeWindowSelector | null;
 declare var pendingRenders: Set<string>;
 
+// Injected at build time by Vite (vite.config.mts define block)
+// Value: "v{MAJOR}.{MINOR}.{PATCH}" sourced from Directory.Build.props + version.txt
+declare const __APP_VERSION__: string;
+
 // Global Functions
 declare function initI18n(lang?: string): void;
 declare function setLanguage(lang: string): void;

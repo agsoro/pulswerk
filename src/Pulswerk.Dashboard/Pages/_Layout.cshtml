@@ -34,6 +34,7 @@
                           data-i18n="nav_home">Home</span>
                 </a>
             </li>
+            @if (DashboardData.Config.Modules?.Dashboards ?? true) {
             <li>
                 <a href="/plswk/Dashboards"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Dashboards" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -43,6 +44,8 @@
                           data-i18n="nav_dashboards">Dashboards</span>
                 </a>
             </li>
+            }
+            @if (DashboardData.Config.Modules?.Assets ?? true) {
             <li>
                 <a href="/plswk/Assets"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Assets" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -52,6 +55,8 @@
                           data-i18n="nav_assets">Assets</span>
                 </a>
             </li>
+            }
+            @if (DashboardData.Config.Modules?.Telemetry ?? true) {
             <li>
                 <a href="/plswk/TelemetryList"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Data Points" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -61,6 +66,8 @@
                           data-i18n="nav_telemetries">Data Points</span>
                 </a>
             </li>
+            }
+            @if (DashboardData.Config.Modules?.Connections ?? true) {
             <li>
                 <a href="/plswk/Connections"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Connections" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -70,7 +77,8 @@
                           data-i18n="nav_connections">Connections</span>
                 </a>
             </li>
-
+            }
+            @if (DashboardData.Config.Modules?.Alarms ?? true) {
             <li>
                 <a href="/plswk/Alarms"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Alarms" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -80,6 +88,8 @@
                           data-i18n="nav_alarms">Alarms</span>
                 </a>
             </li>
+            }
+            @if (DashboardData.Config.Modules?.Logs ?? true) {
             <li>
                 <a href="/plswk/Logs"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Logs" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -89,6 +99,8 @@
                           data-i18n="nav_logs">Logs</span>
                 </a>
             </li>
+            }
+            @if (DashboardData.Config.Modules?.Heartbeat ?? true) {
             <li>
                 <a href="/plswk/Heartbeat"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Heartbeat" ? "!bg-sky-400/10 !text-sky-400" : "")"
@@ -98,6 +110,7 @@
                           data-i18n="nav_heartbeat">Heartbeat</span>
                 </a>
             </li>
+            }
         </ul>
         <footer
             class="mt-auto pt-4 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full flex flex-col items-center gap-3 overflow-hidden"

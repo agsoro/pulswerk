@@ -45,6 +45,16 @@ services:
     ports:
       - "47809:47808/udp"  # host 47809 → container 47808 (avoids clash with pulswerk)
 
+  # ── OCPP WebSocket simulator ────────────────────────────────────────────────
+  ocpp-sim:
+    build:
+      context: testing/OcppSim
+    container_name: ocpp-sim
+    restart: unless-stopped
+    command: ["wallbox-sim-01", "ws://pulswerk:5000/plswk/ocpp/wallbox-sim-01"]
+    depends_on:
+      - pulswerk
+
   # ── Pulswerk overrides for test environment ─────────────────────────────────
   pulswerk:
     depends_on:
@@ -59,6 +69,8 @@ services:
     volumes:
       # Mount host's compiled binaries
       - ./src/Pulswerk.Host/bin/Debug/net8.0:/app
+      # Mount wwwroot static assets so container can serve JS/CSS
+      - ./src/Pulswerk.Dashboard/wwwroot:/app/wwwroot:ro
       # Override production config with testing config (Docker DNS for simulators)
       - ./pulswerk.testing.json:/app/pulswerk.json:ro
     # All services share the default compose bridge network.
@@ -85,7 +97,7 @@ services:
     depends_on:
       - pulswerk
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/json/version || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- 'http://localhost:3000/json/version?token=pulswerk-visual-tests' || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 20

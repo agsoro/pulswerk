@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pulswerk.Core\Pulswerk.Core.csproj" />
+    <ProjectReference Include="..\Pulswerk.Storage\Pulswerk.Storage.csproj" />
+    <ProjectReference Include="..\Pulswerk.Billing\Pulswerk.Billing.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -2,8 +2,34 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { DashboardService } from '../dashboards/api';
 import { t } from '../i18n';
 
-const ROW_HEIGHT = 70; // px per row
+const ROW_HEIGHT = 60; // px per row
 const BUFFER_ROWS = 10;
+
+/** Format a lastSeen ISO string to a human-readable relative time.
+ *  Returns null if the value is falsy (never seen). */
+function formatLastSeen(raw: string | null | undefined): { label: string; cls: string } {
+    if (!raw) return { label: 'Never', cls: 'text-slate-600' };
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return { label: raw, cls: 'text-slate-500' };
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 0) return { label: 'just now', cls: 'text-emerald-400' };
+    if (seconds < 15)  return { label: 'just now',            cls: 'text-emerald-400' };
+    if (seconds < 60)  return { label: `${seconds}s ago`,     cls: 'text-emerald-400/80' };
+    if (seconds < 3600) return { label: `${Math.floor(seconds / 60)}m ago`, cls: 'text-sky-400/80' };
+    if (seconds < 86400) return { label: `${Math.floor(seconds / 3600)}h ago`, cls: 'text-amber-400/70' };
+    return { label: `${Math.floor(seconds / 86400)}d ago`,   cls: 'text-slate-500' };
+}
+
+/** Color-class for the TYPE badge */
+function typeColor(type: string): string {
+    if (!type) return 'bg-white/5 text-slate-400';
+    const t = type.replace('OBJECT_', '').toUpperCase();
+    if (t === 'ANALOG_INPUT' || t === 'ANALOG_VALUE')  return 'bg-sky-500/10 text-sky-400';
+    if (t === 'BINARY_INPUT' || t === 'BINARY_VALUE')  return 'bg-violet-500/10 text-violet-400';
+    if (t === 'DISCRETE' || t === 'MULTI_STATE_INPUT') return 'bg-amber-500/10 text-amber-400';
+    if (t === 'SCHEDULE')                               return 'bg-emerald-500/10 text-emerald-400';
+    return 'bg-white/5 text-slate-400';
+}
 
 export function TelemetryListPage() {
     const [allPoints, setAllPoints] = useState<any[]>([]);
@@ -64,11 +90,11 @@ export function TelemetryListPage() {
         const device = (p.device || '').toLowerCase();
         const connection = (p.connection || '').toLowerCase();
         const type = (p.type || '').toLowerCase();
-        return searchTerms.every(term => 
-            name.includes(term) || 
-            key.includes(term) || 
-            device.includes(term) || 
-            connection.includes(term) || 
+        return searchTerms.every(term =>
+            name.includes(term) ||
+            key.includes(term) ||
+            device.includes(term) ||
+            connection.includes(term) ||
             type.includes(term)
         );
     });
@@ -90,7 +116,7 @@ export function TelemetryListPage() {
         return 0;
     });
 
-    // Subscribe to SSE updates for visible keys
+    // Virtual scroll window
     const totalCount = sortedPoints.length;
     let startIdx = Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_ROWS;
     let endIdx = Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + BUFFER_ROWS;
@@ -102,15 +128,10 @@ export function TelemetryListPage() {
 
     useEffect(() => {
         if (visibleKeys.length === 0) return;
-
-        // Listen to updates
         const unsubscribe = DashboardService.listenToLiveUpdates(visibleKeys, (newData) => {
             setLiveValues(prev => ({ ...prev, ...newData }));
         });
-
-        return () => {
-            unsubscribe();
-        };
+        return () => { unsubscribe(); };
     }, [JSON.stringify(visibleKeys)]);
 
     const handleSort = (field: string) => {
@@ -149,7 +170,7 @@ export function TelemetryListPage() {
                         <i class="fas fa-list-ul text-xl"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-extrabold text-white tracking-tight">{t('nav_telemetries')}</h1>
+                        <h1 class="text-xl font-extrabold text-white tracking-tight" data-testid="page-title">{t('nav_telemetries')}</h1>
                         <p class="text-[0.7rem] text-slate-400 uppercase tracking-widest font-semibold opacity-60">Real-time point overview</p>
                     </div>
                 </div>
@@ -157,9 +178,9 @@ export function TelemetryListPage() {
                 <div class="flex items-center gap-4 flex-1 max-w-2xl">
                     <div class="relative flex-1">
                         <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
-                        <input 
-                            type="text" 
-                            placeholder="Search by name, key, device..." 
+                        <input
+                            type="text"
+                            placeholder="Search by name, key, device..."
                             value={searchTerm}
                             onInput={(e) => setSearchTerm(e.currentTarget.value)}
                             class="w-full bg-slate-900/40 border border-white/5 rounded-xl py-3 pl-12 pr-4 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:bg-slate-900/60 transition-all shadow-inner"
@@ -178,35 +199,35 @@ export function TelemetryListPage() {
                     <table class="w-full text-left border-collapse table-fixed">
                         <thead>
                             <tr class="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500 font-black">
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('connection')} style={{ width: '10%' }}>
-                                    <div class="flex items-center gap-1.5 truncate">Connection <i class={`fas ${getSortIcon('connection')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('connection')} style={{ width: '9%' }}>
+                                    <div class="flex items-center gap-1.5">Connection <i class={`fas ${getSortIcon('connection')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('device')} style={{ width: '10%' }}>
-                                    <div class="flex items-center gap-1.5 truncate">Device <i class={`fas ${getSortIcon('device')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('device')} style={{ width: '11%' }}>
+                                    <div class="flex items-center gap-1.5">Device <i class={`fas ${getSortIcon('device')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('name')} style={{ width: '22%' }}>
-                                    <div class="flex items-center gap-1.5 truncate">Identity &amp; Path <i class={`fas ${getSortIcon('name')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('name')} style={{ width: '24%' }}>
+                                    <div class="flex items-center gap-1.5">Identity &amp; Path <i class={`fas ${getSortIcon('name')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('key')} style={{ width: '20%' }}>
-                                    <div class="flex items-center gap-1.5 truncate">Key / Tag <i class={`fas ${getSortIcon('key')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('key')} style={{ width: '22%' }}>
+                                    <div class="flex items-center gap-1.5">Key / Tag <i class={`fas ${getSortIcon('key')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('type')} style={{ width: '10%' }}>
-                                    <div class="flex items-center gap-1.5 truncate">Type <i class={`fas ${getSortIcon('type')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group" onClick={() => handleSort('type')} style={{ width: '9%' }}>
+                                    <div class="flex items-center gap-1.5">Type <i class={`fas ${getSortIcon('type')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" onClick={() => handleSort('value')} style={{ width: '10%' }}>
-                                    <div class="flex items-center justify-end gap-1.5 truncate">Current Value <i class={`fas ${getSortIcon('value')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group text-right" onClick={() => handleSort('value')} style={{ width: '10%' }}>
+                                    <div class="flex items-center justify-end gap-1.5">Value <i class={`fas ${getSortIcon('value')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 cursor-pointer hover:text-sky-400 transition-colors group text-right" onClick={() => handleSort('lastSeen')} style={{ width: '10%' }}>
-                                    <div class="flex items-center justify-end gap-1.5 truncate">Last Seen <i class={`fas ${getSortIcon('lastSeen')} text-[0.6rem] group-hover:opacity-100`}></i></div>
+                                <th class="px-4 py-3 cursor-pointer hover:text-sky-400 transition-colors group text-right" onClick={() => handleSort('lastSeen')} style={{ width: '8%' }}>
+                                    <div class="flex items-center justify-end gap-1.5">Last Seen <i class={`fas ${getSortIcon('lastSeen')} text-[0.6rem] group-hover:opacity-100`}></i></div>
                                 </th>
-                                <th class="px-6 py-4 text-center" style={{ width: '8%' }}>Actions</th>
+                                <th class="px-4 py-3 text-center" style={{ width: '7%' }}>Actions</th>
                             </tr>
                         </thead>
                     </table>
                 </div>
 
                 {/* Virtual Scroll Viewport */}
-                <div 
+                <div
                     ref={viewportRef}
                     onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
                     class="flex-1 overflow-y-auto relative min-h-0"
@@ -228,72 +249,145 @@ export function TelemetryListPage() {
                                         const isSchedule = point.type === 'OBJECT_SCHEDULE';
                                         const isFav = (window as any).pw_fav?.get('deziko_favorites')?.includes(point.key);
 
+                                        // De-emphasize connection/device when same as previous visible row
+                                        const prevPoint = index > 0 ? visibleSlice[index - 1] : null;
+                                        const sameConn = prevPoint?.connection === point.connection;
+                                        const sameDev  = sameConn && prevPoint?.device === point.device;
+
+                                        const { label: lastSeenLabel, cls: lastSeenCls } = formatLastSeen(point.lastSeen);
+                                        const typeBadgeCls = typeColor(point.type);
+                                        const typeShort = (point.type || '').replace('OBJECT_', '');
+                                        const parentPath = point.parentPath?.map((p: any) => p.name).join(' / ') || '';
+
                                         return (
-                                            <tr 
+                                            <tr
                                                 key={point.key}
-                                                style={{ 
-                                                    position: 'absolute', 
-                                                    top: `${topPos}px`, 
+                                                style={{
+                                                    position: 'absolute',
+                                                    top: `${topPos}px`,
                                                     height: `${ROW_HEIGHT}px`,
-                                                    left: 0, 
+                                                    left: 0,
                                                     right: 0,
                                                     borderBottom: '1px solid rgba(255, 255, 255, 0.03)'
                                                 }}
-                                                class="flex items-center w-full transition-colors duration-150 hover:bg-white/[0.03]"
+                                                class="flex items-center w-full transition-colors duration-150 hover:bg-white/[0.04] group/row"
                                             >
-                                                <td class="px-6 py-3 align-middle truncate font-semibold text-slate-100" style={{ width: '10%' }}>
-                                                    {point.connection || '–'}
-                                                </td>
-                                                <td class="px-6 py-3 align-middle truncate text-slate-300" style={{ width: '10%' }}>
-                                                    {point.device || '–'}
-                                                </td>
-                                                <td class="px-6 py-3 align-middle truncate" style={{ width: '22%' }}>
-                                                    <div class="font-bold text-slate-50 truncate">{point.name}</div>
-                                                    <div class="text-[0.62rem] opacity-40 font-mono truncate">{point.parentPath?.map((p: any) => p.name).join(' / ')}</div>
-                                                </td>
-                                                <td class="px-6 py-3 align-middle truncate font-mono text-xs text-sky-400/80" style={{ width: '20%' }}>
-                                                    {point.key}
-                                                </td>
-                                                <td class="px-6 py-3 align-middle truncate" style={{ width: '10%' }}>
-                                                    <span class="text-[0.68rem] font-bold uppercase px-2 py-0.5 rounded bg-white/5 text-slate-400 truncate block text-center">
-                                                        {point.type?.replace('OBJECT_', '')}
-                                                    </span>
-                                                </td>
-                                                <td class="px-6 py-3 align-middle text-right" style={{ width: '10%' }}>
-                                                    {isSchedule ? (
-                                                        <span class="text-sky-400/50 text-[0.65rem] font-black uppercase tracking-widest"><i class="fas fa-clock mr-1 opacity-70"></i>Schedule</span>
+                                                {/* CONNECTION — dimmed when repeating */}
+                                                <td class="px-4 py-2 align-middle" style={{ width: '9%' }}>
+                                                    {sameConn ? (
+                                                        <span class="text-[0.7rem] text-slate-700 italic select-none truncate block">↳</span>
                                                     ) : (
-                                                        <span class="text-[0.95rem] font-bold text-sky-400 tabular-nums">
-                                                            {displayVal}
+                                                        <span
+                                                            class="text-[0.78rem] font-semibold text-slate-300 truncate block"
+                                                            title={point.connection}
+                                                        >
+                                                            {point.connection || '–'}
                                                         </span>
                                                     )}
-                                                    <span class="text-[0.7rem] text-slate-500 ml-1">{point.units}</span>
                                                 </td>
-                                                <td class="px-6 py-3 align-middle text-right font-mono text-[0.78rem] text-slate-400" style={{ width: '10%' }}>
-                                                    {point.lastSeen || 'Never'}
+
+                                                {/* DEVICE — dimmed when same connection + device */}
+                                                <td class="px-4 py-2 align-middle" style={{ width: '11%' }}>
+                                                    {sameDev ? (
+                                                        <span class="text-[0.7rem] text-slate-700 italic select-none truncate block">↳</span>
+                                                    ) : (
+                                                        <span
+                                                            class="text-[0.78rem] text-slate-400 truncate block"
+                                                            title={point.device}
+                                                        >
+                                                            {point.device || '–'}
+                                                        </span>
+                                                    )}
                                                 </td>
-                                                <td class="px-6 py-3 align-middle text-center flex justify-center gap-1.5" style={{ width: '8%' }}>
-                                                    <button 
+
+                                                {/* IDENTITY & PATH — name bold, path faint mono, both with tooltip */}
+                                                <td class="px-4 py-2 align-middle" style={{ width: '24%' }}>
+                                                    <div
+                                                        class="font-semibold text-slate-50 text-[0.85rem] truncate leading-tight"
+                                                        title={point.name}
+                                                    >
+                                                        {point.name}
+                                                    </div>
+                                                    {parentPath && (
+                                                        <div
+                                                            class="text-[0.62rem] text-slate-600 font-mono truncate mt-0.5 leading-tight"
+                                                            title={parentPath}
+                                                        >
+                                                            {parentPath}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                {/* KEY / TAG — monospace, full key in title tooltip */}
+                                                <td class="px-4 py-2 align-middle" style={{ width: '22%' }}>
+                                                    <span
+                                                        class="font-mono text-[0.72rem] text-sky-400/75 truncate block leading-snug"
+                                                        title={point.key}
+                                                    >
+                                                        {point.key}
+                                                    </span>
+                                                </td>
+
+                                                {/* TYPE badge — colored by type family, tooltip on overflow */}
+                                                <td class="px-4 py-2 align-middle" style={{ width: '9%' }}>
+                                                    <span
+                                                        class={`inline-flex items-center text-[0.65rem] font-bold uppercase px-1.5 py-0.5 rounded-md leading-none max-w-full ${typeBadgeCls}`}
+                                                        title={typeShort}
+                                                    >
+                                                        <span class="truncate">{typeShort}</span>
+                                                    </span>
+                                                </td>
+
+                                                {/* CURRENT VALUE */}
+                                                <td class="px-4 py-2 align-middle text-right" style={{ width: '10%' }}>
+                                                    {isSchedule ? (
+                                                        <span class="text-sky-400/50 text-[0.65rem] font-black uppercase tracking-widest">
+                                                            <i class="fas fa-clock mr-1 opacity-70"></i>Schedule
+                                                        </span>
+                                                    ) : (
+                                                        <span class="text-[0.9rem] font-bold text-sky-300 tabular-nums">
+                                                            {displayVal}
+                                                            {point.units && (
+                                                                <span class="text-[0.68rem] text-slate-500 ml-1 font-normal">{point.units}</span>
+                                                            )}
+                                                        </span>
+                                                    )}
+                                                </td>
+
+                                                {/* LAST SEEN — relative time, color-coded freshness */}
+                                                <td class="px-4 py-2 align-middle text-right" style={{ width: '8%' }}>
+                                                    <span
+                                                        class={`font-mono text-[0.72rem] ${lastSeenCls}`}
+                                                        title={point.lastSeen || 'Never polled'}
+                                                    >
+                                                        {lastSeenLabel}
+                                                    </span>
+                                                </td>
+
+                                                {/* ACTIONS */}
+                                                <td class="px-4 py-2 align-middle text-center flex justify-center gap-1" style={{ width: '7%' }}>
+                                                    <button
                                                         class={`btn-icon star-btn ${(window as any).pwCanEditFavorites ? '' : 'hidden'} ${isFav ? 'active text-amber-400' : ''}`}
+                                                        title={isFav ? 'Remove from favourites' : 'Add to favourites'}
                                                         onClick={() => {
                                                             if (typeof (window as any).toggleFavorite === 'function') {
                                                                 (window as any).toggleFavorite(point.key);
-                                                                setLiveValues(prev => ({ ...prev })); // force render
+                                                                setLiveValues(prev => ({ ...prev }));
                                                             }
                                                         }}
                                                     >
                                                         <i class={`${isFav ? 'fas' : 'far'} fa-star`}></i>
                                                     </button>
-                                                    <button class="btn-icon" title="Trend" onClick={() => (window as any).openHistory(point.key)}>
+                                                    <button class="btn-icon" title="Show trend" onClick={() => (window as any).openHistory(point.key)}>
                                                         <i class="fas fa-chart-area"></i>
                                                     </button>
                                                     {isSchedule && (
-                                                        <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Schedule View" onClick={() => (window as any).openScheduleView(point.key)}>
+                                                        <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Edit schedule" onClick={() => (window as any).openScheduleView(point.key)}>
                                                             <i class="fas fa-calendar-check"></i>
                                                         </button>
                                                     )}
                                                     {point.isWritable && !isSchedule && (
-                                                        <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Edit Value" onClick={() => (window as any).openEdit(point.key)}>
+                                                        <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Write value" onClick={() => (window as any).openEdit(point.key)}>
                                                             <i class="fas fa-pen"></i>
                                                         </button>
                                                     )}

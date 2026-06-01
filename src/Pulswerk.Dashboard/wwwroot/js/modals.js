@@ -252,10 +252,25 @@ async function openEdit(key) {
         document.getElementById('boolGroup').style.display = 'block';
     }
     else {
-        document.getElementById('editValue').value = String(parseFloat(currentVal) || 0);
+        const editInput = document.getElementById('editValue');
+        editInput.value = String(parseFloat(currentVal) || 0);
+        const units = (meta.units || '').trim().toLowerCase();
+        if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
+            editInput.step = '0.5';
+        }
+        else {
+            editInput.step = '1';
+        }
         document.getElementById('stepperGroup').style.display = 'block';
     }
     document.getElementById('editModal').style.display = 'flex';
+    // applyRightsToUI() hides .auth-write-only via inline style at page load.
+    // Re-assert visibility here based on the current permission so the button
+    // is visible for users who have write access.
+    const saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) {
+        saveBtn.style.display = window.pwCanWriteValue ? '' : 'none';
+    }
 }
 function closeEdit() {
     document.getElementById('editModal').style.display = 'none';
@@ -267,7 +282,9 @@ function closeEdit() {
     document.getElementById('editMeta').textContent = '';
     document.getElementById('editUnitLabel').textContent = '';
     document.getElementById('currentVal').textContent = '---';
-    document.getElementById('editValue').value = '0';
+    const editInput = document.getElementById('editValue');
+    editInput.value = '0';
+    editInput.step = '1';
     const status = document.getElementById('editStatus');
     status.textContent = '';
     status.className = 'status-msg';
@@ -277,7 +294,17 @@ function closeEdit() {
 }
 function step(n) {
     const input = document.getElementById('editValue');
-    input.value = String((parseFloat(input.value) || 0) + n);
+    let stepVal = 1.0;
+    if (currentEditKey) {
+        const meta = resolveKeyMeta(currentEditKey);
+        const units = (meta.units || '').trim().toLowerCase();
+        if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
+            stepVal = 0.5;
+        }
+    }
+    const current = parseFloat(input.value) || 0;
+    const nextVal = current + (n * stepVal);
+    input.value = String(Math.round(nextVal * 10) / 10);
 }
 function updateBoolLabel() {
     const input = document.getElementById('boolInput');

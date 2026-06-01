@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page } from './fixtures';
 
 // The list of pages to audit in the dashboard interface
 const PAGES = [
@@ -9,7 +9,10 @@ const PAGES = [
   { name: 'connections', path: '/plswk/Connections' },
   { name: 'alarms', path: '/plswk/Alarms' },
   { name: 'logs', path: '/plswk/Logs' },
-  { name: 'heartbeat', path: '/plswk/Heartbeat' }
+  { name: 'heartbeat', path: '/plswk/Heartbeat' },
+  { name: 'billing', path: '/plswk/Billing' },
+  { name: 'wallboxes', path: '/plswk/Wallboxes' },
+  { name: 'trajectory', path: '/plswk/Trajectory' }
 ];
 
 // Helper: Disable CSS animations and transitions to stabilize visual testing screenshots
@@ -30,7 +33,7 @@ async function disableAnimations(page: Page) {
 
 // Helper: Wait for general dashboard Shell components to render
 async function waitForDashboardShell(page: Page) {
-  await page.waitForSelector('[data-testid="sidebar-brand"]', { state: 'visible', timeout: 15000 });
+  await page.waitForSelector('[data-testid="sidebar"]', { state: 'visible', timeout: 15000 });
   await page.waitForSelector('[data-testid="page-title"]', { state: 'visible', timeout: 15000 });
 }
 
@@ -58,6 +61,222 @@ test.describe('UI Quality and Layout Audits', () => {
             updatedAt: "2026-05-20T12:00:00Z"
           }
         ])
+      });
+    });
+
+    // Mock /api/billing/rfid
+    await page.route('**/api/billing/rfid', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { idTag: "04A1B2C3", userName: "Alice Miller" },
+          { idTag: "08D4E5F6", userName: "Bob Fischer" }
+        ])
+      });
+    });
+
+    // Mock /api/billing/tenants
+    await page.route('**/api/billing/tenants', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: "tenant-101", name: "Apartment 101", meterKey: "meter-101_active-energy" },
+          { id: "tenant-202", name: "Office 202", meterKey: "meter-202_active-energy" }
+        ])
+      });
+    });
+
+    // Mock /api/billing/tariffs
+    await page.route('**/api/billing/tariffs', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ratePerKwh: 0.35, baseMonthlyFee: 12.50 })
+      });
+    });
+
+    // Mock /api/billing/invoice
+    await page.route('**/api/billing/invoice**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          invoices: [
+            {
+              type: "EV Charging",
+              idTag: "04A1B2C3",
+              userName: "Alice Miller",
+              details: "RFID: 04A1B2C3",
+              transactionCount: 4,
+              totalKwh: 80.5,
+              ratePerKwh: 0.35,
+              baseFee: 12.50,
+              energyCost: 28.18,
+              totalCost: 40.68,
+              billingPeriod: "2026-05"
+            },
+            {
+              type: "Tenant Meter",
+              idTag: "",
+              userName: "Apartment 101",
+              details: "meter-101_active-energy",
+              transactionCount: 0,
+              totalKwh: 320.0,
+              ratePerKwh: 0.35,
+              baseFee: 12.50,
+              energyCost: 112.00,
+              totalCost: 124.50,
+              billingPeriod: "2026-05"
+            }
+          ],
+          ratePerKwh: 0.35,
+          baseMonthlyFee: 12.50
+        })
+      });
+    });
+
+    // Mock /api/trajectory/status
+    await page.route('**/api/trajectory/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          enabled: true,
+          monthlyTargetKwh: 3000.0,
+          mainMeterKey: "analytics-summary_daily-kwh",
+          targetKwh: 240.50,
+          actualKwh: 232.10,
+          deviationPct: -3.5,
+          isCurtailmentActive: false,
+          controlState: "Normal",
+          logs: [
+            { timestamp: "2026-05-27 12:00:00", message: "Control loop evaluated. actual: 232.1kWh, target: 240.5kWh.", state: "Normal" },
+            { timestamp: "2026-05-27 08:00:00", message: "Peak warning: deviation exceeded 5% threshold.", state: "Warning" }
+          ]
+        })
+      });
+    });
+
+    // Mock /api/trajectory/targets
+    await page.route('**/api/trajectory/targets', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { telemetryKey: "wallbox-sim-01_max_charge_current", normalValue: 16, warningValue: 10, criticalValue: 6 },
+          { telemetryKey: "hvac-01_setpoint", normalValue: 22, warningValue: 19, criticalValue: 16 }
+        ])
+      });
+    });
+
+    // Mock /api/trajectory/targets/15min
+    await page.route('**/api/trajectory/targets/15min', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
+    });
+
+    // Mock /api/history
+    await page.route('**/api/history**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { ts: Date.now() - 3600000 * 2, value: 5000.0, valueStr: null },
+          { ts: Date.now() - 3600000, value: 5120.0, valueStr: null },
+          { ts: Date.now(), value: 5232.1, valueStr: null }
+        ])
+      });
+    });
+
+    // Mock /api/wallboxes
+    await page.route('**/api/wallboxes', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: "wallbox-sim-01",
+            name: "Garage Wallbox 1",
+            connected: true,
+            status: "Available",
+            power: 0.0,
+            energyImport: 125.4,
+            current: 0.0,
+            voltage: 230.0,
+            activeUser: "None"
+          },
+          {
+            id: "wallbox-sim-02",
+            name: "Parking Charger 2",
+            connected: true,
+            status: "Charging",
+            power: 7.4,
+            energyImport: 412.8,
+            current: 32.0,
+            voltage: 231.0,
+            activeUser: "Alice Miller"
+          },
+          {
+            id: "wallbox-sim-03",
+            name: "Outdoor Charger 3",
+            connected: false,
+            status: "Unavailable",
+            power: 0.0,
+            energyImport: 50.0,
+            current: 0.0,
+            voltage: 0.0,
+            activeUser: "None"
+          }
+        ])
+      });
+    });
+
+    // Mock /api/alarms (alarms page fetches this on mount via Preact component)
+    await page.route('**/api/alarms**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          alarms: [],
+          countCritical: 0,
+          countMajor: 0,
+          countMinor: 0,
+          countWarning: 0,
+          countMaintenance: 0,
+          countAcked: 0
+        })
+      });
+    });
+
+    // Mock /api/heartbeat/stats (heartbeat page polls this on mount)
+    await page.route('**/api/heartbeat/stats', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          uptimeSeconds: 3661,
+          updatesPerMinute: 120.0,
+          totalTelemetries: 1024,
+          databaseSizeBytes: 536870912,
+          totalUpdates: 98765,
+          totalPushUpdates: 70000,
+          totalPullUpdates: 28765,
+          workingSetMb: 256,
+          gcHeapMb: 80,
+          tcpConnections: 3,
+          oldestDeviceSeenUtc: "2026-05-31 10:00:00",
+          isScanning: false,
+          deviceCount: 9,
+          connectedDeviceCount: 9,
+          dataPointKeyCount: 1337,
+          version: "2.6.0",
+          environment: "Test"
+        })
       });
     });
   });

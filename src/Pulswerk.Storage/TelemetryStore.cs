@@ -510,6 +510,33 @@ namespace Pulswerk.Storage
             return stats;
         }
 
+        /// <summary>
+        /// Deletes telemetry points for a specific key within a time range.
+        /// </summary>
+        public virtual async Task DeleteAsync(string key, long startTs, long endTs)
+        {
+            try
+            {
+                await Task.Run(() =>
+                {
+                    var start = DateTimeOffset.FromUnixTimeMilliseconds(startTs).UtcDateTime;
+                    var stop = DateTimeOffset.FromUnixTimeMilliseconds(endTs).UtcDateTime;
+                    var predicate = $"_measurement=\"telemetry\" AND key=\"{EscapeFlux(key)}\"";
+
+                    var deleteApi = _client.GetDeleteApi();
+                    deleteApi.Delete(start, stop, predicate, _bucket, _org);
+                    deleteApi.Delete(start, stop, predicate, _bucket + "_downsampled", _org);
+                    Log.Info($"[InfluxDB] Deleted points for key '{key}' from {start:o} to {stop:o}.");
+                });
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[InfluxDB] Delete error: {ex.Message}");
+                throw;
+            }
+        }
+
+
         public void Dispose()
         {
             if (_disposed) return;

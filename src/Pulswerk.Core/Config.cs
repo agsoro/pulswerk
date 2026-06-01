@@ -10,7 +10,8 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("polling")] PollingConfig? Polling,
         [property: JsonPropertyName("connections")] List<ConnectionConfig> Connections,
         [property: JsonPropertyName("devices")] List<DeviceConfig> Devices,
-        [property: JsonPropertyName("server")] ServerConfig? Server
+        [property: JsonPropertyName("server")] ServerConfig? Server,
+        [property: JsonPropertyName("modules")] ModulesConfig? Modules = null
     );
 
     public record TelemetryConfig(
@@ -375,6 +376,53 @@ namespace Pulswerk.Core
         /// Groups that are allowed to view and edit system configuration.
         /// Defaults to ["admins"] if not specified.
         /// </summary>
-        [property: JsonPropertyName("allowConfigEdit")] List<string>? AllowConfigEdit = null
+        [property: JsonPropertyName("allowConfigEdit")] List<string>? AllowConfigEdit = null,
+
+        /// <summary>Groups allowed to access EMS/Trajectory module.</summary>
+        [property: JsonPropertyName("allowEms")] List<string>? AllowEms = null,
+
+        /// <summary>Groups allowed to access Billing module.</summary>
+        [property: JsonPropertyName("allowBilling")] List<string>? AllowBilling = null,
+
+        /// <summary>Groups allowed to access Wallbox/OCPP module.</summary>
+        [property: JsonPropertyName("allowWallbox")] List<string>? AllowWallbox = null,
+
+        /// <summary>Groups allowed to access Historical Data CRUD module.</summary>
+        [property: JsonPropertyName("allowHistoricalData")] List<string>? AllowHistoricalData = null,
+
+        /// <summary>Groups allowed to access Alarms module.</summary>
+        [property: JsonPropertyName("allowAlarms")] List<string>? AllowAlarms = null,
+
+        /// <summary>Groups allowed to access Logs module.</summary>
+        [property: JsonPropertyName("allowLogs")] List<string>? AllowLogs = null,
+
+        /// <summary>Groups allowed to access Heartbeat module.</summary>
+        [property: JsonPropertyName("allowHeartbeat")] List<string>? AllowHeartbeat = null,
+
+        /// <summary>Groups allowed to access Dashboards module.</summary>
+        [property: JsonPropertyName("allowDashboards")] List<string>? AllowDashboards = null,
+
+        /// <summary>Groups allowed to access Assets module.</summary>
+        [property: JsonPropertyName("allowAssets")] List<string>? AllowAssets = null,
+
+        /// <summary>Groups allowed to access Telemetry module.</summary>
+        [property: JsonPropertyName("allowTelemetry")] List<string>? AllowTelemetry = null,
+
+        /// <summary>Groups allowed to access Connections module.</summary>
+        [property: JsonPropertyName("allowConnections")] List<string>? AllowConnections = null
+    );
+
+    public record ModulesConfig(
+        [property: JsonPropertyName("ems")] bool Ems = true,
+        [property: JsonPropertyName("billing")] bool Billing = true,
+        [property: JsonPropertyName("wallbox")] bool Wallbox = true,
+        [property: JsonPropertyName("historicalData")] bool HistoricalData = true,
+        [property: JsonPropertyName("alarms")] bool Alarms = true,
+        [property: JsonPropertyName("logs")] bool Logs = true,
+        [property: JsonPropertyName("heartbeat")] bool Heartbeat = true,
+        [property: JsonPropertyName("dashboards")] bool Dashboards = true,
+        [property: JsonPropertyName("assets")] bool Assets = true,
+        [property: JsonPropertyName("telemetry")] bool Telemetry = true,
+        [property: JsonPropertyName("connections")] bool Connections = true
     );
 }

@@ -2,11 +2,13 @@
 //
 //  Register map  (UMG 604/605-PRO, 0-based, float32 = 2 × 16-bit registers)
 //
-//    Address  Data point key    Unit   Conversion
-//    ───────  ───────────────  ─────  ──────────
-//    19026    power_kw         W      ÷ 1000
-//    19060    import_kwh       Wh     ÷ 1000
-//    19076    export_kwh       Wh     ÷ 1000
+//    Address  Designation       Data point key    Unit   Conversion
+//    ───────  ───────────────  ───────────────  ─────  ──────────
+//    19026    _P_SUML13         power_kw         W      ÷ 1000
+//    19060    _G_WH_SUML13      (active energy sum L1–L3, bidirectional – NOT used)
+//    19062    _G_WH_V[0]        (active energy L1 consumed only – NOT used)
+//    19068    _G_WH_VSUML13     import_kwh       Wh     ÷ 1000
+//    19076    _G_WH_RSUML13     export_kwh       Wh     ÷ 1000
 //
 //  ⚠  Verify addresses for your exact model:
 //     https://www.janitza.com/en/downloads/modbus-address-list
@@ -23,8 +25,8 @@ namespace Pulswerk.Drivers.Modbus
     class JanitzaDriver : BaseModbusDriver
     {
         const ushort REG_POWER_SUM_W = 19026;
-        const ushort REG_IMPORT_SUM_WH = 19060;
-        const ushort REG_EXPORT_SUM_WH = 19076;
+        const ushort REG_IMPORT_SUM_WH = 19068;   // _G_WH_VSUML13: consumed (import) L1+L2+L3
+        const ushort REG_EXPORT_SUM_WH = 19076;   // _G_WH_RSUML13: delivered (export) L1+L2+L3
 
         public override string DriverName => "Janitza";
 

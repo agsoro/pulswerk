@@ -16,7 +16,10 @@ using Pulswerk.Core;
 using Pulswerk.Dashboard;
 using Pulswerk.Drivers;
 using Pulswerk.Drivers.BACnet;
+using Pulswerk.Drivers.Ocpp;
 using Pulswerk.Storage;
+using Pulswerk.Billing;
+using Pulswerk.Ems;
 
 namespace Pulswerk.Host
 {
@@ -26,7 +29,7 @@ namespace Pulswerk.Host
     /// Hosts the full connector lifecycle: config → stores → drivers →
     /// monitoring dashboard → polling loops → graceful shutdown.
     /// </summary>
-    sealed class ConnectorHost
+    sealed partial class ConnectorHost
     {
         readonly AppConfig _cfg;
         readonly Dictionary<string, ConnectionConfig> _connections;
@@ -39,6 +42,7 @@ namespace Pulswerk.Host
         DashboardDataService? _dataService;
         TelemetryStore _dataStore = null!;
         AlarmStore _alarmStore = null!;
+        BillingStore _billingStore = null!;
         DashboardServer? _dashboardServer;
         DevicePoller _poller = null!;
 
@@ -203,7 +207,8 @@ namespace Pulswerk.Host
                 overrideCfg.Polling ?? baseCfg.Polling,
                 mergedConnections,
                 mergedDevices,
-                overrideCfg.Server ?? baseCfg.Server
+                overrideCfg.Server ?? baseCfg.Server,
+                overrideCfg.Modules ?? baseCfg.Modules
             );
         }
 
@@ -237,8 +242,12 @@ namespace Pulswerk.Host
             string alarmDbPath = Path.Combine(dataDir, "alarms.db");
             _alarmStore = new AlarmStore(alarmDbPath);
 
+            string billingDbPath = Path.Combine(dataDir, "billing.db");
+            _billingStore = new BillingStore(billingDbPath);
+
             Log.Info($"InfluxDB: {influxUrl} org={influxOrg} bucket={influxBucket}");
             Log.Info($"AlarmDB:  {alarmDbPath}");
+            Log.Info($"BillingDB: {billingDbPath}");
         }
 
         // ── Drivers ──────────────────────────────────────────────────────────
@@ -286,11 +295,51 @@ namespace Pulswerk.Host
                 _offlineDevices, _lastPolledAt, _drivers);
             _dataService = dataService;
 
-            string dataDir = "/app/data";
+            string dataDir = Path.Combine(AppContext.BaseDirectory, "data");
             var dashboardStore = new DashboardStore(dataDir);
 
-            _dashboardServer = new DashboardServer(dataService, dashboardStore);
+            _dashboardServer = new DashboardServer(dataService, dashboardStore, _billingStore);
             var server = _dashboardServer;
+
+            var modules = _cfg.Modules ?? new ModulesConfig();
+
+            if (modules.Wallbox)
+            {
+                OcppManagerService.Instance.Initialize(_billingStore);
+                OcppManagerService.Instance.OnTelemetryUpdated += (chargePointId, key, value) =>
+                {
+                    var device = dataService.Config.Devices.Find(d => 
+                        d.DeviceType.Equals("ocpp", StringComparison.OrdinalIgnoreCase) && 
+                        string.Equals(d.Id, chargePointId, StringComparison.OrdinalIgnoreCase)
+                    );
+
+                    if (device != null)
+                    {
+                        var update = new Dictionary<string, object>
+                        {
+                            [$"{device.Id}_{key}"] = value
+                        };
+                        dataService.UpdateTelemetries(update);
+                    }
+                };
+            }
+
+            if (modules.Ems)
+            {
+                TrajectoryService.Instance.Initialize(
+                    _dataStore,
+                    _billingStore,
+                    key =>
+                    {
+                        var liveVals = dataService.GetCurrentValues(new List<string> { key });
+                        if (liveVals.TryGetValue(key, out var liveStr) && double.TryParse(liveStr, out double liveVal))
+                            return liveVal;
+                        return null;
+                    },
+                    async (key, value) => await dataService.WriteValueAsync(key, value)
+                );
+                TrajectoryService.Instance.Start();
+            }
 
             _ = Task.Run(async () =>
             {
@@ -534,8 +583,13 @@ namespace Pulswerk.Host
             var dbCfg = _cfg.Database ?? new DatabaseConfig();
             _alarmStore.PurgeCleared(dbCfg.AlarmRetentionDays);
 
+            if (_cfg.Modules?.Ems ?? true)
+            {
+                TrajectoryService.Instance.Stop();
+            }
             _dataStore.Dispose();
             _alarmStore.Dispose();
+            _billingStore.Dispose();
             _dashboardServer?.Dispose();
         }
 

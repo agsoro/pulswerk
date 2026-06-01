@@ -10,20 +10,159 @@ using Microsoft.AspNetCore.Mvc;
 using Pulswerk.Core;
 using Pulswerk.Drivers;
 using Pulswerk.Storage;
+using Pulswerk.Billing;
+using Pulswerk.Ems;
 
 namespace Pulswerk.Dashboard.Controllers
 {
     [ApiController]
     [Route("plswk/api")]
-    public class ApiController : ControllerBase
+    public partial class ApiController : ControllerBase, Microsoft.AspNetCore.Mvc.Filters.IActionFilter
     {
         private readonly DashboardDataService _data;
         private readonly DashboardStore _store;
+        private readonly BillingStore _billing;
 
-        public ApiController(DashboardDataService data, DashboardStore store)
+        public ApiController(DashboardDataService data, DashboardStore store, BillingStore billing)
         {
             _data = data;
             _store = store;
+            _billing = billing;
+        }
+
+        [NonAction]
+        public void OnActionExecuting(Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext context)
+        {
+            var path = HttpContext.Request.Path.Value;
+            if (path == null) return;
+
+            var modules = _data.Config.Modules ?? new ModulesConfig();
+
+            // 1. Gate OCPP Wallbox endpoints
+            if (path.Contains("/api/wallboxes", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Wallbox || !DashboardAuth.CanAccessWallbox(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Wallbox access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 2. Gate Billing endpoints
+            if (path.Contains("/api/billing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Billing || !DashboardAuth.CanAccessBilling(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Billing access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 3. Gate EMS / Trajectory endpoints
+            if (path.Contains("/api/trajectory", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Ems || !DashboardAuth.CanAccessEms(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "EMS access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 4. Gate Historical Data CRUD endpoints
+            if (path.Contains("/api/telemetry/data", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.HistoricalData || !DashboardAuth.CanAccessHistoricalData(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Historical data access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 5. Gate Alarms endpoints
+            if (path.Contains("/api/alarm", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Alarms || !DashboardAuth.CanAccessAlarms(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Alarms access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 6. Gate Logs endpoints
+            if (path.Contains("/api/logs", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Logs || !DashboardAuth.CanAccessLogs(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Logs access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 7. Gate Heartbeat endpoints
+            if (path.Contains("/api/heartbeat", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/health-history", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/connection-health", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Heartbeat || !DashboardAuth.CanAccessHeartbeat(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Heartbeat access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 8. Gate Dashboards endpoints
+            if (path.Contains("/api/dashboards", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Dashboards || !DashboardAuth.CanAccessDashboards(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Dashboards access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 9. Gate Assets endpoints
+            if (path.Contains("/api/tree", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/properties", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/write", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Assets || !DashboardAuth.CanAccessAssets(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Assets access is disabled or unauthorized.");
+                    return;
+                }
+            }
+
+            // 10. Gate Telemetry endpoints (excluding historical data CRUD which has its own path)
+            if (path.Contains("/api/telemetry-keys", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/telemetries", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/widget-data", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/latest-value", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/history", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!path.Contains("/api/telemetry/data", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!modules.Telemetry || !DashboardAuth.CanAccessTelemetry(HttpContext, _data.Config.Server))
+                    {
+                        context.Result = StatusCode(403, "Telemetry access is disabled or unauthorized.");
+                        return;
+                    }
+                }
+            }
+
+            // 11. Gate Connections endpoints
+            if (path.Contains("/api/connections", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!modules.Connections || !DashboardAuth.CanAccessConnections(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Connections access is disabled or unauthorized.");
+                    return;
+                }
+            }
+        }
+
+        [NonAction]
+        public void OnActionExecuted(Microsoft.AspNetCore.Mvc.Filters.ActionExecutedContext context)
+        {
         }
 
         [HttpGet("status")]
@@ -430,6 +569,10 @@ namespace Pulswerk.Dashboard.Controllers
                 string saveJson = JsonSerializer.Serialize(newOverride, writeOpts);
                 System.IO.File.WriteAllText(overridePath, saveJson);
 
+                // Update the in-memory config immediately so sidebar gating and
+                // /api/user/identity reflect the new module state without a restart.
+                _data.UpdateModules(newOverride.Modules);
+
                 return Ok();
             }
             catch (Exception ex)
@@ -729,7 +872,32 @@ namespace Pulswerk.Dashboard.Controllers
                     canAckAlarm = DashboardAuth.CanAckAlarm(HttpContext, _data.Config.Server),
                     canEditDashboard = DashboardAuth.CanEditDashboard(HttpContext, _data.Config.Server),
                     canEditFavorites = DashboardAuth.CanEditFavorites(HttpContext, _data.Config.Server),
-                    canEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server)
+                    canEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server),
+                    canAccessEms = (_data.Config.Modules?.Ems ?? true) && DashboardAuth.CanAccessEms(HttpContext, _data.Config.Server),
+                    canAccessBilling = (_data.Config.Modules?.Billing ?? true) && DashboardAuth.CanAccessBilling(HttpContext, _data.Config.Server),
+                    canAccessWallbox = (_data.Config.Modules?.Wallbox ?? true) && DashboardAuth.CanAccessWallbox(HttpContext, _data.Config.Server),
+                    canAccessHistoricalData = (_data.Config.Modules?.HistoricalData ?? true) && DashboardAuth.CanAccessHistoricalData(HttpContext, _data.Config.Server),
+                    canAccessAlarms = (_data.Config.Modules?.Alarms ?? true) && DashboardAuth.CanAccessAlarms(HttpContext, _data.Config.Server),
+                    canAccessLogs = (_data.Config.Modules?.Logs ?? true) && DashboardAuth.CanAccessLogs(HttpContext, _data.Config.Server),
+                    canAccessHeartbeat = (_data.Config.Modules?.Heartbeat ?? true) && DashboardAuth.CanAccessHeartbeat(HttpContext, _data.Config.Server),
+                    canAccessDashboards = (_data.Config.Modules?.Dashboards ?? true) && DashboardAuth.CanAccessDashboards(HttpContext, _data.Config.Server),
+                    canAccessAssets = (_data.Config.Modules?.Assets ?? true) && DashboardAuth.CanAccessAssets(HttpContext, _data.Config.Server),
+                    canAccessTelemetry = (_data.Config.Modules?.Telemetry ?? true) && DashboardAuth.CanAccessTelemetry(HttpContext, _data.Config.Server),
+                    canAccessConnections = (_data.Config.Modules?.Connections ?? true) && DashboardAuth.CanAccessConnections(HttpContext, _data.Config.Server)
+                },
+                modules = new
+                {
+                    ems = _data.Config.Modules?.Ems ?? true,
+                    billing = _data.Config.Modules?.Billing ?? true,
+                    wallbox = _data.Config.Modules?.Wallbox ?? true,
+                    historicalData = _data.Config.Modules?.HistoricalData ?? true,
+                    alarms = _data.Config.Modules?.Alarms ?? true,
+                    logs = _data.Config.Modules?.Logs ?? true,
+                    heartbeat = _data.Config.Modules?.Heartbeat ?? true,
+                    dashboards = _data.Config.Modules?.Dashboards ?? true,
+                    assets = _data.Config.Modules?.Assets ?? true,
+                    telemetry = _data.Config.Modules?.Telemetry ?? true,
+                    connections = _data.Config.Modules?.Connections ?? true
                 }
             });
         }
@@ -815,6 +983,7 @@ namespace Pulswerk.Dashboard.Controllers
                 {
                     "bacnet-ip" => "BACnet Gateway",
                     "modbus-tcp" => "Modbus Gateway",
+                    "ocpp" => "OCPP Central System",
                     _ => conn.Type
                 };
 
@@ -835,6 +1004,7 @@ namespace Pulswerk.Dashboard.Controllers
                         "sunspec" => "Modbus",
                         "bacnet" => "BACnet",
                         "deziko" => "Deziko (BACnet)",
+                        "ocpp" => "OCPP",
                         _ => d.DeviceType
                     };
 
@@ -880,6 +1050,587 @@ namespace Pulswerk.Dashboard.Controllers
                 connections = connectionsList,
                 canEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server)
             });
+        }
+
+        // ── OCPP Wallbox Endpoints ──────────────────────────────────────────
+
+        [HttpGet("wallboxes")]
+        public IActionResult GetWallboxes()
+        {
+            var wallboxes = _data.Config.Devices
+                .Where(d => d.DeviceType.Equals("ocpp", StringComparison.OrdinalIgnoreCase))
+                .Select(d => {
+                    var telemetry = Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.GetTelemetry(d.Id);
+                    return new {
+                        id = d.Id,
+                        name = d.Name,
+                        connected = Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.IsConnected(d.Id),
+                        status = telemetry.GetValueOrDefault("status", "Unavailable"),
+                        power = telemetry.GetValueOrDefault("power", 0.0),
+                        energyImport = telemetry.GetValueOrDefault("energy_import", 0.0),
+                        current = telemetry.GetValueOrDefault("current", 0.0),
+                        voltage = telemetry.GetValueOrDefault("voltage", 0.0),
+                        activeUser = telemetry.GetValueOrDefault("active_user", "None")
+                    };
+                }).ToList();
+
+            return Ok(wallboxes);
+        }
+
+        public class WallboxCommandDto
+        {
+            public string ChargePointId { get; set; } = "";
+            public string Command { get; set; } = ""; // "start", "stop", "unlock"
+            public string? RfidTag { get; set; }
+            public int? TransactionId { get; set; }
+        }
+
+        [HttpPost("wallboxes/command")]
+        public async Task<IActionResult> ExecuteWallboxCommand([FromBody] WallboxCommandDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanWriteValue(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.ChargePointId)) return BadRequest("chargePointId is required");
+
+            bool ok = false;
+            if (req.Command == "start")
+            {
+                ok = await Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.RemoteStartTransactionAsync(req.ChargePointId, 1, req.RfidTag ?? "RemoteUser");
+            }
+            else if (req.Command == "stop" && req.TransactionId.HasValue)
+            {
+                ok = await Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.RemoteStopTransactionAsync(req.ChargePointId, req.TransactionId.Value);
+            }
+            else if (req.Command == "unlock")
+            {
+                string messageId = Guid.NewGuid().ToString("N")[..8];
+                string ocppMsg = $"[2,\"{messageId}\",\"UnlockConnector\",{{\"connectorId\":1}}]";
+                ok = await Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.SendMessageAsync(req.ChargePointId, ocppMsg);
+            }
+
+            return Ok(new { success = ok });
+        }
+
+        // ── Billing / Invoice Endpoints ─────────────────────────────────────
+
+        [HttpGet("billing/tariffs")]
+        public IActionResult GetBillingTariffs()
+        {
+            return Ok(new {
+                ratePerKwh = _billing.GetTariff("rate_per_kwh", 0.30),
+                baseMonthlyFee = _billing.GetTariff("base_monthly_fee", 10.00)
+            });
+        }
+
+        public class TariffsDto
+        {
+            public double RatePerKwh { get; set; }
+            public double BaseMonthlyFee { get; set; }
+        }
+
+        [HttpPost("billing/tariffs")]
+        public IActionResult UpdateBillingTariffs([FromBody] TariffsDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            _billing.SetTariff("rate_per_kwh", req.RatePerKwh);
+            _billing.SetTariff("base_monthly_fee", req.BaseMonthlyFee);
+            return Ok(new { success = true });
+        }
+
+        [HttpGet("billing/rfid")]
+        public IActionResult GetRfidMappings()
+        {
+            var map = _billing.GetRfidMap();
+            var list = map.Select(kv => new { idTag = kv.Key, userName = kv.Value }).ToList();
+            return Ok(list);
+        }
+
+        public class RfidDto
+        {
+            public string IdTag { get; set; } = "";
+            public string UserName { get; set; } = "";
+        }
+
+        [HttpPost("billing/rfid")]
+        public IActionResult AddRfidMapping([FromBody] RfidDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.IdTag) || string.IsNullOrEmpty(req.UserName))
+                return BadRequest("idTag and userName are required");
+
+            _billing.AddRfidMapping(req.IdTag, req.UserName);
+            return Ok(new { success = true });
+        }
+
+        [HttpDelete("billing/rfid/{idTag}")]
+        public IActionResult DeleteRfidMapping(string idTag)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            _billing.DeleteRfidMapping(idTag);
+            return Ok(new { success = true });
+        }
+
+        [HttpGet("billing/transactions")]
+        public IActionResult GetBillingTransactions()
+        {
+            var list = _billing.GetTransactions();
+            var rfidMap = _billing.GetRfidMap();
+
+            var result = list.Select(t => new {
+                id = t.Id,
+                chargepointId = t.ChargepointId,
+                connectorId = t.ConnectorId,
+                idTag = t.IdTag,
+                userName = rfidMap.TryGetValue(t.IdTag, out var u) ? u : "Guest",
+                kwh = t.Kwh,
+                timestamp = DateTimeOffset.FromUnixTimeMilliseconds(t.Timestamp).ToString("yyyy-MM-dd HH:mm:ss")
+            }).ToList();
+
+            return Ok(result);
+        }
+
+        [HttpGet("billing/invoice")]
+        public async Task<IActionResult> GenerateMonthlyInvoice([FromQuery] int year, [FromQuery] int month)
+        {
+            var transactions = _billing.GetTransactions();
+            var rfidMap = _billing.GetRfidMap();
+            var tenants = _billing.GetTenants();
+            double ratePerKwh = _billing.GetTariff("rate_per_kwh", 0.30);
+            double baseMonthlyFee = _billing.GetTariff("base_monthly_fee", 10.00);
+
+            var invoices = new List<object>();
+
+            // 1. Process EV charging sessions
+            var filtered = transactions.Where(t => {
+                var dt = DateTimeOffset.FromUnixTimeMilliseconds(t.Timestamp);
+                return dt.Year == year && dt.Month == month;
+            }).ToList();
+
+            var grouped = filtered.GroupBy(t => t.IdTag);
+            foreach (var g in grouped)
+            {
+                string idTag = g.Key;
+                string userName = rfidMap.TryGetValue(idTag, out var u) ? u : "Guest";
+                double totalKwh = g.Sum(t => t.Kwh);
+                double energyCost = Math.Round(totalKwh * ratePerKwh, 2);
+                double totalCost = Math.Round(energyCost + baseMonthlyFee, 2);
+
+                invoices.Add(new {
+                    type = "EV Charging",
+                    idTag = idTag,
+                    userName = userName,
+                    details = $"RFID: {idTag}",
+                    transactionCount = g.Count(),
+                    totalKwh = Math.Round(totalKwh, 3),
+                    ratePerKwh = ratePerKwh,
+                    baseFee = baseMonthlyFee,
+                    energyCost = energyCost,
+                    totalCost = totalCost,
+                    billingPeriod = $"{year:D4}-{month:D2}"
+                });
+            }
+
+            // 2. Process Metered Tenants
+            var startOfMonth = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
+            var endOfMonth = startOfMonth.AddMonths(1);
+            long startTs = new DateTimeOffset(startOfMonth).ToUnixTimeMilliseconds();
+            long endTs   = new DateTimeOffset(endOfMonth).ToUnixTimeMilliseconds();
+
+            foreach (var tenant in tenants)
+            {
+                double totalKwh = 0.0;
+                int replacementCount = 0;
+                try
+                {
+                    // Build breakpoints: split the billing period at every meter replacement
+                    var replacements = _billing.GetMeterReplacementsInRange(tenant.Id, startTs, endTs);
+                    replacementCount = replacements.Count;
+
+                    var breakpoints = new List<long> { startTs };
+                    foreach (var r in replacements)
+                        breakpoints.Add(r.ReplacedAt);
+                    breakpoints.Add(endTs);
+
+                    // Sum each contiguous sub-segment independently
+                    for (int i = 0; i < breakpoints.Count - 1; i++)
+                    {
+                        var points = await _data.GetTelemetryHistoryAsync(tenant.MeterKey, breakpoints[i], breakpoints[i + 1]);
+                        if (points != null && points.Count > 1)
+                        {
+                            // points are returned newest-first (descending)
+                            double segLatest   = Convert.ToDouble(points.First().Value);
+                            double segEarliest = Convert.ToDouble(points.Last().Value);
+                            double segKwh = segLatest - segEarliest;
+                            totalKwh += Math.Max(0.0, segKwh); // clamp: never subtract for anomalies
+                        }
+                        else if (points != null && points.Count == 1 && breakpoints.Count == 2)
+                        {
+                            // Only a single reading in the whole period — fall back to live value
+                            var liveVals = _data.GetCurrentValues(new List<string> { tenant.MeterKey });
+                            if (liveVals.TryGetValue(tenant.MeterKey, out var liveStr) &&
+                                double.TryParse(liveStr, System.Globalization.NumberStyles.Float,
+                                                System.Globalization.CultureInfo.InvariantCulture, out double liveVal))
+                            {
+                                totalKwh = liveVal;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[Billing] Failed to query consumption for tenant '{tenant.Name}' ({tenant.MeterKey}): {ex.Message}");
+                }
+
+                double energyCost = Math.Round(totalKwh * ratePerKwh, 2);
+                double totalCost  = Math.Round(energyCost + baseMonthlyFee, 2);
+
+                invoices.Add(new {
+                    type = "Tenant Meter",
+                    idTag = tenant.Id,
+                    userName = tenant.Name,
+                    details = $"Meter Point: {tenant.MeterKey}",
+                    transactionCount = 1,
+                    totalKwh = Math.Round(totalKwh, 3),
+                    ratePerKwh = ratePerKwh,
+                    baseFee = baseMonthlyFee,
+                    energyCost = energyCost,
+                    totalCost = totalCost,
+                    replacementCount = replacementCount,
+                    billingPeriod = $"{year:D4}-{month:D2}"
+                });
+            }
+
+            return Ok(new { invoices, ratePerKwh, baseMonthlyFee });
+        }
+
+        [HttpGet("billing/tenants")]
+        public IActionResult GetTenants()
+        {
+            var list = _billing.GetTenants().Select(t => new {
+                id = t.Id,
+                name = t.Name,
+                meterKey = t.MeterKey
+            }).ToList();
+            return Ok(list);
+        }
+
+        public class TenantDto
+        {
+            public string Id { get; set; } = "";
+            public string Name { get; set; } = "";
+            public string MeterKey { get; set; } = "";
+        }
+
+        [HttpPost("billing/tenants")]
+        public IActionResult AddOrUpdateTenant([FromBody] TenantDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.Id) || string.IsNullOrEmpty(req.Name) || string.IsNullOrEmpty(req.MeterKey))
+                return BadRequest("id, name, and meterKey are required");
+
+            _billing.AddTenant(req.Id, req.Name, req.MeterKey);
+            return Ok(new { success = true });
+        }
+
+        [HttpDelete("billing/tenants/{id}")]
+        public IActionResult DeleteTenant(string id)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            _billing.DeleteTenant(id);
+            return Ok(new { success = true });
+        }
+
+        // ── Meter Replacement Events ────────────────────────────────────────
+
+        [HttpGet("billing/meter-replacements")]
+        public IActionResult GetMeterReplacements([FromQuery] string tenantId)
+        {
+            if (string.IsNullOrEmpty(tenantId)) return BadRequest("tenantId is required");
+            var list = _billing.GetMeterReplacements(tenantId).Select(r => new {
+                id           = r.Id,
+                tenantId     = r.TenantId,
+                replacedAt   = r.ReplacedAt,
+                replacedAtIso = DateTimeOffset.FromUnixTimeMilliseconds(r.ReplacedAt).ToString("o"),
+                oldFinalKwh  = r.OldFinalKwh,
+                newStartKwh  = r.NewStartKwh,
+                note         = r.Note
+            }).ToList();
+            return Ok(list);
+        }
+
+        public class MeterReplacementDto
+        {
+            public string TenantId     { get; set; } = "";
+            public long   ReplacedAt   { get; set; }   // unix ms
+            public double? OldFinalKwh { get; set; }
+            public double? NewStartKwh { get; set; }
+            public string? Note        { get; set; }
+        }
+
+        [HttpPost("billing/meter-replacements")]
+        public IActionResult AddMeterReplacement([FromBody] MeterReplacementDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.TenantId)) return BadRequest("tenantId is required");
+            if (req.ReplacedAt <= 0) return BadRequest("replacedAt (unix ms) is required");
+
+            _billing.AddMeterReplacement(req.TenantId, req.ReplacedAt, req.OldFinalKwh, req.NewStartKwh, req.Note);
+            return Ok(new { success = true });
+        }
+
+        [HttpDelete("billing/meter-replacements/{id:int}")]
+        public IActionResult DeleteMeterReplacement(int id)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            bool ok = _billing.DeleteMeterReplacement(id);
+            return Ok(new { success = ok });
+        }
+
+        [HttpPost("trajectory/targets/15min")]
+        public IActionResult Set15MinTrajectoryTargets([FromBody] List<TrajectoryTarget15MinDto> req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            if (req == null) return BadRequest("Targets list is required");
+
+            var list = req.Select(t => new TrajectoryTarget15Min(t.Timestamp, t.TargetKwh)).ToList();
+            _billing.SetTrajectoryTargets15Min(list);
+            return Ok(new { success = true });
+        }
+
+        [HttpGet("trajectory/targets/15min")]
+        public IActionResult Get15MinTrajectoryTargets()
+        {
+            var list = _billing.GetTrajectoryTargets15Min().Select(t => new {
+                timestamp = t.Timestamp,
+                targetKwh = t.TargetKwh
+            }).ToList();
+            return Ok(list);
+        }
+
+        public class TrajectoryTarget15MinDto
+        {
+            public long Timestamp { get; set; }
+            public double TargetKwh { get; set; }
+        }
+
+        // ── Trajectory Control Endpoints ────────────────────────────────────
+
+        [HttpGet("trajectory/status")]
+        public IActionResult GetTrajectoryStatus()
+        {
+            var svc = TrajectoryService.Instance;
+            return Ok(new {
+                enabled = _billing.GetTariff("trajectory_control_enabled", 0) == 1,
+                monthlyTargetKwh = _billing.GetTariff("trajectory_monthly_target_kwh", 3000.0),
+                mainMeterKey = _billing.GetRfidMap().TryGetValue("trajectory_main_meter_key", out var k) ? k : "analytics-summary_daily-kwh",
+                targetKwh = svc.TargetKwh,
+                actualKwh = svc.ActualKwh,
+                deviationPct = svc.DeviationPct,
+                isCurtailmentActive = svc.IsCurtailmentActive,
+                controlState = svc.ControlState,
+                logs = svc.GetLogs().Select(l => new {
+                    timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                    message = l.Message,
+                    state = l.State
+                }).ToList()
+            });
+        }
+
+        public class TrajectoryConfigDto
+        {
+            public bool Enabled { get; set; }
+            public double MonthlyTargetKwh { get; set; }
+            public string MainMeterKey { get; set; } = "";
+        }
+
+        [HttpPost("trajectory/config")]
+        public IActionResult UpdateTrajectoryConfig([FromBody] TrajectoryConfigDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            _billing.SetTariff("trajectory_control_enabled", req.Enabled ? 1 : 0);
+            _billing.SetTariff("trajectory_monthly_target_kwh", req.MonthlyTargetKwh);
+            _billing.AddRfidMapping("trajectory_main_meter_key", req.MainMeterKey);
+            return Ok(new { success = true });
+        }
+
+        [HttpGet("trajectory/targets")]
+        public IActionResult GetTrajectoryTargets()
+        {
+            var list = _billing.GetCurtailmentTargets().Select(t => new {
+                telemetryKey = t.TelemetryKey,
+                normalValue = t.NormalValue,
+                warningValue = t.WarningValue,
+                criticalValue = t.CriticalValue
+            }).ToList();
+            return Ok(list);
+        }
+
+        public class CurtailmentTargetDto
+        {
+            public string TelemetryKey { get; set; } = "";
+            public double NormalValue { get; set; }
+            public double WarningValue { get; set; }
+            public double CriticalValue { get; set; }
+        }
+
+        [HttpPost("trajectory/targets")]
+        public IActionResult AddOrUpdateTrajectoryTarget([FromBody] CurtailmentTargetDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.TelemetryKey)) return BadRequest("telemetryKey is required");
+
+            _billing.AddCurtailmentTarget(req.TelemetryKey, req.NormalValue, req.WarningValue, req.CriticalValue);
+            return Ok(new { success = true });
+        }
+
+        [HttpDelete("trajectory/targets/{*telemetryKey}")]
+        public IActionResult DeleteTrajectoryTarget(string telemetryKey)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            _billing.DeleteCurtailmentTarget(telemetryKey);
+            return Ok(new { success = true });
+        }
+
+        public class TelemetryInsertDto
+        {
+            [JsonPropertyName("key")]
+            public string Key { get; set; } = null!;
+            [JsonPropertyName("ts")]
+            public long Ts { get; set; }
+            [JsonPropertyName("value")]
+            public JsonElement Value { get; set; }
+        }
+
+        public class TelemetryBatchInsertDto
+        {
+            [JsonPropertyName("key")]
+            public string Key { get; set; } = null!;
+            [JsonPropertyName("points")]
+            public List<TelemetryBatchPointDto> Points { get; set; } = null!;
+        }
+
+        public class TelemetryBatchPointDto
+        {
+            [JsonPropertyName("ts")]
+            public long Ts { get; set; }
+            [JsonPropertyName("value")]
+            public JsonElement Value { get; set; }
+        }
+
+        [HttpGet("telemetry/data")]
+        public async Task<IActionResult> GetTelemetryData(
+            [FromQuery] string key,
+            [FromQuery] long startTs,
+            [FromQuery] long endTs,
+            [FromQuery] int limit = 1000)
+        {
+            if (string.IsNullOrEmpty(key))
+                return BadRequest("key is required");
+
+            var data = await _data.DataStore.QueryAsync(key, startTs, endTs, limit, descending: true);
+            return Ok(data);
+        }
+
+        [HttpPost("telemetry/data")]
+        public IActionResult InsertTelemetryData([FromBody] TelemetryInsertDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanWriteValue(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.Key))
+                return BadRequest("key is required");
+
+            var valObj = ExtractValue(req.Value);
+            _data.DataStore.Insert(req.Key, req.Ts, valObj);
+            _data.DataStore.Flush();
+
+            return Ok(new { success = true });
+        }
+
+        [HttpPost("telemetry/data/batch")]
+        public IActionResult InsertTelemetryDataBatch([FromBody] TelemetryBatchInsertDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanWriteValue(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.Key))
+                return BadRequest("key is required");
+
+            if (req.Points == null || req.Points.Count == 0)
+                return BadRequest("points are required");
+
+            foreach (var pt in req.Points)
+            {
+                var valObj = ExtractValue(pt.Value);
+                _data.DataStore.Insert(req.Key, pt.Ts, valObj);
+            }
+            _data.DataStore.Flush();
+
+            return Ok(new { success = true, count = req.Points.Count });
+        }
+
+        [HttpDelete("telemetry/data")]
+        public async Task<IActionResult> DeleteTelemetryData(
+            [FromQuery] string key,
+            [FromQuery] long startTs,
+            [FromQuery] long endTs)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanWriteValue(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            if (string.IsNullOrEmpty(key))
+                return BadRequest("key is required");
+
+            await _data.DataStore.DeleteAsync(key, startTs, endTs);
+            return Ok(new { success = true });
+        }
+
+        private static object ExtractValue(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Number:
+                    if (element.TryGetDouble(out double d)) return d;
+                    return element.GetRawText();
+                case JsonValueKind.True:
+                    return 1.0;
+                case JsonValueKind.False:
+                    return 0.0;
+                case JsonValueKind.String:
+                    var str = element.GetString() ?? "";
+                    if (double.TryParse(str, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsed))
+                        return parsed;
+                    return str;
+                default:
+                    return element.GetRawText();
+            }
         }
 
         private static string? ResolveConfigPath()

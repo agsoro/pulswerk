@@ -14,6 +14,8 @@
     <ProjectReference Include="..\Pulswerk.Core\Pulswerk.Core.csproj" />
     <ProjectReference Include="..\Pulswerk.Drivers\Pulswerk.Drivers.csproj" />
     <ProjectReference Include="..\Pulswerk.Storage\Pulswerk.Storage.csproj" />
+    <ProjectReference Include="..\Pulswerk.Billing\Pulswerk.Billing.csproj" />
+    <ProjectReference Include="..\Pulswerk.Ems\Pulswerk.Ems.csproj" />
   </ItemGroup>
 
 </Project>

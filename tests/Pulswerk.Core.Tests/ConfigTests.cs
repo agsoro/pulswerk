@@ -361,5 +361,103 @@ namespace Connector.Tests
             var props = typeof(AppConfig).GetProperties();
             Assert.DoesNotContain(props, p => p.Name == "ThingsBoard");
         }
+
+        // ── ConfigValidator / OCPP Validation ──────────────────────────────────
+
+        [Fact]
+        public void ConfigValidator_OcppConnection_Valid_Passes()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "ocpp1",
+                        Type: "ocpp",
+                        LocalPort: 5000,
+                        LocalAddress: "/plswk/ocpp/"
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "wallbox-sim-01",
+                        Name: "Garage Wallbox 1",
+                        DeviceType: "ocpp",
+                        ConnectionId: "ocpp1"
+                    )
+                },
+                Server: null
+            );
+
+            // Should compile and pass validation without exception
+            ConfigValidator.Validate(cfg);
+        }
+
+        [Fact]
+        public void ConfigValidator_OcppConnection_MissingLocalPort_Throws()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "ocpp1",
+                        Type: "ocpp",
+                        LocalPort: null, // Invalid: missing localPort
+                        LocalAddress: "/plswk/ocpp/"
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "wallbox-sim-01",
+                        Name: "Garage Wallbox 1",
+                        DeviceType: "ocpp",
+                        ConnectionId: "ocpp1"
+                    )
+                },
+                Server: null
+            );
+
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains("missing 'localPort'", ex.Message);
+        }
+
+        [Fact]
+        public void ConfigValidator_OcppConnection_InvalidLocalAddress_Throws()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "ocpp1",
+                        Type: "ocpp",
+                        LocalPort: 5000,
+                        LocalAddress: "plswk/ocpp" // Invalid: must start and end with /
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "wallbox-sim-01",
+                        Name: "Garage Wallbox 1",
+                        DeviceType: "ocpp",
+                        ConnectionId: "ocpp1"
+                    )
+                },
+                Server: null
+            );
+
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains("must start and end with a '/'", ex.Message);
+        }
     }
 }
