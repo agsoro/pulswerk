@@ -308,14 +308,19 @@ async function loadUserIdentity(): Promise<void> {
         if (!r.ok) return;
         _currentUser = await r.json();
     } catch (e) {
-        _currentUser = { authenticated: false, user: 'public', name: 'Public', email: '', groups: [], canWriteValue: true, canAckAlarm: true, canEditDashboard: true, canEditFavorites: true };
+        // Fail-closed: if the identity request fails we cannot determine the user's
+        // actual rights, so deny everything rather than accidentally grant access.
+        _currentUser = {
+            authenticated: false, user: 'Public', name: 'Public', email: '', groups: [],
+            permissions: { canWriteValue: false, canAckAlarm: false, canEditDashboard: false, canEditFavorites: false }
+        };
     }
-    
+
     // Set global permission flags
-    window.pwCanWriteValue = _currentUser!.canWriteValue;
-    window.pwCanAckAlarm = _currentUser!.canAckAlarm;
-    window.pwCanEditDashboard = _currentUser!.canEditDashboard;
-    window.pwCanEditFavorites = _currentUser!.canEditFavorites;
+    window.pwCanWriteValue = _currentUser!.permissions.canWriteValue;
+    window.pwCanAckAlarm = _currentUser!.permissions.canAckAlarm;
+    window.pwCanEditDashboard = _currentUser!.permissions.canEditDashboard;
+    window.pwCanEditFavorites = _currentUser!.permissions.canEditFavorites;
 
     updateUserBadge(_currentUser!);
     applyRightsToUI(_currentUser!);
@@ -330,20 +335,20 @@ async function loadUserIdentity(): Promise<void> {
 
 /** Hides/Disables UI elements based on user rights. */
 function applyRightsToUI(u: IUserIdentity): void {
-    if (!u.canWriteValue) {
+    if (!u.permissions?.canWriteValue) {
         document.querySelectorAll('.auth-write-only').forEach(el => (el as HTMLElement).style.display = 'none');
         document.querySelectorAll('.auth-write-disable').forEach(el => {
             (el as HTMLInputElement).disabled = true;
             (el as HTMLElement).title = 'Insufficient rights (value edit permission required)';
         });
     }
-    if (!u.canAckAlarm) {
+    if (!u.permissions?.canAckAlarm) {
         document.querySelectorAll('.auth-ack-only').forEach(el => (el as HTMLElement).style.display = 'none');
     }
-    if (!u.canEditDashboard) {
+    if (!u.permissions?.canEditDashboard) {
         document.querySelectorAll('.auth-edit-dash-only').forEach(el => (el as HTMLElement).style.display = 'none');
     }
-    if (!u.canEditFavorites) {
+    if (!u.permissions?.canEditFavorites) {
         document.querySelectorAll('.auth-edit-fav-only').forEach(el => (el as HTMLElement).style.display = 'none');
     }
 }

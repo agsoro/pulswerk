@@ -862,7 +862,9 @@ namespace Pulswerk.Dashboard.Controllers
 
             return Ok(new
             {
-                username = user ?? "Public",
+                user = user ?? "Public",
+                authenticated = !string.IsNullOrWhiteSpace(user) && user != _data.Config.Server?.Auth?.DefaultUser,
+                isDefault = !string.IsNullOrWhiteSpace(user) && user == _data.Config.Server?.Auth?.DefaultUser,
                 email = email,
                 name = name,
                 groups = groups,

@@ -78,17 +78,34 @@ interface ITelemetryMeta {
     [key: string]: any;
 }
 
+interface IUserPermissions {
+    canWriteValue: boolean;
+    canAckAlarm: boolean;
+    canEditDashboard: boolean;
+    canEditFavorites: boolean;
+    canEditConfig?: boolean;
+    canAccessEms?: boolean;
+    canAccessBilling?: boolean;
+    canAccessWallbox?: boolean;
+    canAccessHistoricalData?: boolean;
+    canAccessAlarms?: boolean;
+    canAccessLogs?: boolean;
+    canAccessHeartbeat?: boolean;
+    canAccessDashboards?: boolean;
+    canAccessAssets?: boolean;
+    canAccessTelemetry?: boolean;
+    canAccessConnections?: boolean;
+}
+
 interface IUserIdentity {
     authenticated: boolean;
+    /** Normalised from the API's `username` field. */
     user: string;
     name: string;
     email?: string;
     groups?: string[];
     isDefault?: boolean;
-    canWriteValue: boolean;
-    canAckAlarm: boolean;
-    canEditDashboard: boolean;
-    canEditFavorites: boolean;
+    permissions: IUserPermissions;
 }
 
 interface ITimeWindowSelector {

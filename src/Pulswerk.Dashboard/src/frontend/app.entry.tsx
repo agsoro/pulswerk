@@ -26,7 +26,7 @@ import { TelemetryCrudPage } from './pages/telemetryCrud';
 import { initI18n, setLanguage, t, currentLang } from './i18n';
 
 interface UserIdentity {
-    username: string;
+    user: string;
     email: string;
     name: string;
     groups: string[];
@@ -113,15 +113,8 @@ export function App() {
                 const data = await res.json();
                 setUser(data);
                 
-                // Inject credentials globally for compatibility
-                (window as any)._currentUser = {
-                    authenticated: data.username !== 'Public',
-                    user: data.username,
-                    name: data.name,
-                    email: data.email,
-                    groups: data.groups,
-                    ...data.permissions
-                };
+                // Inject credentials globally for compatibility with legacy JS (modals.js etc.)
+                (window as any)._currentUser = data;
                 (window as any).pwCanWriteValue = data.permissions.canWriteValue;
                 (window as any).pwCanAckAlarm = data.permissions.canAckAlarm;
                 (window as any).pwCanEditDashboard = data.permissions.canEditDashboard;
@@ -238,7 +231,7 @@ export function App() {
     };
 
     const userInitials = user ? getUserInitials(user.name) : '';
-    const isUserAuth = user && user.username !== 'Public';
+    const isUserAuth = user && user.user !== 'Public';
 
     const navItems = [
         { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home', title: 'Home' },
@@ -314,7 +307,7 @@ export function App() {
                         data-testid="user-badge"
                     >
                         {isUserAuth ? (
-                            <div class="user-avatar authenticated" id="userAvatar" title={user.name || user.username}>
+                            <div class="user-avatar authenticated" id="userAvatar" title={user.name || user.user}>
                                 {userInitials}
                             </div>
                         ) : (
@@ -323,7 +316,7 @@ export function App() {
                             </div>
                         )}
                         <span class="user-name nav-label" id="userNameLabel">
-                            {user ? (user.name || user.username) : 'Public'}
+                            {user ? (user.name || user.user) : 'Public'}
                         </span>
                     </div>
 
@@ -347,7 +340,7 @@ export function App() {
                                 )}
                                 <div class="user-popover-info">
                                     <div class="user-popover-name" id="popoverName">
-                                        {user ? (user.name || user.username) : 'Public'}
+                                        {user ? (user.name || user.user) : 'Public'}
                                     </div>
                                     <div class="user-popover-email" id="popoverEmail">
                                         {user ? (user.email || 'No email') : 'Not authenticated'}

@@ -67,15 +67,8 @@ export function App() {
             if (res.ok) {
                 const data = await res.json();
                 setUser(data);
-                // Inject credentials globally for compatibility
-                window._currentUser = {
-                    authenticated: data.username !== 'Public',
-                    user: data.username,
-                    name: data.name,
-                    email: data.email,
-                    groups: data.groups,
-                    ...data.permissions
-                };
+                // Inject credentials globally for compatibility with legacy JS (modals.js etc.)
+                window._currentUser = data;
                 window.pwCanWriteValue = data.permissions.canWriteValue;
                 window.pwCanAckAlarm = data.permissions.canAckAlarm;
                 window.pwCanEditDashboard = data.permissions.canEditDashboard;
@@ -92,6 +85,14 @@ export function App() {
             await loadUser();
         };
         init();
+        // When the system config page saves module changes (same or other tab),
+        // re-fetch identity so the nav reflects the new module state immediately.
+        const handleStorageChange = (e) => {
+            if (e.key === 'pw_modules_updated')
+                loadUser();
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
     }, []);
     // Close user popover when clicking outside
     useEffect(() => {
@@ -186,7 +187,7 @@ export function App() {
         return name.substring(0, 2).toUpperCase();
     };
     const userInitials = user ? getUserInitials(user.name) : '';
-    const isUserAuth = user && user.username !== 'Public';
+    const isUserAuth = user && user.user !== 'Public';
     const navItems = [
         { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home', title: 'Home' },
         user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false ? { id: 'dashboards', path: '/plswk/Dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards', title: 'Dashboards' } : null,
@@ -231,10 +232,10 @@ export function App() {
     return (_jsxs("div", { class: "w-full flex min-h-screen", children: [_jsxs("aside", { class: "w-[72px] bg-slate-800 border-r border-slate-700 py-6 px-3 flex flex-col items-center fixed h-screen z-50 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap", "data-testid": "sidebar", children: [_jsx("a", { href: "/plswk/", class: "flex items-center mb-10 no-underline w-full pl-2 overflow-hidden", "data-testid": "sidebar-brand", children: _jsx("img", { src: "/plswk/img/pulswerk_logo_sm.png", alt: "Pulswerk", class: "h-8 min-w-[170px] brightness-0 invert" }) }), _jsx("ul", { class: "nav-links list-none flex flex-col gap-2 w-full", "data-testid": "nav-links", children: navItems.map(item => {
                             const isActive = activeNavId === item.id;
                             return (_jsx("li", { children: _jsxs("a", { href: item.path, class: `flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 ${isActive ? '!bg-sky-400/10 !text-sky-400' : ''}`, "data-testid": `nav-${item.id}`, children: [_jsx("i", { class: `fas ${item.icon} w-5 text-xl flex-shrink-0 text-center` }), _jsx("span", { class: "nav-label nav-text opacity-0 transition-opacity duration-200 ml-4", children: t(item.labelKey) })] }) }, item.id));
-                        }) }), _jsxs("footer", { class: "mt-auto pt-4 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full flex flex-col items-center gap-3 overflow-hidden", "data-testid": "sidebar-footer", children: [_jsxs("div", { class: "user-badge", id: "userBadge", onClick: togglePopover, "data-testid": "user-badge", children: [isUserAuth ? (_jsx("div", { class: "user-avatar authenticated", id: "userAvatar", title: user.name || user.username, children: userInitials })) : (_jsx("div", { class: "user-avatar", id: "userAvatar", title: "Public", children: _jsx("i", { class: "fas fa-globe" }) })), _jsx("span", { class: "user-name nav-label", id: "userNameLabel", children: user ? (user.name || user.username) : 'Public' })] }), popoverOpen && (_jsxs("div", { ref: popoverRef, class: "user-popover open", id: "userPopover", "data-testid": "user-popover", children: [_jsxs("div", { class: "user-popover-header", children: [isUserAuth ? (_jsx("div", { class: "user-popover-avatar authenticated", id: "popoverAvatar", children: userInitials })) : (_jsx("div", { class: "user-popover-avatar", id: "popoverAvatar", children: _jsx("i", { class: "fas fa-globe" }) })), _jsxs("div", { class: "user-popover-info", children: [_jsx("div", { class: "user-popover-name", id: "popoverName", children: user ? (user.name || user.username) : 'Public' }), _jsx("div", { class: "user-popover-email", id: "popoverEmail", children: user ? (user.email || 'No email') : 'Not authenticated' })] })] }), user && user.groups && user.groups.length > 0 && (_jsxs("div", { class: "user-popover-groups", id: "popoverGroups", children: [_jsxs("div", { class: "user-popover-section-title", children: [_jsx("i", { class: "fas fa-users", style: { marginRight: '0.4rem', opacity: 0.5 } }), "Groups"] }), _jsx("div", { id: "popoverGroupList", class: "user-popover-group-list", children: user.groups.map(g => {
+                        }) }), _jsxs("footer", { class: "mt-auto pt-4 pb-2 px-2 text-xs text-slate-400 border-t border-slate-700 w-full flex flex-col items-center gap-3 overflow-hidden", "data-testid": "sidebar-footer", children: [_jsxs("div", { class: "user-badge", id: "userBadge", onClick: togglePopover, "data-testid": "user-badge", children: [isUserAuth ? (_jsx("div", { class: "user-avatar authenticated", id: "userAvatar", title: user.name || user.user, children: userInitials })) : (_jsx("div", { class: "user-avatar", id: "userAvatar", title: "Public", children: _jsx("i", { class: "fas fa-globe" }) })), _jsx("span", { class: "user-name nav-label", id: "userNameLabel", children: user ? (user.name || user.user) : 'Public' })] }), popoverOpen && (_jsxs("div", { ref: popoverRef, class: "user-popover open", id: "userPopover", "data-testid": "user-popover", children: [_jsxs("div", { class: "user-popover-header", children: [isUserAuth ? (_jsx("div", { class: "user-popover-avatar authenticated", id: "popoverAvatar", children: userInitials })) : (_jsx("div", { class: "user-popover-avatar", id: "popoverAvatar", children: _jsx("i", { class: "fas fa-globe" }) })), _jsxs("div", { class: "user-popover-info", children: [_jsx("div", { class: "user-popover-name", id: "popoverName", children: user ? (user.name || user.user) : 'Public' }), _jsx("div", { class: "user-popover-email", id: "popoverEmail", children: user ? (user.email || 'No email') : 'Not authenticated' })] })] }), user && user.groups && user.groups.length > 0 && (_jsxs("div", { class: "user-popover-groups", id: "popoverGroups", children: [_jsxs("div", { class: "user-popover-section-title", children: [_jsx("i", { class: "fas fa-users", style: { marginRight: '0.4rem', opacity: 0.5 } }), "Groups"] }), _jsx("div", { id: "popoverGroupList", class: "user-popover-group-list", children: user.groups.map(g => {
                                                     const isAdmin = g.toLowerCase().includes('admin');
                                                     return (_jsxs("span", { class: `user-group-chip ${isAdmin ? 'admin' : ''}`, children: [_jsx("i", { class: `fas ${isAdmin ? 'fa-shield-alt' : 'fa-tag'}` }), g] }, g));
-                                                }) })] })), _jsx("div", { class: "user-popover-footer", id: "popoverAuthStatus", children: isUserAuth ? (_jsxs("span", { class: "user-auth-chip authenticated", id: "authChip", children: [_jsx("i", { class: "fas fa-shield-alt" }), " Authenticated"] })) : (_jsxs("span", { class: "user-auth-chip public", id: "authChip", children: [_jsx("i", { class: "fas fa-globe" }), " Public Access"] })) })] })), _jsxs("div", { class: "lang-switcher", "data-testid": "lang-switcher", children: [_jsx("button", { onClick: () => handleLanguageChange('en'), id: "lang-en", class: `lang-btn ${lang === 'en' ? 'active' : ''}`, children: "EN" }), _jsx("div", { class: "lang-sep" }), _jsx("button", { onClick: () => handleLanguageChange('de'), id: "lang-de", class: `lang-btn ${lang === 'de' ? 'active' : ''}`, children: "DE" })] }), _jsx("span", { class: "sidebar-version opacity-0 transition-opacity duration-200", children: "v2.6.0" })] })] }), _jsxs("main", { class: "flex-1 ml-[72px] px-6 py-4 w-[calc(100%-72px)] transition-[margin-left] duration-300", children: [_jsx("header", { id: "pageHeader", class: "flex justify-between items-center mb-4 border-b border-white/5 pb-2.5", "data-testid": "page-header", children: _jsx("h1", { class: "text-xl font-extrabold tracking-tight text-white/95", "data-testid": "page-title", children: pageTitle === 'Home' ? t('nav_home') :
+                                                }) })] })), _jsx("div", { class: "user-popover-footer", id: "popoverAuthStatus", children: isUserAuth ? (_jsxs("span", { class: "user-auth-chip authenticated", id: "authChip", children: [_jsx("i", { class: "fas fa-shield-alt" }), " Authenticated"] })) : (_jsxs("span", { class: "user-auth-chip public", id: "authChip", children: [_jsx("i", { class: "fas fa-globe" }), " Public Access"] })) })] })), _jsxs("div", { class: "lang-switcher", "data-testid": "lang-switcher", children: [_jsx("button", { onClick: () => handleLanguageChange('en'), id: "lang-en", class: `lang-btn ${lang === 'en' ? 'active' : ''}`, children: "EN" }), _jsx("div", { class: "lang-sep" }), _jsx("button", { onClick: () => handleLanguageChange('de'), id: "lang-de", class: `lang-btn ${lang === 'de' ? 'active' : ''}`, children: "DE" })] }), _jsx("span", { class: "sidebar-version opacity-0 transition-opacity duration-200", children: __APP_VERSION__ })] })] }), _jsxs("main", { class: "flex-1 ml-[72px] px-6 py-4 w-[calc(100%-72px)] transition-[margin-left] duration-300", children: [_jsx("header", { id: "pageHeader", class: "flex justify-between items-center mb-4 border-b border-white/5 pb-2.5", "data-testid": "page-header", children: _jsx("h1", { class: "text-xl font-extrabold tracking-tight text-white/95", "data-testid": "page-title", children: pageTitle === 'Home' ? t('nav_home') :
                                 pageTitle === 'Dashboards' ? t('nav_dashboards') :
                                     pageTitle === 'Assets' ? t('nav_assets') :
                                         pageTitle === 'Data Points' ? t('nav_telemetries') :

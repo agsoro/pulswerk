@@ -264,13 +264,6 @@ async function openEdit(key) {
         document.getElementById('stepperGroup').style.display = 'block';
     }
     document.getElementById('editModal').style.display = 'flex';
-    // applyRightsToUI() hides .auth-write-only via inline style at page load.
-    // Re-assert visibility here based on the current permission so the button
-    // is visible for users who have write access.
-    const saveBtn = document.getElementById('saveBtn');
-    if (saveBtn) {
-        saveBtn.style.display = window.pwCanWriteValue ? '' : 'none';
-    }
 }
 function closeEdit() {
     document.getElementById('editModal').style.display = 'none';

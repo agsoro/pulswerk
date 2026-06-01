@@ -8,6 +8,32 @@ const TelemetryKeySchema = z.object({
     name: z.string().optional(),
     units: z.string().optional()
 });
+// ── Module metadata ──────────────────────────────────────────────────────────
+const MODULE_META = [
+    { key: 'dashboards', label: 'Dashboards', icon: 'fa-table-cells-large', description: 'Custom dashboard builder & widget layout' },
+    { key: 'assets', label: 'Assets', icon: 'fa-sitemap', description: 'Asset hierarchy browser & property editor' },
+    { key: 'telemetry', label: 'Telemetry', icon: 'fa-database', description: 'Telemetry list, search, and CRUD management' },
+    { key: 'historicalData', label: 'Historical Data', icon: 'fa-chart-line', description: 'Time-series query, charts, and data export' },
+    { key: 'alarms', label: 'Alarms', icon: 'fa-bell', description: 'Active alarm monitoring and acknowledgement' },
+    { key: 'logs', label: 'System Logs', icon: 'fa-scroll', description: 'Live system log stream and log history' },
+    { key: 'heartbeat', label: 'Heartbeat', icon: 'fa-heart-pulse', description: 'System health, uptime, and performance stats' },
+    { key: 'billing', label: 'Billing', icon: 'fa-dollar-sign', description: 'RFID card billing and tenant energy invoicing' },
+    { key: 'wallbox', label: 'Wallboxes', icon: 'fa-charging-station', description: 'OCPP EV chargepoint management and monitoring' },
+    { key: 'ems', label: 'Energy Management', icon: 'fa-bolt', description: 'Trajectory control, targets, and curtailment' },
+    { key: 'connections', label: 'Connections', icon: 'fa-network-wired', description: 'Device connection management and diagnostics' },
+];
+const DEFAULT_MODULES = {
+    ems: true, billing: true, wallbox: true, historicalData: true,
+    alarms: true, logs: true, heartbeat: true, dashboards: true,
+    assets: true, telemetry: true, connections: true,
+};
+const ModulesPanel = ({ modules, onChange }) => (_jsxs("div", { class: "bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm", children: [_jsxs("div", { class: "flex items-center gap-3 mb-6 border-b border-slate-700 pb-4", children: [_jsxs("h2", { class: "text-xl font-bold text-slate-100 flex-1", children: [_jsx("i", { class: "fas fa-puzzle-piece mr-2 text-violet-400" }), "Feature Modules"] }), _jsxs("span", { class: "text-xs text-slate-500", children: [Object.values(modules).filter(Boolean).length, " / ", MODULE_META.length, " enabled"] })] }), _jsx("div", { class: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3", children: MODULE_META.map(({ key, label, icon, description }) => {
+                const enabled = modules[key];
+                return (_jsxs("div", { class: `flex items-start gap-3 p-4 rounded-lg border transition-all cursor-pointer select-none ${enabled
+                        ? 'bg-slate-700/40 border-slate-600 hover:border-slate-500'
+                        : 'bg-slate-900/40 border-slate-700/50 opacity-60 hover:opacity-75'}`, onClick: () => onChange(key, !enabled), children: [_jsx("div", { class: `w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${enabled ? 'bg-violet-500/20 text-violet-400' : 'bg-slate-700/50 text-slate-500'}`, children: _jsx("i", { class: `fas ${icon} text-sm` }) }), _jsxs("div", { class: "flex-1 min-w-0", children: [_jsx("div", { class: `font-semibold text-sm ${enabled ? 'text-slate-100' : 'text-slate-400'}`, children: label }), _jsx("div", { class: "text-xs text-slate-500 mt-0.5 leading-relaxed", children: description })] }), _jsx("div", { class: "flex-shrink-0 mt-0.5", children: _jsx("div", { class: `w-9 h-5 rounded-full relative transition-colors ${enabled ? 'bg-violet-500' : 'bg-slate-600'}`, children: _jsx("div", { class: `absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-md transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0.5'}` }) }) })] }, key));
+            }) })] }));
+// ── Editor modal ──────────────────────────────────────────────────────────────
 const EditorModal = ({ title, isOpen, onClose, onSave, children }) => {
     if (!isOpen)
         return null;
@@ -73,6 +99,7 @@ const ConfigPage = () => {
     const [availableKeys, setAvailableKeys] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [modules, setModules] = useState({ ...DEFAULT_MODULES });
     const getAvailablePaths = () => {
         if (!config)
             return [];
@@ -110,6 +137,10 @@ const ConfigPage = () => {
             if (!data.base.connections)
                 data.base.connections = [];
             setConfig(data);
+            // Derive effective module state: base defaults → override patch
+            const baseModules = { ...DEFAULT_MODULES, ...(data.base.modules ?? {}) };
+            const effective = { ...baseModules, ...(data.override.modules ?? {}) };
+            setModules(effective);
             const keysRes = await fetch('/plswk/api/telemetry-keys');
             if (keysRes.ok) {
                 // RUNTIME VALIDATION
@@ -133,14 +164,23 @@ const ConfigPage = () => {
             return;
         setSaving(true);
         try {
+            // Include the current module toggles in the override payload
+            const payload = { ...config.override, modules };
             const res = await fetch('/plswk/api/config/override', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config.override)
+                body: JSON.stringify(payload)
             });
             if (res.ok) {
-                window.pwToast("Configuration saved successfully.");
-                await loadConfig(); // reload to get merged views
+                // Notify other tabs/windows (main SPA) that modules changed
+                try {
+                    localStorage.setItem('pw_modules_updated', Date.now().toString());
+                }
+                catch (_) { }
+                window.pwToast("Configuration saved. Applying module changes…");
+                // Brief pause so the toast is visible, then hard-reload so the main
+                // SPA re-fetches /api/user/identity and the nav reflects the new state.
+                setTimeout(() => { window.location.reload(); }, 800);
             }
             else {
                 window.pwToast("Failed to save configuration.", "error");
@@ -152,6 +192,9 @@ const ConfigPage = () => {
         finally {
             setSaving(false);
         }
+    };
+    const handleModuleToggle = (key, enabled) => {
+        setModules(prev => ({ ...prev, [key]: enabled }));
     };
     const handleSaveDevice = () => {
         if (!editingDevice || !editingDevice.id || !editingDevice.name) {
@@ -220,7 +263,7 @@ const ConfigPage = () => {
     if (!config)
         return _jsx("div", { class: "p-8 text-red-400", children: "Failed to load configuration." });
     const renderConnectionList = (items, isReadOnly) => (_jsx("div", { class: "flex flex-col gap-2", children: items.map(c => (_jsxs("div", { class: "p-4 bg-slate-800/50 border border-slate-700 rounded-lg flex justify-between items-center hover:border-slate-500 transition-colors", children: [_jsxs("div", { children: [_jsxs("div", { class: "font-bold text-slate-100", children: [c.name || c.id, " ", _jsxs("span", { class: "text-xs ml-2 text-slate-400 font-normal opacity-60", children: ["ID: ", c.id] })] }), _jsxs("div", { class: "text-xs text-slate-400 mt-1 flex items-center gap-3", children: [_jsx("span", { class: "px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase tracking-wider", children: c.type }), c.address && _jsxs("span", { children: [c.address, ":", c.port] }), isReadOnly && _jsxs("span", { class: "text-emerald-500/70", children: [_jsx("i", { class: "fas fa-lock mr-1" }), "Read-only"] })] })] }), !isReadOnly && (_jsxs("div", { class: "flex gap-2", children: [_jsx("button", { class: "w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors", onClick: () => setEditingConnection(c), children: _jsx("i", { class: "fas fa-pen" }) }), _jsx("button", { class: "w-8 h-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 flex items-center justify-center transition-colors", onClick: () => handleDeleteConnection(c.id), children: _jsx("i", { class: "fas fa-trash" }) })] }))] }))) }));
-    return (_jsxs("div", { class: "p-6 max-w-6xl mx-auto flex flex-col gap-6", children: [_jsx("datalist", { id: "available-paths", children: getAvailablePaths().map(p => _jsx("option", { value: p })) }), _jsxs("div", { class: "flex justify-between items-center", children: [_jsxs("div", { children: [_jsx("h1", { class: "text-2xl font-bold text-white", children: "System Configuration" }), _jsx("p", { class: "text-slate-400 text-sm mt-1", children: "Manage interactive configurations (saved to override JSON)." })] }), _jsx("button", { class: `px-6 py-2.5 rounded-lg font-bold shadow-lg transition-all ${saving ? 'bg-slate-600 text-slate-400 cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'}`, onClick: saveConfig, disabled: saving, children: saving ? _jsxs("span", { children: [_jsx("i", { class: "fas fa-spinner fa-spin mr-2" }), "Saving..."] }) : _jsxs("span", { children: [_jsx("i", { class: "fas fa-save mr-2" }), "Save & Apply"] }) })] }), _jsxs("div", { class: "grid grid-cols-1 lg:grid-cols-2 gap-6", children: [_jsxs("div", { class: "bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm", children: [_jsxs("div", { class: "flex justify-between items-center mb-6 border-b border-slate-700 pb-4", children: [_jsxs("h2", { class: "text-xl font-bold text-slate-100", children: [_jsx("i", { class: "fas fa-network-wired mr-2 text-amber-400" }), "Connections"] }), _jsxs("button", { class: "px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg text-sm font-bold transition-colors", onClick: () => setEditingConnection({ id: '', type: 'modbus-tcp', address: '' }), children: [_jsx("i", { class: "fas fa-plus mr-1" }), " Add Connection"] })] }), _jsx("h3", { class: "text-sm font-bold text-slate-400 uppercase tracking-widest mt-4", children: "Configured (Editable)" }), (config.override.connections?.length || 0) === 0 ? _jsx("div", { class: "text-slate-500 text-sm italic", children: "No custom connections." }) : renderConnectionList(config.override.connections || [], false), _jsx("h3", { class: "text-sm font-bold text-slate-400 uppercase tracking-widest mt-6", children: "From pulswerk.json (Read-only)" }), renderConnectionList(config.base.connections || [], true)] }), _jsxs("div", { class: "bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm", children: [_jsxs("div", { class: "flex justify-between items-center mb-6 border-b border-slate-700 pb-4", children: [_jsxs("h2", { class: "text-xl font-bold text-slate-100", children: [_jsx("i", { class: "fas fa-microchip mr-2 text-sky-400" }), "Devices & Telemetry"] }), _jsxs("button", { class: "px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/20 rounded-lg text-sm font-bold transition-colors", onClick: () => setEditingDevice({ id: '', name: '', deviceType: 'virtual', telemetries: [] }), children: [_jsx("i", { class: "fas fa-plus mr-1" }), " Add Device"] })] }), _jsx(DeviceList, { baseDevices: config.base.devices || [], overrideDevices: config.override.devices || [], onEdit: setEditingDevice, onDelete: handleDeleteDevice })] })] }), _jsx(EditorModal, { title: editingConnection?.id ? `Edit Connection: ${editingConnection.id}` : "New Connection", isOpen: !!editingConnection, onClose: () => setEditingConnection(null), onSave: handleSaveConnection, children: editingConnection && (_jsxs("div", { class: "flex flex-col gap-5", children: [_jsxs("div", { class: "grid grid-cols-2 gap-4", children: [_jsxs("div", { class: "flex flex-col gap-1.5", children: [_jsx("label", { class: "text-xs font-bold text-slate-400 uppercase tracking-wide", children: "Connection ID" }), _jsx("input", { type: "text", class: "bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none", value: editingConnection.id, onInput: (e) => setEditingConnection({ ...editingConnection, id: e.target.value }) })] }), _jsxs("div", { class: "flex flex-col gap-1.5", children: [_jsx("label", { class: "text-xs font-bold text-slate-400 uppercase tracking-wide", children: "Protocol Type" }), _jsxs("select", { class: "bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none appearance-none", value: editingConnection.type, onChange: (e) => setEditingConnection({ ...editingConnection, type: e.target.value }), children: [_jsx("option", { value: "modbus-tcp", children: "Modbus TCP" }), _jsx("option", { value: "bacnet-ip", children: "BACnet/IP" })] })] })] }), _jsxs("div", { class: "grid grid-cols-2 gap-4", children: [_jsxs("div", { class: "flex flex-col gap-1.5", children: [_jsx("label", { class: "text-xs font-bold text-slate-400 uppercase tracking-wide", children: "Host / Address" }), _jsx("input", { type: "text", class: "bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none", value: editingConnection.address || editingConnection.localAddress || '', onInput: (e) => {
+    return (_jsxs("div", { class: "p-6 max-w-6xl mx-auto flex flex-col gap-6", children: [_jsx("datalist", { id: "available-paths", children: getAvailablePaths().map(p => _jsx("option", { value: p })) }), _jsxs("div", { class: "flex justify-between items-center", children: [_jsxs("div", { children: [_jsx("h1", { class: "text-2xl font-bold text-white", children: "System Configuration" }), _jsx("p", { class: "text-slate-400 text-sm mt-1", children: "Manage interactive configurations (saved to override JSON)." })] }), _jsx("button", { class: `px-6 py-2.5 rounded-lg font-bold shadow-lg transition-all ${saving ? 'bg-slate-600 text-slate-400 cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'}`, onClick: saveConfig, disabled: saving, children: saving ? _jsxs("span", { children: [_jsx("i", { class: "fas fa-spinner fa-spin mr-2" }), "Saving..."] }) : _jsxs("span", { children: [_jsx("i", { class: "fas fa-save mr-2" }), "Save & Apply"] }) })] }), _jsx(ModulesPanel, { modules: modules, onChange: handleModuleToggle }), _jsxs("div", { class: "grid grid-cols-1 lg:grid-cols-2 gap-6", children: [_jsxs("div", { class: "bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm", children: [_jsxs("div", { class: "flex justify-between items-center mb-6 border-b border-slate-700 pb-4", children: [_jsxs("h2", { class: "text-xl font-bold text-slate-100", children: [_jsx("i", { class: "fas fa-network-wired mr-2 text-amber-400" }), "Connections"] }), _jsxs("button", { class: "px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg text-sm font-bold transition-colors", onClick: () => setEditingConnection({ id: '', type: 'modbus-tcp', address: '' }), children: [_jsx("i", { class: "fas fa-plus mr-1" }), " Add Connection"] })] }), _jsx("h3", { class: "text-sm font-bold text-slate-400 uppercase tracking-widest mt-4", children: "Configured (Editable)" }), (config.override.connections?.length || 0) === 0 ? _jsx("div", { class: "text-slate-500 text-sm italic", children: "No custom connections." }) : renderConnectionList(config.override.connections || [], false), _jsx("h3", { class: "text-sm font-bold text-slate-400 uppercase tracking-widest mt-6", children: "From pulswerk.json (Read-only)" }), renderConnectionList(config.base.connections || [], true)] }), _jsxs("div", { class: "bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm", children: [_jsxs("div", { class: "flex justify-between items-center mb-6 border-b border-slate-700 pb-4", children: [_jsxs("h2", { class: "text-xl font-bold text-slate-100", children: [_jsx("i", { class: "fas fa-microchip mr-2 text-sky-400" }), "Devices & Telemetry"] }), _jsxs("button", { class: "px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/20 rounded-lg text-sm font-bold transition-colors", onClick: () => setEditingDevice({ id: '', name: '', deviceType: 'virtual', telemetries: [] }), children: [_jsx("i", { class: "fas fa-plus mr-1" }), " Add Device"] })] }), _jsx(DeviceList, { baseDevices: config.base.devices || [], overrideDevices: config.override.devices || [], onEdit: setEditingDevice, onDelete: handleDeleteDevice })] })] }), _jsx(EditorModal, { title: editingConnection?.id ? `Edit Connection: ${editingConnection.id}` : "New Connection", isOpen: !!editingConnection, onClose: () => setEditingConnection(null), onSave: handleSaveConnection, children: editingConnection && (_jsxs("div", { class: "flex flex-col gap-5", children: [_jsxs("div", { class: "grid grid-cols-2 gap-4", children: [_jsxs("div", { class: "flex flex-col gap-1.5", children: [_jsx("label", { class: "text-xs font-bold text-slate-400 uppercase tracking-wide", children: "Connection ID" }), _jsx("input", { type: "text", class: "bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none", value: editingConnection.id, onInput: (e) => setEditingConnection({ ...editingConnection, id: e.target.value }) })] }), _jsxs("div", { class: "flex flex-col gap-1.5", children: [_jsx("label", { class: "text-xs font-bold text-slate-400 uppercase tracking-wide", children: "Protocol Type" }), _jsxs("select", { class: "bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none appearance-none", value: editingConnection.type, onChange: (e) => setEditingConnection({ ...editingConnection, type: e.target.value }), children: [_jsx("option", { value: "modbus-tcp", children: "Modbus TCP" }), _jsx("option", { value: "bacnet-ip", children: "BACnet/IP" })] })] })] }), _jsxs("div", { class: "grid grid-cols-2 gap-4", children: [_jsxs("div", { class: "flex flex-col gap-1.5", children: [_jsx("label", { class: "text-xs font-bold text-slate-400 uppercase tracking-wide", children: "Host / Address" }), _jsx("input", { type: "text", class: "bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none", value: editingConnection.address || editingConnection.localAddress || '', onInput: (e) => {
                                                 const v = e.target.value;
                                                 if (editingConnection.type === 'bacnet-ip')
                                                     setEditingConnection({ ...editingConnection, localAddress: v });
