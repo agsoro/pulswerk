@@ -79,7 +79,7 @@ services:
         condition: service_started
     volumes:
       # Mount host's compiled binaries
-      - ./src/Pulswerk.Host/bin/Debug/net8.0:/app
+      - ./src/Pulswerk.Host/bin/Debug/net10.0:/app
       # Mount wwwroot static assets so container can serve JS/CSS
       - ./src/Pulswerk.Dashboard/wwwroot:/app/wwwroot:ro
       # Override production config with testing config (Docker DNS for simulators)

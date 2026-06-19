@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <VersionMajor>2</VersionMajor>
-    <VersionMinor>7</VersionMinor>
+    <VersionMinor>8</VersionMinor>
     <VersionBuild>$([System.IO.File]::ReadAllText($(MSBuildThisFileDirectory)version.txt).Trim())</VersionBuild>
     <Version>$(VersionMajor).$(VersionMinor).$(VersionBuild)</Version>
     <Authors>Pulswerk Team</Authors>
@@ -11,10 +11,12 @@
 
   <!-- Global build settings -->
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest</AnalysisLevel>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Pulswerk.$(MSBuildProjectName.Replace('Pulswerk.', ''))</RootNamespace>
+    <NoWarn>$(NoWarn);NU1901;NU1902;NU1903;NU1904</NoWarn>
   </PropertyGroup>
 </Project>

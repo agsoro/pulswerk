@@ -90,7 +90,7 @@ namespace Pulswerk.Drivers.Knx
                 else
                 {
                     Log.Info($"[KNX-{_config.Id}] Starting in TUNNELING mode (gateway={gatewayHost}:{gatewayPort})...");
-                    IPAddress gatewayIp;
+                    IPAddress? gatewayIp;
                     if (!IPAddress.TryParse(gatewayHost, out gatewayIp))
                     {
                         var addresses = Dns.GetHostAddresses(gatewayHost);
@@ -98,7 +98,7 @@ namespace Pulswerk.Drivers.Knx
                             throw new Exception($"Could not resolve KNX gateway host '{gatewayHost}'");
                         gatewayIp = addresses[0];
                     }
-                    _gatewayEndPoint = new IPEndPoint(gatewayIp, gatewayPort);
+                    _gatewayEndPoint = new IPEndPoint(gatewayIp!, gatewayPort);
                     
                     _listenTask = Task.Run(() => TunnelingConnectionLoop(_cts.Token));
                 }
