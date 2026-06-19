@@ -132,9 +132,14 @@ namespace Pulswerk.Host
                 if (persisted != null)
                 {
                     foreach (var p in persisted)
-                        dataStore.Insert(p.Key,
-                            new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
-                            p.Value.val);
+                    {
+                        if (!telemetryValues.ContainsKey(p.Key))
+                        {
+                            dataStore.Insert(p.Key,
+                                new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                p.Value.val);
+                        }
+                    }
                 }
             }
 
@@ -163,9 +168,14 @@ namespace Pulswerk.Host
             if (persisted != null)
             {
                 foreach (var p in persisted)
-                    dataStore.Insert(p.Key,
-                        new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
-                        p.Value.val);
+                {
+                    if (!telemetryValues.ContainsKey(p.Key))
+                    {
+                        dataStore.Insert(p.Key,
+                            new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                            p.Value.val);
+                    }
+                }
             }
 
             // For non-BACnet readers, also scope keys by device ID
@@ -178,9 +188,14 @@ namespace Pulswerk.Host
                 if (persistedScoped != null)
                 {
                     foreach (var p in persistedScoped)
-                        dataStore.Insert(p.Key,
-                            new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
-                            p.Value.val);
+                    {
+                        if (!scoped.ContainsKey(p.Key))
+                        {
+                            dataStore.Insert(p.Key,
+                                new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                p.Value.val);
+                        }
+                    }
                 }
                 dataStore.InsertBatch(scoped);
             }

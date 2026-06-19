@@ -109,6 +109,18 @@
       "localPort": 5000,
       "localAddress": "/plswk/ocpp/",
       "name": "OCPP Central System"
+    },
+    {
+      "id": "knx-test",
+      "type": "knx-ip",
+      "address": "knx-sim",
+      "port": 3671,
+      "knxConnectionType": "tunneling",
+      "knxIndividualAddress": "15.15.250",
+      "knxSecureEnabled": false,
+      "knxPassword": "mySecretSecurePassword123!",
+      "knxUserId": 2,
+      "name": "KNX Test Gateway"
     }
   ],
   // ── Devices ──────────────────────────────────────────────────────────────
@@ -249,6 +261,18 @@
         "Wallbox 1"
       ],
       "assetType": "Wallbox"
+    },
+    {
+      "id": "knx-living-room",
+      "name": "Living Room KNX",
+      "deviceType": "knx",
+      "connectionId": "knx-test",
+      "path": [
+        "Building A",
+        "Living Room"
+      ],
+      "assetType": "KNX Controller",
+      "knxGroupAddressXml": "ets_export.xml"
     }
   ]
 }

@@ -22,6 +22,16 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("path")] List<string>? Path = null
     );
 
+    public record KnxPointConfig(
+        [property: JsonPropertyName("key")] string Key,
+        [property: JsonPropertyName("groupAddress")] string GroupAddress,
+        [property: JsonPropertyName("dpt")] string Dpt,
+        [property: JsonPropertyName("units")] string? Units = null,
+        [property: JsonPropertyName("writable")] bool Writable = false,
+        [property: JsonPropertyName("name")] string? Name = null,
+        [property: JsonPropertyName("description")] string? Description = null
+    );
+
     // ── InfluxDB ───────────────────────────────────────────────────────────────
 
     public record InfluxConfig(
@@ -68,7 +78,22 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("localDeviceId")] uint? LocalDeviceId = null,
 
         /// <summary>Human-readable display name for this connection in the dashboard.</summary>
-        [property: JsonPropertyName("name")] string? Name = null
+        [property: JsonPropertyName("name")] string? Name = null,
+
+        /// <summary>KNX connection mode ("tunneling" or "routing").</summary>
+        [property: JsonPropertyName("knxConnectionType")] string? KnxConnectionType = null,
+
+        /// <summary>KNX client individual physical address (default "15.15.250").</summary>
+        [property: JsonPropertyName("knxIndividualAddress")] string? KnxIndividualAddress = null,
+
+        /// <summary>Whether KNX IP Secure is enabled.</summary>
+        [property: JsonPropertyName("knxSecureEnabled")] bool KnxSecureEnabled = false,
+
+        /// <summary>KNX secure user password for tunneling.</summary>
+        [property: JsonPropertyName("knxPassword")] string? KnxPassword = null,
+
+        /// <summary>KNX secure user ID for tunneling slot (default 2).</summary>
+        [property: JsonPropertyName("knxUserId")] int KnxUserId = 2
     )
     {
         /// <summary>Effective device name — explicit or derived from Id.</summary>
@@ -128,7 +153,18 @@ namespace Pulswerk.Core
         /// <summary>
         /// Formula-based points for 'virtual' device types.
         /// </summary>
-        [property: JsonPropertyName("telemetries")] List<TelemetryConfig>? Telemetries = null
+        [property: JsonPropertyName("telemetries")] List<TelemetryConfig>? Telemetries = null,
+
+        /// <summary>
+        /// Optional path to an ETS XML Group Address export file.
+        /// If provided, metadata (name, description, DPT, hierarchy paths) is loaded dynamically.
+        /// </summary>
+        [property: JsonPropertyName("knxGroupAddressXml")] string? KnxGroupAddressXml = null,
+
+        /// <summary>
+        /// KNX group address datapoints mapped to telemetry keys.
+        /// </summary>
+        [property: JsonPropertyName("knxPoints")] List<KnxPointConfig>? KnxPoints = null
     )
     {
         private static readonly string[] _bacnetTypes = { "bacnet", "deziko" };

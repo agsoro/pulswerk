@@ -249,11 +249,6 @@ export function TelemetryListPage() {
                                         const isSchedule = point.type === 'OBJECT_SCHEDULE';
                                         const isFav = (window as any).pw_fav?.get('deziko_favorites')?.includes(point.key);
 
-                                        // De-emphasize connection/device when same as previous visible row
-                                        const prevPoint = index > 0 ? visibleSlice[index - 1] : null;
-                                        const sameConn = prevPoint?.connection === point.connection;
-                                        const sameDev  = sameConn && prevPoint?.device === point.device;
-
                                         const { label: lastSeenLabel, cls: lastSeenCls } = formatLastSeen(point.lastSeen);
                                         const typeBadgeCls = typeColor(point.type);
                                         const typeShort = (point.type || '').replace('OBJECT_', '');
@@ -272,32 +267,24 @@ export function TelemetryListPage() {
                                                 }}
                                                 class="flex items-center w-full transition-colors duration-150 hover:bg-white/[0.04] group/row"
                                             >
-                                                {/* CONNECTION — dimmed when repeating */}
+                                                {/* CONNECTION */}
                                                 <td class="px-4 py-2 align-middle" style={{ width: '9%' }}>
-                                                    {sameConn ? (
-                                                        <span class="text-[0.7rem] text-slate-700 italic select-none truncate block">↳</span>
-                                                    ) : (
-                                                        <span
-                                                            class="text-[0.78rem] font-semibold text-slate-300 truncate block"
-                                                            title={point.connection}
-                                                        >
-                                                            {point.connection || '–'}
-                                                        </span>
-                                                    )}
+                                                    <span
+                                                        class="text-[0.78rem] font-semibold text-slate-300 truncate block"
+                                                        title={point.connection}
+                                                    >
+                                                        {point.connection || '–'}
+                                                    </span>
                                                 </td>
 
-                                                {/* DEVICE — dimmed when same connection + device */}
+                                                {/* DEVICE */}
                                                 <td class="px-4 py-2 align-middle" style={{ width: '11%' }}>
-                                                    {sameDev ? (
-                                                        <span class="text-[0.7rem] text-slate-700 italic select-none truncate block">↳</span>
-                                                    ) : (
-                                                        <span
-                                                            class="text-[0.78rem] text-slate-400 truncate block"
-                                                            title={point.device}
-                                                        >
-                                                            {point.device || '–'}
-                                                        </span>
-                                                    )}
+                                                    <span
+                                                        class="text-[0.78rem] text-slate-400 truncate block"
+                                                        title={point.device}
+                                                    >
+                                                        {point.device || '–'}
+                                                    </span>
                                                 </td>
 
                                                 {/* IDENTITY & PATH — name bold, path faint mono, both with tooltip */}

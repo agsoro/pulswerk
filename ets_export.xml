@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GroupAddress-Export xmlns="http://knx.org/xml/telecontrol/1.0">
+  <GroupRange Name="Building A" RangeStart="0" RangeEnd="2047">
+    <GroupRange Name="Living Room" RangeStart="0" RangeEnd="255">
+      <GroupAddress Name="Temperature Sensor" Address="1/1/10" Description="Living room temperature" DPT="DPST-9-1" />
+      <GroupAddress Name="Setpoint Temperature" Address="1/1/11" Description="Living room temperature setpoint" DPT="DPST-9-1" />
+      <GroupAddress Name="Ceiling Light" Address="1/2/1" Description="Main light switch" DPT="DPST-1-1" />
+      <GroupAddress Name="Power Sensor" Address="1/3/1" Description="Power usage" DPT="DPST-14-56" />
+      <GroupAddress Name="Simulated Switch" Address="1/2/2" Description="Simulated switch with write capability" DPT="DPST-1-1" />
+      <GroupAddress Name="Simulated Dimmer" Address="1/4/1" Description="Simulated dimmer 0-255 scaling" DPT="DPST-5-1" />
+    </GroupRange>
+  </GroupRange>
+</GroupAddress-Export>

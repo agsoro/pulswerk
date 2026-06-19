@@ -55,6 +55,15 @@ services:
     depends_on:
       - pulswerk
 
+  # ── KNX IP Secure/Tunneling simulator ───────────────────────────────────────
+  knx-sim:
+    build:
+      context: testing/knx-sim
+    container_name: knx-sim
+    restart: unless-stopped
+    ports:
+      - "3671:3671/udp" # expose UDP port 3671 for KNX
+
   # ── Pulswerk overrides for test environment ─────────────────────────────────
   pulswerk:
     depends_on:
@@ -66,6 +75,8 @@ services:
         condition: service_started
       bacnet-sim:
         condition: service_started
+      knx-sim:
+        condition: service_started
     volumes:
       # Mount host's compiled binaries
       - ./src/Pulswerk.Host/bin/Debug/net8.0:/app
@@ -73,6 +84,8 @@ services:
       - ./src/Pulswerk.Dashboard/wwwroot:/app/wwwroot:ro
       # Override production config with testing config (Docker DNS for simulators)
       - ./pulswerk.testing.json:/app/pulswerk.json:ro
+      # Mount fake ETS XML
+      - ./ets_export.xml:/app/ets_export.xml:ro
     # All services share the default compose bridge network.
     # "influxdb", "modbus-sim", and "bacnet-sim" resolve via Docker DNS.
 

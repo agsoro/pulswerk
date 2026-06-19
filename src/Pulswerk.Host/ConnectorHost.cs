@@ -17,6 +17,7 @@ using Pulswerk.Dashboard;
 using Pulswerk.Drivers;
 using Pulswerk.Drivers.BACnet;
 using Pulswerk.Drivers.Ocpp;
+using Pulswerk.Drivers.Knx;
 using Pulswerk.Storage;
 using Pulswerk.Billing;
 using Pulswerk.Ems;
@@ -90,6 +91,7 @@ namespace Pulswerk.Host
 
             StartMonitoringDashboard(cts.Token);
             StartBacnetClients();
+            StartKnxConnections();
 
             _poller = new DevicePoller(_drivers, _dataService, _offlineDevices, _lastPolledAt);
             StartPollingLoops(cts.Token);
@@ -387,6 +389,43 @@ namespace Pulswerk.Host
             }
         }
 
+        // ── KNX client init ──────────────────────────────────────────────────
+
+        void StartKnxConnections()
+        {
+            foreach (var conn in _cfg.Connections.Where(c => c.Type == "knx-ip"))
+            {
+                try
+                {
+                    Log.Info($"[KNX] Initialising connection '{conn.Id}'...");
+                    var knxConn = new KnxConnection(conn);
+                    knxConn.Start();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KNX] Failed to start connection '{conn.Id}': {ex.Message}");
+                }
+            }
+        }
+
+        void ShutdownKnxConnections()
+        {
+            foreach (var conn in _cfg.Connections.Where(c => c.Type == "knx-ip"))
+            {
+                if (KnxConnection.TryGetConnection(conn.Id, out var knxConn) && knxConn != null)
+                {
+                    try
+                    {
+                        knxConn.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[KNX] Error during disconnect of '{conn.Id}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
         // ── COV subscriptions ────────────────────────────────────────────────
 
         void StartCovSubscriptions(CancellationToken ct)
@@ -575,6 +614,8 @@ namespace Pulswerk.Host
         void Shutdown()
         {
             Log.Info("Shutting down…");
+
+            ShutdownKnxConnections();
 
             foreach (var d in _cfg.Devices)
                 if (d.EffectiveCov is { Enabled: true })

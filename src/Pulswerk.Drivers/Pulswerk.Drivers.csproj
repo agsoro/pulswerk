@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
     <PackageReference Include="NModbus" Version="3.0.81" />
     <PackageReference Include="BACnet" Version="3.0.2" />
   </ItemGroup>

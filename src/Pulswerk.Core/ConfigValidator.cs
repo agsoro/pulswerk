@@ -31,8 +31,8 @@ namespace Pulswerk.Core
                     else if (!connIds.Add(conn.Id))
                         errors.Add($"Duplicate connection ID found: '{conn.Id}'.");
 
-                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp")
-                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp'.");
+                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp" && conn.Type != "knx-ip")
+                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp', 'knx-ip'.");
 
                     if (conn.Type == "bacnet-ip")
                     {
@@ -52,6 +52,31 @@ namespace Pulswerk.Core
                             errors.Add($"OCPP connection '{conn.Id}' is missing 'localAddress' (path).");
                         else if (!conn.LocalAddress.StartsWith('/') || !conn.LocalAddress.EndsWith('/'))
                             errors.Add($"OCPP connection '{conn.Id}' has invalid 'localAddress' '{conn.LocalAddress}'. It must start and end with a '/' (e.g., '/plswk/ocpp/').");
+                    }
+                    else if (conn.Type == "knx-ip")
+                    {
+                        if (string.IsNullOrWhiteSpace(conn.Address))
+                            errors.Add($"KNX connection '{conn.Id}' is missing 'address' (IP of the KNX IP Gateway).");
+
+                        if (!string.IsNullOrWhiteSpace(conn.KnxIndividualAddress))
+                        {
+                            var parts = conn.KnxIndividualAddress.Split('.');
+                            if (parts.Length != 3 || 
+                                !int.TryParse(parts[0], out int area) || area < 0 || area > 15 ||
+                                !int.TryParse(parts[1], out int line) || line < 0 || line > 15 ||
+                                !int.TryParse(parts[2], out int member) || member < 0 || member > 255)
+                            {
+                                errors.Add($"KNX connection '{conn.Id}' has invalid individual address '{conn.KnxIndividualAddress}'. Expected 'area.line.member' format (0-15.0-15.0-255).");
+                            }
+                        }
+
+                        if (conn.KnxSecureEnabled)
+                        {
+                            if (string.IsNullOrWhiteSpace(conn.KnxPassword))
+                                errors.Add($"KNX connection '{conn.Id}' has secure enabled but is missing 'knxPassword'.");
+                            if (conn.KnxUserId < 1 || conn.KnxUserId > 255)
+                                errors.Add($"KNX connection '{conn.Id}' has secure enabled but invalid 'knxUserId' '{conn.KnxUserId}'. Expected range 1-255.");
+                        }
                     }
                 }
             }
@@ -76,7 +101,7 @@ namespace Pulswerk.Core
                     if (string.IsNullOrWhiteSpace(dev.Name))
                         errors.Add($"Device '{dev.Id}' is missing a name.");
 
-                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ocpp")
+                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ocpp" && dev.DeviceType != "knx")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
@@ -86,12 +111,89 @@ namespace Pulswerk.Core
                         if (dev.DeviceId == null)
                             errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
                     }
-                    else if (dev.DeviceType == "ocpp")
+                    else if (dev.DeviceType == "ocpp" || dev.DeviceType == "knx")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
                         else if (!connections.ContainsKey(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' references unknown connectionId '{dev.ConnectionId}'.");
+                    }
+
+                    if (dev.DeviceType == "knx")
+                    {
+                        if (string.IsNullOrWhiteSpace(dev.KnxGroupAddressXml) && (dev.KnxPoints == null || dev.KnxPoints.Count == 0))
+                        {
+                            errors.Add($"KNX Device '{dev.Id}' must define 'knxGroupAddressXml' or at least one datapoint in 'knxPoints'.");
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(dev.KnxGroupAddressXml))
+                        {
+                            string? resolved = ResolveConfigRelativePath(dev.KnxGroupAddressXml);
+                            if (resolved == null || !System.IO.File.Exists(resolved))
+                            {
+                                errors.Add($"KNX Device '{dev.Id}' has 'knxGroupAddressXml' path '{dev.KnxGroupAddressXml}' but the file could not be found.");
+                            }
+                        }
+
+                        if (dev.KnxPoints != null && dev.KnxPoints.Count > 0)
+                        {
+                            var pointKeys = new HashSet<string>();
+                            foreach (var dp in dev.KnxPoints)
+                            {
+                                string context = $"Device '{dev.Id}' KNX datapoint '{dp.Key}'";
+                                if (string.IsNullOrWhiteSpace(dp.Key))
+                                    errors.Add($"Device '{dev.Id}' KNX datapoint has missing or empty 'key'.");
+                                else if (!pointKeys.Add(dp.Key))
+                                    errors.Add($"Device '{dev.Id}' has duplicate KNX datapoint key '{dp.Key}'.");
+
+                                if (string.IsNullOrWhiteSpace(dp.GroupAddress))
+                                    errors.Add($"{context}: Missing 'groupAddress'.");
+                                else if (!System.Text.RegularExpressions.Regex.IsMatch(dp.GroupAddress, @"^\d+(/\d+){0,2}$"))
+                                    errors.Add($"{context}: Invalid group address format '{dp.GroupAddress}'. Expected formats: 'X/Y/Z', 'X/Y', or 'X'.");
+                                else
+                                {
+                                    try
+                                    {
+                                        var parts = dp.GroupAddress.Split('/');
+                                        if (parts.Length == 3)
+                                        {
+                                            uint main = uint.Parse(parts[0]);
+                                            uint middle = uint.Parse(parts[1]);
+                                            uint sub = uint.Parse(parts[2]);
+                                            if (main > 31 || middle > 7 || sub > 255)
+                                                errors.Add($"{context}: KNX group address parts out of range (main <= 31, middle <= 7, sub <= 255).");
+                                        }
+                                        else if (parts.Length == 2)
+                                        {
+                                            uint main = uint.Parse(parts[0]);
+                                            uint sub = uint.Parse(parts[1]);
+                                            if (main > 31 || sub > 2047)
+                                                errors.Add($"{context}: KNX group address parts out of range (main <= 31, sub <= 2047).");
+                                        }
+                                        else if (parts.Length == 1)
+                                        {
+                                            uint val = uint.Parse(parts[0]);
+                                            if (val > 65535)
+                                                errors.Add($"{context}: KNX group address out of range (value <= 65535).");
+                                        }
+                                    }
+                                    catch
+                                    {
+                                        errors.Add($"{context}: Failed to parse group address '{dp.GroupAddress}'.");
+                                    }
+                                }
+
+                                if (string.IsNullOrWhiteSpace(dp.Dpt))
+                                    errors.Add($"{context}: Missing 'dpt' (Datapoint Type).");
+                                else
+                                {
+                                    bool dptOk = dp.Dpt.StartsWith("1.") || dp.Dpt.StartsWith("5.") || dp.Dpt.StartsWith("9.") ||
+                                                 dp.Dpt.StartsWith("12.") || dp.Dpt.StartsWith("13.") || dp.Dpt.StartsWith("14.");
+                                    if (!dptOk)
+                                        errors.Add($"{context}: Unsupported DPT '{dp.Dpt}'. Supported: DPT 1 (boolean), 5 (scaling), 9 (2-byte float), 12 (4-byte uint), 13 (4-byte int), 14 (4-byte float).");
+                                }
+                            }
+                        }
                     }
                     if (dev.Telemetries != null)
                     {
@@ -184,6 +286,33 @@ namespace Pulswerk.Core
                     }
                 }
             }
+        }
+
+        private static string? ResolveConfigRelativePath(string relativeOrAbsolutePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativeOrAbsolutePath)) return null;
+            if (System.IO.Path.IsPathRooted(relativeOrAbsolutePath))
+            {
+                return System.IO.File.Exists(relativeOrAbsolutePath) ? relativeOrAbsolutePath : null;
+            }
+
+            var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null)
+            {
+                var targetFile = System.IO.Path.Combine(dir.FullName, relativeOrAbsolutePath);
+                if (System.IO.File.Exists(targetFile)) return targetFile;
+
+                var configJson = System.IO.Path.Combine(dir.FullName, "pulswerk.json");
+                if (System.IO.File.Exists(configJson))
+                {
+                    var targetNearJson = System.IO.Path.Combine(dir.FullName, relativeOrAbsolutePath);
+                    if (System.IO.File.Exists(targetNearJson)) return targetNearJson;
+                }
+
+                dir = dir.Parent;
+            }
+
+            return null;
         }
     }
 }
