@@ -257,7 +257,7 @@ namespace Pulswerk.Billing
             {
                 var list = new List<ChargingTransaction>();
                 using var cmd = _db.CreateCommand();
-                cmd.CommandText = "SELECT id, chargepoint_id, connector_id, id_tag, kwh, timestamp FROM charging_transactions ORDER BY timestamp DESC";
+                cmd.CommandText = "SELECT id, chargepoint_id, connector_id, id_tag, kwh, timestamp FROM charging_transactions ORDER BY timestamp DESC, id DESC";
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())
                 {

@@ -45,6 +45,24 @@ namespace Pulswerk.Dashboard.Tests
             return Task.FromResult(new List<TsPoint>());
         }
 
+        public override async Task<Dictionary<string, List<TsPoint>>> QueryMultipleAsync(
+            List<string> keys, long startTs, long endTs, string? granularity = null, string? mode = null, int maxPointsPerKey = 300)
+        {
+            var dict = new Dictionary<string, List<TsPoint>>();
+            foreach (var key in keys)
+            {
+                if (QueryAsyncHandler != null)
+                {
+                    dict[key] = await QueryAsyncHandler(key, startTs, endTs);
+                }
+                else
+                {
+                    dict[key] = new List<TsPoint>();
+                }
+            }
+            return dict;
+        }
+
         public override Task<List<TsPoint>> QueryConsumptionAsync(string key, string interval, long startTs, long endTs, int maxPoints = 300)
         {
             if (QueryConsumptionAsyncHandler != null) return QueryConsumptionAsyncHandler(key, interval, startTs, endTs);

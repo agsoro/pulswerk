@@ -341,6 +341,19 @@ namespace Pulswerk.Dashboard
                 }
             }
 
+            try
+            {
+                var historyMap = await DataStore.QueryMultipleAsync(new List<string> { key }, startTs, endTs, maxPointsPerKey: 1000);
+                if (historyMap.TryGetValue(key, out var points) && points.Count > 0)
+                {
+                    return points;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"QueryMultipleAsync failed for {key}, falling back to QueryAsync: {ex.Message}");
+            }
+
             return await DataStore.QueryAsync(key, startTs, endTs, limit: 5000);
         }
 
@@ -549,7 +562,21 @@ namespace Pulswerk.Dashboard
             }
 
             if (keyList.Count == 1 && (formula == keyList[0] || formula == $"[{keyList[0]}]"))
+            {
+                try
+                {
+                    var singleHistoryMap = await DataStore.QueryMultipleAsync(new List<string> { keyList[0] }, startTs, endTs, maxPointsPerKey: 1000);
+                    if (singleHistoryMap.TryGetValue(keyList[0], out var points) && points.Count > 0)
+                    {
+                        return points;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"QueryMultipleAsync failed for virtual single key {keyList[0]}, falling back to QueryAsync: {ex.Message}");
+                }
                 return await DataStore.QueryAsync(keyList[0], startTs, endTs, limit: 5000);
+            }
 
             var historyMap = await DataStore.QueryMultipleAsync(keyList, startTs, endTs, maxPointsPerKey: 5000);
             var mergedPoints = new List<TsPoint>();
