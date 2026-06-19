@@ -315,7 +315,7 @@ namespace Pulswerk.Dashboard
             Log.Debug($"[Dashboard] History requested: {key}, range={startTs} to {endTs}");
 
             var device = IdentifyDeviceFromTelemetryKey(key);
-            if (device?.DeviceType == "virtual")
+            if (device != null && key.StartsWith(device.Id + "_"))
             {
                 string pointKey = key.Substring(device.Id.Length + 1);
                 var point = device.Telemetries?.FirstOrDefault(t => t.Id == pointKey);
