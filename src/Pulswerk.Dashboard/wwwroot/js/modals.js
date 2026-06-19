@@ -7,6 +7,10 @@ let _currentScheduleKey = null;
 let _historyChart = null;
 let _historyRefreshTimer = null;
 let _historyTw = null; // reusable TW selector instance
+let isEditingSchedule = false;
+let scheduleValueType = 'real';
+let scheduleStates = null;
+let currentScheduleData = [];
 Object.defineProperties(window, {
     currentHistoryKey: { get: () => _currentHistoryKey, set: (v) => { _currentHistoryKey = v; }, configurable: true },
     currentEditKey: { get: () => _currentEditKey, set: (v) => { _currentEditKey = v; }, configurable: true },
@@ -73,6 +77,35 @@ function switchTelemetryTab(tabName) {
 // --- Unified Telemetry Details Modal ---
 async function openTelemetryDetails(key) {
     console.log("DEBUG: openTelemetryDetails called with key:", key);
+    // Stop any running refresh timer
+    stopHistoryRefresh();
+    // Destroy previous chart instance to prevent listener leaks and flickering when switching keys
+    if (historyChart) {
+        try {
+            historyChart.destroy();
+        }
+        catch (e) {
+            console.error("Failed to destroy previous chart:", e);
+        }
+        historyChart = null;
+    }
+    const chartContainer = document.getElementById('historyChart');
+    if (chartContainer) {
+        chartContainer.innerHTML = '';
+    }
+    // Open Modal immediately & show loading spinner
+    const detailsModal = document.getElementById('telemetryDetailsModal');
+    if (detailsModal) {
+        detailsModal.style.display = 'flex';
+        console.log("DEBUG: modal display set to flex immediately");
+    }
+    else {
+        console.error("DEBUG: telemetryDetailsModal element not found in DOM!");
+    }
+    const loadingOverlay = document.getElementById('telModalLoadingOverlay');
+    if (loadingOverlay) {
+        loadingOverlay.classList.remove('hidden');
+    }
     try {
         currentHistoryKey = key;
         currentEditKey = key;
@@ -255,24 +288,24 @@ async function openTelemetryDetails(key) {
             console.log("DEBUG: loading schedule");
             await loadScheduleForDetails(key, props);
         }
-        // Open Modal
-        console.log("DEBUG: opening modal");
-        const detailsModal = document.getElementById('telemetryDetailsModal');
-        if (detailsModal) {
-            detailsModal.style.display = 'flex';
-            console.log("DEBUG: modal display set to flex successfully");
-        }
-        else {
-            console.error("DEBUG: telemetryDetailsModal element not found in DOM!");
-        }
         // Load History Chart
         console.log("DEBUG: reloading history");
         await reloadHistory();
         console.log("DEBUG: starting history refresh");
         startHistoryRefresh();
+        // Hide loading overlay
+        if (loadingOverlay) {
+            loadingOverlay.classList.add('hidden');
+        }
     }
     catch (err) {
         console.error("DEBUG: openTelemetryDetails caught error:", err);
+        if (loadingOverlay) {
+            loadingOverlay.classList.add('hidden');
+        }
+        if (detailsModal) {
+            detailsModal.style.display = 'none';
+        }
         try {
             fetch("/plswk/api/client-error", {
                 method: "POST",
@@ -490,6 +523,16 @@ async function reloadHistory() {
     }
 }
 function renderChart(data) {
+    // Destroy previous chart instance if it exists to avoid memory leaks and hover flickering
+    if (historyChart) {
+        try {
+            historyChart.destroy();
+        }
+        catch (e) {
+            console.error("Failed to destroy previous chart:", e);
+        }
+        historyChart = null;
+    }
     const options = {
         series: [{
                 name: document.getElementById('telTitle')?.textContent || 'Telemetry Details',

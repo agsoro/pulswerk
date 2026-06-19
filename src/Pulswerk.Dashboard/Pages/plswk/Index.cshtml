@@ -32,6 +32,12 @@
     <!-- Telemetry Details Modal -->
     <div class="modal-overlay" id="telemetryDetailsModal" data-testid="telemetry-details-modal">
         <div class="modal-content animate-fade-in w-[1200px] max-w-[98vw] h-[90vh] flex flex-col">
+            <!-- Modal Loading Overlay -->
+            <div id="telModalLoadingOverlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex flex-col items-center justify-center text-sky-400 gap-3 rounded-2xl hidden">
+                <i class="fas fa-circle-notch fa-spin text-4xl"></i>
+                <span class="text-xs font-semibold tracking-wider uppercase">Loading Details...</span>
+            </div>
+
             <!-- Modal Header -->
             <div class="modal-header shrink-0">
                 <div class="flex-1 min-w-0 pr-8">
