@@ -709,7 +709,12 @@ namespace Pulswerk.Dashboard.Controllers
         }
 
         [HttpGet("widget-data")]
-        public async Task<IActionResult> GetWidgetData([FromQuery] string keys, [FromQuery] long startTs, [FromQuery] long endTs)
+        public async Task<IActionResult> GetWidgetData(
+            [FromQuery] string keys, 
+            [FromQuery] long startTs, 
+            [FromQuery] long endTs,
+            [FromQuery] string? barGranularity = null,
+            [FromQuery] string? barMode = null)
         {
             var keyList = keys?.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
                           ?? new List<string>();
@@ -717,7 +722,7 @@ namespace Pulswerk.Dashboard.Controllers
             if (keyList.Count == 0)
                 return Ok(new Dictionary<string, object?>());
 
-            var data = await _data.GetTelemetryHistoryForWidgetAsync(keyList, startTs, endTs);
+            var data = await _data.GetTelemetryHistoryForWidgetAsync(keyList, startTs, endTs, barGranularity, barMode);
             return Ok(data);
         }
 

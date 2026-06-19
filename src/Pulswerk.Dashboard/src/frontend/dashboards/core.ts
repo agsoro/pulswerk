@@ -111,6 +111,10 @@ export async function showDashboard(): Promise<void> {
     document.getElementById('dashMode')!.style.display = '';
     document.getElementById('dashTitleView')!.textContent = DashboardStore.dashboard!.name;
     (document.getElementById('dashTitle') as HTMLInputElement).value = DashboardStore.dashboard!.name;
+    const descView = document.getElementById('dashDescView');
+    if (descView) descView.textContent = DashboardStore.dashboard!.description || 'No description';
+    const descInput = document.getElementById('dashDesc') as HTMLInputElement;
+    if (descInput) descInput.value = DashboardStore.dashboard!.description || '';
     const sep = document.getElementById('dashBreadcrumbSep'); if (sep) sep.style.display = '';
     
     // Init favorite star
@@ -185,6 +189,10 @@ export function enterEditMode(): void {
     DashboardStore.isEditing = true;
     if (DashboardStore.grid) { DashboardStore.grid.setStatic(false); }
     document.getElementById('dashTitle')!.style.display = ''; document.getElementById('dashTitleView')!.style.display = 'none';
+    const descInput = document.getElementById('dashDesc');
+    const descView = document.getElementById('dashDescView');
+    if (descInput) descInput.style.display = '';
+    if (descView) descView.style.display = 'none';
     document.getElementById('btnEdit')!.style.display = 'none';
     document.getElementById('btnSave')!.style.display = ''; document.getElementById('btnCancel')!.style.display = ''; document.getElementById('btnAddWidget')!.style.display = '';
     document.querySelectorAll('.widget-actions').forEach(e => (e as HTMLElement).style.display = 'flex');
@@ -210,6 +218,10 @@ export function cancelEdit(): void { location.href = `/plswk/Dashboards/${Dashbo
 
 export async function saveDashboard(): Promise<void> {
     DashboardStore.dashboard!.name = (document.getElementById('dashTitle') as HTMLInputElement).value.trim() || DashboardStore.dashboard!.name;
+    const descInput = document.getElementById('dashDesc') as HTMLInputElement;
+    if (descInput) {
+        DashboardStore.dashboard!.description = descInput.value.trim();
+    }
     const r = DashboardStore.dashTw ? DashboardStore.dashTw.getRange() : {};
     DashboardStore.dashboard!.timewindow = { mode: r.mode || 'realtime', realtimeMs: r.realtimeMs || 3600000 };
     // Sync widget positions from grid

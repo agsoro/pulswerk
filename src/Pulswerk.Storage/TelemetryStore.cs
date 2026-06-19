@@ -262,7 +262,7 @@ namespace Pulswerk.Storage
         /// Automatically downsamples via aggregateWindow when the range exceeds ~15 minutes
         /// to keep chart payloads lean (~300 points per series max).</summary>
         public virtual async Task<Dictionary<string, List<TsPoint>>> QueryMultipleAsync(
-            List<string> keys, long startTs, long endTs, int maxPointsPerKey = 300)
+            List<string> keys, long startTs, long endTs, string? granularity = null, string? mode = null, int maxPointsPerKey = 300)
         {
             var result = new Dictionary<string, List<TsPoint>>();
             if (keys == null || keys.Count == 0) return result;
@@ -270,17 +270,51 @@ namespace Pulswerk.Storage
             var keyFilter = string.Join(" or ",
                 keys.Select(k => $"r.key == \"{EscapeFlux(k)}\""));
 
-            long spanMs = endTs - startTs;
-            long windowMs = spanMs / maxPointsPerKey;
-
-            bool downsample = windowMs >= 10_000;
             string aggregatePipeline = "";
-            if (downsample)
+            if (!string.IsNullOrEmpty(granularity))
             {
-                string windowDur = FormatFluxDuration(windowMs);
-                aggregatePipeline = $"""
-                      |> aggregateWindow(every: {windowDur}, fn: mean, createEmpty: false)
-                    """;
+                string every = granularity switch
+                {
+                    "hour" => "1h",
+                    "day" => "1d",
+                    "month" => "1mo",
+                    "year" => "1y",
+                    _ => "1h"
+                };
+
+                if (mode == "diff")
+                {
+                    aggregatePipeline = $"""
+                          |> difference(nonNegative: true)
+                          |> aggregateWindow(every: {every}, fn: sum, timeSrc: "_start", createEmpty: false)
+                        """;
+                }
+                else if (mode == "max")
+                {
+                    aggregatePipeline = $"""
+                          |> aggregateWindow(every: {every}, fn: max, createEmpty: false)
+                        """;
+                }
+                else
+                {
+                    aggregatePipeline = $"""
+                          |> aggregateWindow(every: {every}, fn: mean, createEmpty: false)
+                        """;
+                }
+            }
+            else
+            {
+                long spanMs = endTs - startTs;
+                long windowMs = spanMs / maxPointsPerKey;
+
+                bool downsample = windowMs >= 10_000;
+                if (downsample)
+                {
+                    string windowDur = FormatFluxDuration(windowMs);
+                    aggregatePipeline = $"""
+                          |> aggregateWindow(every: {windowDur}, fn: mean, createEmpty: false)
+                        """;
+                }
             }
 
             var flux = $"""

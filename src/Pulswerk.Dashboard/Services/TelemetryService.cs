@@ -359,8 +359,32 @@ namespace Pulswerk.Dashboard
         /// Supports virtual keys: "key:consumption:1h" or "pathsum(...):consumption:1d".
         /// </summary>
         public async Task<Dictionary<string, List<TsPoint>>> GetTelemetryHistoryForWidgetAsync(
-            List<string> telemetryKeys, long startTs, long endTs)
+            List<string> telemetryKeys, long startTs, long endTs, string? barGranularity = null, string? barMode = null)
         {
+            if (!string.IsNullOrEmpty(barGranularity))
+            {
+                var dt = DateTimeOffset.FromUnixTimeMilliseconds(startTs);
+                if (barGranularity == "hour")
+                {
+                    var aligned = new DateTimeOffset(dt.Year, dt.Month, dt.Day, dt.Hour, 0, 0, dt.Offset);
+                    startTs = aligned.ToUnixTimeMilliseconds();
+                }
+                else if (barGranularity == "day")
+                {
+                    var aligned = new DateTimeOffset(dt.Year, dt.Month, dt.Day, 0, 0, 0, dt.Offset);
+                    startTs = aligned.ToUnixTimeMilliseconds();
+                }
+                else if (barGranularity == "month")
+                {
+                    var aligned = new DateTimeOffset(dt.Year, dt.Month, 1, 0, 0, 0, dt.Offset);
+                    startTs = aligned.ToUnixTimeMilliseconds();
+                }
+                else if (barGranularity == "year")
+                {
+                    var aligned = new DateTimeOffset(dt.Year, 1, 1, 0, 0, 0, dt.Offset);
+                    startTs = aligned.ToUnixTimeMilliseconds();
+                }
+            }
             var result = new Dictionary<string, List<TsPoint>>();
             var realKeys = new List<string>();
             var realKeyMap = new Dictionary<string, string>();
@@ -442,7 +466,7 @@ namespace Pulswerk.Dashboard
                     }
                 }
 
-                var realData = await DataStore.QueryMultipleAsync(realKeys, startTs, endTs);
+                var realData = await DataStore.QueryMultipleAsync(realKeys, startTs, endTs, barGranularity, barMode);
                 foreach (var entry in realKeyMap)
                 {
                     if (realData.TryGetValue(entry.Value, out var data))

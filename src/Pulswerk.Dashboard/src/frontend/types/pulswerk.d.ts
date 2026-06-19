@@ -216,6 +216,8 @@ declare function openEdit(key: string): Promise<void>;
 declare function closeEdit(): void;
 declare function step(n: number): void;
 declare function updateBoolLabel(): void;
+declare function startTelemetryEdit(): void;
+declare function cancelTelemetryEdit(): void;
 declare function submitEdit(e?: Event): Promise<void>;
 
 declare function openProperties(key: string): Promise<void>;

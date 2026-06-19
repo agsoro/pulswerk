@@ -91,6 +91,24 @@ export function AssetsPage({ initialNodeId }) {
         const keys = selectedNode.telemetries.map((point) => point.key).filter(Boolean);
         if (keys.length === 0)
             return;
+        // Sync selected node's telemetry metadata to global allKeys cache so the details modal can resolve writable state
+        const existingAllKeys = window.allKeys || [];
+        const currentKeys = selectedNode.telemetries.map((point) => ({
+            key: point.key,
+            name: point.name,
+            fullName: point.fullName || point.name,
+            units: point.units || '',
+            type: point.type || '',
+            isWritable: !!point.isWritable,
+            parentPath: []
+        }));
+        const mergedKeys = [...existingAllKeys];
+        currentKeys.forEach((nk) => {
+            if (!mergedKeys.some((ek) => ek.key === nk.key)) {
+                mergedKeys.push(nk);
+            }
+        });
+        window.allKeys = mergedKeys;
         // Fetch initial latest values
         DashboardService.fetchLatestValues(keys).then(data => {
             setLiveValues(prev => ({ ...prev, ...data }));
@@ -224,12 +242,12 @@ export function AssetsPage({ initialNodeId }) {
                                 const curValue = liveValues[point.key] !== undefined ? liveValues[point.key] : point.value;
                                 const displayVal = window.PulswerkValue?.formatDisplay(curValue, point.type) || curValue;
                                 const isFav = window.pw_fav?.get('deziko_favorites')?.includes(point.key);
-                                return (_jsxs("div", { "data-key": point.key, class: "glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-sky-400 hover:translate-x-1", children: [_jsx("div", { class: "w-10 h-10 bg-sky-400/10 rounded-lg flex items-center justify-center text-sky-400 text-xl", children: _jsx("i", { class: `fas ${getPointIcon(point.type || '')}` }) }), _jsxs("div", { class: "flex-1 min-w-0", children: [_jsx("div", { class: "font-semibold text-slate-50 truncate", children: point.name || 'Unnamed' }), _jsx("div", { class: "text-[0.7rem] text-slate-400 font-mono truncate", children: point.fullName || '' })] }), _jsxs("div", { class: "text-right min-w-[120px]", children: [isSchedule ? (_jsxs("span", { class: "text-sky-400/50 text-[0.65rem] font-black tracking-widest uppercase", children: [_jsx("i", { class: "fas fa-clock mr-1 opacity-70" }), "Schedule"] })) : (_jsx("span", { class: "text-lg font-bold text-sky-400", children: displayVal })), _jsx("span", { class: "text-xs text-slate-400 ml-1", children: point.units || '' })] }), _jsxs("div", { class: "flex gap-2 shrink-0", children: [_jsx("button", { class: `btn-icon star-btn ${window.pwCanEditFavorites ? '' : 'hidden'} ${isFav ? 'active text-amber-400' : ''}`, onClick: () => {
-                                                        if (typeof window.toggleFavorite === 'function') {
-                                                            window.toggleFavorite(point.key);
-                                                            // Force update
-                                                            setLiveValues(prev => ({ ...prev }));
-                                                        }
-                                                    }, title: "Favorite", children: _jsx("i", { class: `${isFav ? 'fas' : 'far'} fa-star` }) }), _jsx("button", { class: "btn-icon", title: "Trend", onClick: () => window.openHistory(point.key), children: _jsx("i", { class: "fas fa-chart-area" }) }), isSchedule && (_jsx("button", { class: `btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}`, title: "Schedule View", onClick: () => window.openScheduleView(point.key), children: _jsx("i", { class: "fas fa-calendar-check" }) })), point.isWritable && !isSchedule && (_jsx("button", { class: `btn-icon ${window.pwCanWriteValue ? '' : 'hidden'}`, title: "Edit Value", onClick: () => window.openEdit(point.key), children: _jsx("i", { class: "fas fa-pen" }) })), _jsx("button", { class: "btn-icon", title: "Properties", onClick: () => window.openProperties(point.key), children: _jsx("i", { class: "fas fa-cog" }) })] })] }, point.key));
+                                return (_jsxs("div", { "data-key": point.key, class: "glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-sky-400 hover:translate-x-1 cursor-pointer", onClick: () => window.openTelemetryDetails(point.key), children: [_jsx("div", { class: "w-10 h-10 bg-sky-400/10 rounded-lg flex items-center justify-center text-sky-400 text-xl shrink-0", children: _jsx("i", { class: `fas ${getPointIcon(point.type || '')}` }) }), _jsxs("div", { class: "flex-1 min-w-0", children: [_jsx("div", { class: "font-semibold text-slate-50 truncate", children: point.name || 'Unnamed' }), _jsx("div", { class: "text-[0.7rem] text-slate-400 font-mono truncate", children: point.fullName || '' })] }), _jsxs("div", { class: "text-right min-w-[120px] shrink-0", children: [isSchedule ? (_jsxs("span", { class: "text-sky-400/50 text-[0.65rem] font-black tracking-widest uppercase", children: [_jsx("i", { class: "fas fa-clock mr-1 opacity-70" }), "Schedule"] })) : (_jsx("span", { class: "text-lg font-bold text-sky-400", children: displayVal })), _jsx("span", { class: "text-xs text-slate-400 ml-1", children: point.units || '' })] }), _jsx("div", { class: "flex gap-2 shrink-0", children: _jsx("button", { class: `btn-icon star-btn ${window.pwCanEditFavorites ? '' : 'hidden'} ${isFav ? 'active text-amber-400' : ''}`, onClick: (e) => {
+                                                    e.stopPropagation();
+                                                    if (typeof window.toggleFavorite === 'function') {
+                                                        window.toggleFavorite(point.key);
+                                                        setLiveValues(prev => ({ ...prev }));
+                                                    }
+                                                }, title: "Favorite", children: _jsx("i", { class: `${isFav ? 'fas' : 'far'} fa-star` }) }) })] }, point.key));
                             })) })] })) : (_jsxs("div", { class: "flex-1 flex flex-col items-center justify-center gap-4 text-slate-400 opacity-45 text-sm select-none", children: [_jsx("i", { class: "fas fa-network-wired text-4xl" }), _jsx("p", { children: t('select_node_hint') })] })) })] }));
 }

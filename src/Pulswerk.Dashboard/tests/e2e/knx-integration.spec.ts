@@ -202,9 +202,13 @@ test.describe('KNX IP Secure & Tunneling E2E Tests', () => {
         await expect(page.getByText('Simulated Switch', { exact: true })).toBeVisible();
         await expect(page.getByText('Simulated Dimmer', { exact: true })).toBeVisible();
 
-        // Click edit value button on "Simulated Switch" (which is writable)
+        // Click the row to open the details modal
         const simSwitchRow = page.locator('.glass').filter({ hasText: 'Simulated Switch' });
-        const editBtn = simSwitchRow.locator('button[title="Edit Value"]');
+        await simSwitchRow.click();
+        await page.waitForSelector('#telemetryDetailsModal', { state: 'visible' });
+
+        // Verify the inline edit start button is visible in the modal
+        const editBtn = page.locator('#telInlineEditStartBtn');
         await expect(editBtn).toBeVisible();
     });
 });

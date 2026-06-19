@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+declare const process: any;
+
 // Auth proxy URL for admin-authenticated requests.
 // In Docker: set ADMIN_PROXY_URL=http://auth-proxy:81 (port 81 = admins group).
 // Locally:   defaults to http://localhost:5002.
@@ -67,34 +69,51 @@ test.describe('Dashboard Interactions and Component States', () => {
 
   // 2. Edit Modal Dynamic Form Modes (Numeric, Enum, Boolean)
   test('Edit Modal Input Variants', async ({ page }) => {
-    await page.goto('/plswk/Assets');
+    await page.goto(`${ADMIN_PROXY_URL}/plswk/Assets`);
     await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
 
     // A. Test Numeric Stepper Mode
     await page.evaluate(() => {
       const win = window as any;
+      win.allKeys = win.allKeys || [];
+      const existing = win.allKeys.find((k: any) => k.key === 'test:key');
+      if (!existing) {
+        win.allKeys.push({
+          key: 'test:key',
+          name: 'Test Key',
+          fullName: 'test:key',
+          units: '°C',
+          type: 'ANALOG_VALUE',
+          isWritable: true,
+          parentPath: []
+        });
+      }
       if (typeof win.openEdit === 'function') {
         win.openEdit('test:key');
       }
     });
     await page.waitForTimeout(500);
 
-    const modal = page.locator('#editModal');
+    const modal = page.locator('#telemetryDetailsModal');
     await expect(modal).toBeVisible();
 
-    // Verify stepper is shown, others are hidden
-    await expect(page.locator('#stepperGroup')).toBeVisible();
-    await expect(page.locator('#enumGroup')).toBeHidden();
-    await expect(page.locator('#boolGroup')).toBeHidden();
+    // Click Edit Value button to start edit mode
+    await page.locator('#telInlineEditStartBtn').click();
+    await page.waitForTimeout(100);
 
-    const plusBtn = page.locator('.number-stepper button:has-text("+")');
-    const minusBtn = page.locator('.number-stepper button:has-text("−")');
+    // Verify stepper is shown, others are hidden
+    await expect(page.locator('#inlineStepperGroup')).toBeVisible();
+    await expect(page.locator('#inlineEnumGroup')).toBeHidden();
+    await expect(page.locator('#inlineBoolGroup')).toBeHidden();
+
+    const plusBtn = page.locator('#inlineStepperGroup button[onclick="step(1)"]');
+    const minusBtn = page.locator('#inlineStepperGroup button[onclick="step(-1)"]');
     await expect(plusBtn).toBeVisible();
     await expect(minusBtn).toBeVisible();
 
     // Close modal
-    await page.locator('#editModal .close-modal, #editModal button:has-text("Cancel")').first().click();
-    await page.waitForSelector('#editModal', { state: 'hidden' });
+    await page.locator('#telemetryDetailsModal .close-modal').first().click();
+    await page.waitForSelector('#telemetryDetailsModal', { state: 'hidden' });
 
     // B. Test Multi-State Enum Dropdown Mode
     // We register the enum metadata directly onto allKeys to simulate an Enum key
@@ -121,17 +140,21 @@ test.describe('Dashboard Interactions and Component States', () => {
     await page.waitForTimeout(500);
     await expect(modal).toBeVisible();
 
+    // Click Edit Value button to start edit mode
+    await page.locator('#telInlineEditStartBtn').click();
+    await page.waitForTimeout(100);
+
     // Verify dropdown select is shown, stepper and toggle are hidden
-    await expect(page.locator('#enumGroup')).toBeVisible();
-    await expect(page.locator('#stepperGroup')).toBeHidden();
-    await expect(page.locator('#boolGroup')).toBeHidden();
+    await expect(page.locator('#inlineEnumGroup')).toBeVisible();
+    await expect(page.locator('#inlineStepperGroup')).toBeHidden();
+    await expect(page.locator('#inlineBoolGroup')).toBeHidden();
 
     const options = page.locator('#enumSelect option');
     expect(await options.count()).toBe(3);
 
     // Close modal
-    await page.locator('#editModal .close-modal').first().click();
-    await page.waitForSelector('#editModal', { state: 'hidden' });
+    await page.locator('#telemetryDetailsModal .close-modal').first().click();
+    await page.waitForSelector('#telemetryDetailsModal', { state: 'hidden' });
 
     // C. Test Binary Output Boolean Toggle Mode
     // We register the binary metadata directly onto allKeys to simulate a Boolean key
@@ -158,10 +181,14 @@ test.describe('Dashboard Interactions and Component States', () => {
     await page.waitForTimeout(500);
     await expect(modal).toBeVisible();
 
+    // Click Edit Value button to start edit mode
+    await page.locator('#telInlineEditStartBtn').click();
+    await page.waitForTimeout(100);
+
     // Verify toggle wrap is visible, stepper and dropdown are hidden
-    await expect(page.locator('#boolGroup')).toBeVisible();
-    await expect(page.locator('#stepperGroup')).toBeHidden();
-    await expect(page.locator('#enumGroup')).toBeHidden();
+    await expect(page.locator('#inlineBoolGroup')).toBeVisible();
+    await expect(page.locator('#inlineStepperGroup')).toBeHidden();
+    await expect(page.locator('#inlineEnumGroup')).toBeHidden();
 
     const toggleLabel = page.locator('#boolLabel');
     expect(await toggleLabel.textContent()).not.toBe('');
@@ -289,6 +316,34 @@ test.describe('Dashboard Interactions and Component States', () => {
     // Verify we are in edit mode
     const addWidgetBtn = page.locator('[data-testid="dash-add-widget-btn"]');
     await expect(addWidgetBtn).toBeVisible();
+
+    // Verify description is populated in edit mode
+    const descInput = page.locator('#dashDesc');
+    await expect(descInput).toBeVisible();
+    await expect(descInput).toHaveValue('Created via automated test');
+
+    // Update and save the description
+    await descInput.fill('Updated description via E2E test');
+    await page.locator('#btnSave').click();
+    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+
+    // Verify description updated in view mode
+    const descView = page.locator('#dashDescView');
+    await expect(descView).toBeVisible();
+    await expect(descView).toHaveText('Updated description via E2E test');
+
+    // Edit again and verify cancel reverts change
+    await page.locator('#btnEdit').click();
+    await expect(descInput).toBeVisible();
+    await expect(descInput).toHaveValue('Updated description via E2E test');
+
+    await descInput.fill('Canceled description change');
+    await page.locator('#btnCancel').click();
+    
+    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
+    await expect(descView).toHaveText('Updated description via E2E test');
   });
 
   // 6. Verify telemetry fetching optimization (no full telemetries fetch on load/view)

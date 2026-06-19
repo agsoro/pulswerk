@@ -10,8 +10,13 @@ export const apiCall = async (endpoint, opts) => {
     return response.json();
 };
 export class DashboardService {
-    static async fetchWidgetData(keys, startTs, endTs) {
-        return await apiCall(`widget-data?keys=${encodeURIComponent(keys.join(','))}&startTs=${startTs}&endTs=${endTs}`);
+    static async fetchWidgetData(keys, startTs, endTs, barGranularity, barMode) {
+        let url = `widget-data?keys=${encodeURIComponent(keys.join(','))}&startTs=${startTs}&endTs=${endTs}`;
+        if (barGranularity)
+            url += `&barGranularity=${encodeURIComponent(barGranularity)}`;
+        if (barMode)
+            url += `&barMode=${encodeURIComponent(barMode)}`;
+        return await apiCall(url);
     }
     static async fetchLatestValues(keys) {
         const keysArray = Array.isArray(keys) ? keys : (keys ? keys.split(',') : []);

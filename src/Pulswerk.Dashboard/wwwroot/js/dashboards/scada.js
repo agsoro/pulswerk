@@ -257,10 +257,9 @@ export function renderScadaPoint(w) {
         const units = meta.units || '';
         const borderStyle = layout === 'vertical' && i < keys.length - 1 ? 'border-bottom:1px solid rgba(255,255,255,0.04);' : '';
         html += `<div class="sp-row" style="display:flex;align-items:center;gap:0.4rem;padding:0.15rem 0;${borderStyle}">
-            <span style="flex:1;font-size:0.68rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${esc(name)}</span>
+            <a href="#" class="hover:text-sky-400 transition-colors cursor-pointer" data-key="${esc(key)}" onclick="event.preventDefault(); event.stopPropagation(); openTelemetryDetails(this.dataset.key || '')" style="flex:1;font-size:0.68rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;text-decoration:none;">${esc(name)}</a>
             <span class="sp-val" data-key="${key}">---</span>
             ${units ? `<span class="sp-unit">${esc(units)}</span>` : ''}
-            <i class="fas fa-info-circle sp-info" data-key="${esc(key)}" onclick="event.stopPropagation();showScadaPopup(this.dataset.key || '',this)"></i>
         </div>`;
     });
     html += '</div>';

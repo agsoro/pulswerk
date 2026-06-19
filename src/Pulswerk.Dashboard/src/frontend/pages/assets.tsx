@@ -102,6 +102,25 @@ export function AssetsPage({ initialNodeId }: AssetsPageProps) {
         const keys = selectedNode.telemetries.map((point: any) => point.key).filter(Boolean);
         if (keys.length === 0) return;
 
+        // Sync selected node's telemetry metadata to global allKeys cache so the details modal can resolve writable state
+        const existingAllKeys = (window as any).allKeys || [];
+        const currentKeys = selectedNode.telemetries.map((point: any) => ({
+            key: point.key,
+            name: point.name,
+            fullName: point.fullName || point.name,
+            units: point.units || '',
+            type: point.type || '',
+            isWritable: !!point.isWritable,
+            parentPath: []
+        }));
+        const mergedKeys = [...existingAllKeys];
+        currentKeys.forEach((nk: any) => {
+            if (!mergedKeys.some((ek: any) => ek.key === nk.key)) {
+                mergedKeys.push(nk);
+            }
+        });
+        (window as any).allKeys = mergedKeys;
+
         // Fetch initial latest values
         DashboardService.fetchLatestValues(keys).then(data => {
             setLiveValues(prev => ({ ...prev, ...data }));
@@ -347,9 +366,10 @@ export function AssetsPage({ initialNodeId }: AssetsPageProps) {
                                         <div 
                                             key={point.key}
                                             data-key={point.key}
-                                            class="glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-sky-400 hover:translate-x-1"
+                                            class="glass border border-slate-700 rounded-lg p-4 mb-3 flex items-center gap-5 transition-all duration-200 hover:border-sky-400 hover:translate-x-1 cursor-pointer"
+                                            onClick={() => (window as any).openTelemetryDetails(point.key)}
                                         >
-                                            <div class="w-10 h-10 bg-sky-400/10 rounded-lg flex items-center justify-center text-sky-400 text-xl">
+                                            <div class="w-10 h-10 bg-sky-400/10 rounded-lg flex items-center justify-center text-sky-400 text-xl shrink-0">
                                                 <i class={`fas ${getPointIcon(point.type || '')}`}></i>
                                             </div>
                                             
@@ -358,7 +378,7 @@ export function AssetsPage({ initialNodeId }: AssetsPageProps) {
                                                 <div class="text-[0.7rem] text-slate-400 font-mono truncate">{point.fullName || ''}</div>
                                             </div>
 
-                                            <div class="text-right min-w-[120px]">
+                                            <div class="text-right min-w-[120px] shrink-0">
                                                 {isSchedule ? (
                                                     <span class="text-sky-400/50 text-[0.65rem] font-black tracking-widest uppercase">
                                                         <i class="fas fa-clock mr-1 opacity-70"></i>Schedule
@@ -374,32 +394,16 @@ export function AssetsPage({ initialNodeId }: AssetsPageProps) {
                                             <div class="flex gap-2 shrink-0">
                                                 <button 
                                                     class={`btn-icon star-btn ${(window as any).pwCanEditFavorites ? '' : 'hidden'} ${isFav ? 'active text-amber-400' : ''}`}
-                                                    onClick={() => {
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
                                                         if (typeof (window as any).toggleFavorite === 'function') {
                                                             (window as any).toggleFavorite(point.key);
-                                                            // Force update
                                                             setLiveValues(prev => ({ ...prev }));
                                                         }
                                                     }}
                                                     title="Favorite"
                                                 >
                                                     <i class={`${isFav ? 'fas' : 'far'} fa-star`}></i>
-                                                </button>
-                                                <button class="btn-icon" title="Trend" onClick={() => (window as any).openHistory(point.key)}>
-                                                    <i class="fas fa-chart-area"></i>
-                                                </button>
-                                                {isSchedule && (
-                                                    <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Schedule View" onClick={() => (window as any).openScheduleView(point.key)}>
-                                                        <i class="fas fa-calendar-check"></i>
-                                                    </button>
-                                                )}
-                                                {point.isWritable && !isSchedule && (
-                                                    <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Edit Value" onClick={() => (window as any).openEdit(point.key)}>
-                                                        <i class="fas fa-pen"></i>
-                                                    </button>
-                                                )}
-                                                <button class="btn-icon" title="Properties" onClick={() => (window as any).openProperties(point.key)}>
-                                                    <i class="fas fa-cog"></i>
                                                 </button>
                                             </div>
                                         </div>

@@ -69,6 +69,6 @@ export function LatestValuesWidget({ keys, allKeysMeta }) {
                         const formattedVal = window.PulswerkValue?.formatDisplay(displayVal, meta.type) || displayVal;
                         const numVal = parseFloat(val);
                         const isNum = !isNaN(numVal);
-                        return (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("span", { style: { display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: color, marginRight: '0.5rem' } }), window.friendlyName ? window.friendlyName(key) : key] }), _jsxs("td", { children: [_jsx("span", { class: "lv-value", "data-key": key, children: formattedVal }), _jsx("span", { class: "lv-units", children: meta.units || '' })] }), _jsx("td", { children: isNum && _jsx(MiniSpark, { val: numVal, color: color }) })] }, key));
+                        return (_jsxs("tr", { class: "cursor-pointer", onClick: () => window.openTelemetryDetails(key), children: [_jsxs("td", { children: [_jsx("span", { style: { display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: color, marginRight: '0.5rem' } }), window.friendlyName ? window.friendlyName(key) : key] }), _jsxs("td", { children: [_jsx("span", { class: "lv-value", "data-key": key, children: formattedVal }), _jsx("span", { class: "lv-units", children: meta.units || '' })] }), _jsx("td", { children: isNum && _jsx(MiniSpark, { val: numVal, color: color }) })] }, key));
                     }) })] }) }));
 }

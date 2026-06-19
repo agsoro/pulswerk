@@ -13,8 +13,11 @@ export const apiCall = async (endpoint: string, opts?: RequestInit): Promise<any
 };
 
 export class DashboardService {
-    static async fetchWidgetData(keys: string[], startTs: number, endTs: number): Promise<any> {
-        return await apiCall(`widget-data?keys=${encodeURIComponent(keys.join(','))}&startTs=${startTs}&endTs=${endTs}`);
+    static async fetchWidgetData(keys: string[], startTs: number, endTs: number, barGranularity?: string, barMode?: string): Promise<any> {
+        let url = `widget-data?keys=${encodeURIComponent(keys.join(','))}&startTs=${startTs}&endTs=${endTs}`;
+        if (barGranularity) url += `&barGranularity=${encodeURIComponent(barGranularity)}`;
+        if (barMode) url += `&barMode=${encodeURIComponent(barMode)}`;
+        return await apiCall(url);
     }
 
     static async fetchLatestValues(keys: string | string[]): Promise<any> {

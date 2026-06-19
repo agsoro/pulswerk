@@ -288,9 +288,9 @@ export function TelemetryListPage() {
                                                 </td>
 
                                                 {/* IDENTITY & PATH — name bold, path faint mono, both with tooltip */}
-                                                <td class="px-4 py-2 align-middle" style={{ width: '24%' }}>
+                                                <td class="px-4 py-2 align-middle cursor-pointer" style={{ width: '24%' }} onClick={() => (window as any).openTelemetryDetails(point.key)}>
                                                     <div
-                                                        class="font-semibold text-slate-50 text-[0.85rem] truncate leading-tight"
+                                                        class="font-semibold text-slate-50 text-[0.85rem] truncate leading-tight hover:text-sky-400 transition-colors"
                                                         title={point.name}
                                                     >
                                                         {point.name}
@@ -306,9 +306,9 @@ export function TelemetryListPage() {
                                                 </td>
 
                                                 {/* KEY / TAG — monospace, full key in title tooltip */}
-                                                <td class="px-4 py-2 align-middle" style={{ width: '22%' }}>
+                                                <td class="px-4 py-2 align-middle cursor-pointer" style={{ width: '22%' }} onClick={() => (window as any).openTelemetryDetails(point.key)}>
                                                     <span
-                                                        class="font-mono text-[0.72rem] text-sky-400/75 truncate block leading-snug"
+                                                        class="font-mono text-[0.72rem] text-sky-400/75 truncate block leading-snug hover:text-sky-300 transition-colors"
                                                         title={point.key}
                                                     >
                                                         {point.key}
@@ -316,7 +316,7 @@ export function TelemetryListPage() {
                                                 </td>
 
                                                 {/* TYPE badge — colored by type family, tooltip on overflow */}
-                                                <td class="px-4 py-2 align-middle" style={{ width: '9%' }}>
+                                                <td class="px-4 py-2 align-middle cursor-pointer" style={{ width: '9%' }} onClick={() => (window as any).openTelemetryDetails(point.key)}>
                                                     <span
                                                         class={`inline-flex items-center text-[0.65rem] font-bold uppercase px-1.5 py-0.5 rounded-md leading-none max-w-full ${typeBadgeCls}`}
                                                         title={typeShort}
@@ -326,7 +326,7 @@ export function TelemetryListPage() {
                                                 </td>
 
                                                 {/* CURRENT VALUE */}
-                                                <td class="px-4 py-2 align-middle text-right" style={{ width: '10%' }}>
+                                                <td class="px-4 py-2 align-middle text-right cursor-pointer" style={{ width: '10%' }} onClick={() => (window as any).openTelemetryDetails(point.key)}>
                                                     {isSchedule ? (
                                                         <span class="text-sky-400/50 text-[0.65rem] font-black uppercase tracking-widest">
                                                             <i class="fas fa-clock mr-1 opacity-70"></i>Schedule
@@ -352,11 +352,12 @@ export function TelemetryListPage() {
                                                 </td>
 
                                                 {/* ACTIONS */}
-                                                <td class="px-4 py-2 align-middle text-center flex justify-center gap-1" style={{ width: '7%' }}>
+                                                <td class="px-4 py-2 align-middle text-center flex justify-center gap-1.5" style={{ width: '7%' }}>
                                                     <button
                                                         class={`btn-icon star-btn ${(window as any).pwCanEditFavorites ? '' : 'hidden'} ${isFav ? 'active text-amber-400' : ''}`}
                                                         title={isFav ? 'Remove from favourites' : 'Add to favourites'}
-                                                        onClick={() => {
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
                                                             if (typeof (window as any).toggleFavorite === 'function') {
                                                                 (window as any).toggleFavorite(point.key);
                                                                 setLiveValues(prev => ({ ...prev }));
@@ -364,22 +365,6 @@ export function TelemetryListPage() {
                                                         }}
                                                     >
                                                         <i class={`${isFav ? 'fas' : 'far'} fa-star`}></i>
-                                                    </button>
-                                                    <button class="btn-icon" title="Show trend" onClick={() => (window as any).openHistory(point.key)}>
-                                                        <i class="fas fa-chart-area"></i>
-                                                    </button>
-                                                    {isSchedule && (
-                                                        <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Edit schedule" onClick={() => (window as any).openScheduleView(point.key)}>
-                                                            <i class="fas fa-calendar-check"></i>
-                                                        </button>
-                                                    )}
-                                                    {point.isWritable && !isSchedule && (
-                                                        <button class={`btn-icon ${(window as any).pwCanWriteValue ? '' : 'hidden'}`} title="Write value" onClick={() => (window as any).openEdit(point.key)}>
-                                                            <i class="fas fa-pen"></i>
-                                                        </button>
-                                                    )}
-                                                    <button class="btn-icon" title="Properties" onClick={() => (window as any).openProperties(point.key)}>
-                                                        <i class="fas fa-cog"></i>
                                                     </button>
                                                 </td>
                                             </tr>

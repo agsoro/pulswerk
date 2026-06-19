@@ -118,8 +118,16 @@ export function DashboardsPage({ dashboardId, slug }: DashboardsPageProps) {
                 <div class="flex items-center gap-4 mb-4 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/[0.06]" data-testid="dash-toolbar">
                     <a href="/plswk/Dashboards" class="text-white no-underline text-xl font-bold tracking-tight transition-colors duration-200 hover:text-sky-400" data-i18n="nav_dashboards">Dashboards</a>
                     <i class="fas fa-chevron-right text-[0.55rem] text-slate-600 animate-fade-in" id="dashBreadcrumbSep" style={{ display: 'none' }}></i>
-                    <input type="text" class="bg-transparent border-0 text-white text-lg font-bold outline-none flex-1 min-w-0" id="dashTitle" style={{ display: 'none' }} placeholder="Dashboard name" />
-                    <span class="text-lg font-bold flex-1" id="dashTitleView"></span>
+                    <div class="flex flex-col flex-1 min-w-0 gap-0.5">
+                        <div class="flex items-center">
+                            <input type="text" class="bg-transparent border-0 text-white text-lg font-bold outline-none w-full" id="dashTitle" style={{ display: 'none' }} placeholder="Dashboard name" />
+                            <span class="text-lg font-bold text-ellipsis overflow-hidden whitespace-nowrap" id="dashTitleView"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="text" class="bg-transparent border-0 text-slate-400 text-xs outline-none w-full" id="dashDesc" style={{ display: 'none' }} placeholder="Dashboard description (optional)" />
+                            <span class="text-xs text-slate-400 text-ellipsis overflow-hidden whitespace-nowrap" id="dashDescView"></span>
+                        </div>
+                    </div>
                     <button class="btn-icon auth-edit-fav-only" id="btnFavDash" onClick={() => (window as any).toggleFavoriteDash((window as any).dashboard?.id)} title="Favorite">
                         <i class="far fa-star"></i>
                     </button>

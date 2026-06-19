@@ -67,7 +67,12 @@ async function ensureKeysMeta(keys?: string | string[]): Promise<void> {
         try {
             const r = await fetch('/plswk/api/telemetries');
             if (r.ok) {
-                allKeys = await r.json();
+                const data = await r.json();
+                const merged = [...allKeys];
+                data.forEach((m: any) => {
+                    if (!merged.some(x => x.key === m.key)) merged.push(m);
+                });
+                allKeys = merged;
                 (window as any).allKeysLoaded = true;
             }
         } catch (e) { /* non-critical */ }

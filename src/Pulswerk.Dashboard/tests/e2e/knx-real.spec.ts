@@ -63,15 +63,18 @@ test.describe('KNX Real E2E Tests (Non-Mocked)', () => {
 
         // Locate "Simulated Switch" (which is writable)
         const simSwitchRow = page.locator('.glass').filter({ hasText: 'Simulated Switch' });
-        const editBtn = simSwitchRow.locator('button[title="Edit Value"]');
-        await expect(editBtn).toBeVisible();
+        await expect(simSwitchRow).toBeVisible();
 
-        // Click Edit Value button
-        await editBtn.click();
-        await page.waitForSelector('#editModal', { state: 'visible' });
+        // Click the row to open the details modal
+        await simSwitchRow.click();
+        await page.waitForSelector('#telemetryDetailsModal', { state: 'visible' });
 
-        // Verify the boolGroup is visible
-        const boolGroup = page.locator('#boolGroup');
+        // Click Edit Value button to start edit mode
+        await page.locator('#telInlineEditStartBtn').click();
+        await page.waitForTimeout(100);
+
+        // Verify the inlineBoolGroup is visible
+        const boolGroup = page.locator('#inlineBoolGroup');
         await expect(boolGroup).toBeVisible();
 
         // Verify state is attached (the actual input checkbox is visually hidden by standard toggle switch styling)
@@ -89,7 +92,11 @@ test.describe('KNX Real E2E Tests (Non-Mocked)', () => {
 
         // Click Save Changes
         await page.locator('#saveBtn').click();
-        await page.waitForSelector('#editModal', { state: 'hidden' });
+        await page.waitForTimeout(1600); // wait for success state timeout (1500ms) to resolve
+        
+        // Close modal manually
+        await page.locator('#telemetryDetailsModal .close-modal').first().click();
+        await page.waitForSelector('#telemetryDetailsModal', { state: 'hidden' });
         
         // Wait for connection to update value and reflect it in UI
         await page.waitForTimeout(500);

@@ -75,6 +75,82 @@ export function renderWidgetContent(w) {
     else if (w.type === 'single-value')
         renderSingleValue(w, body, cfg);
 }
+export function getEnabledGranularities(durationMs) {
+    const HOUR_MS = 3600000;
+    const DAY_MS = 86400000;
+    const MONTH_MS = 30 * DAY_MS;
+    const YEAR_MS = 365 * DAY_MS;
+    const hourBars = durationMs / HOUR_MS;
+    const dayBars = durationMs / DAY_MS;
+    const monthBars = durationMs / MONTH_MS;
+    const yearBars = durationMs / YEAR_MS;
+    const enabled = {
+        hour: hourBars >= 2 && hourBars <= 400,
+        day: dayBars >= 2 && dayBars <= 400,
+        month: monthBars >= 2 && monthBars <= 400,
+        year: yearBars >= 2 && yearBars <= 400
+    };
+    // Guarantee at least one enabled granularity
+    if (!enabled.hour && !enabled.day && !enabled.month && !enabled.year) {
+        if (durationMs < 2 * HOUR_MS) {
+            enabled.hour = true;
+        }
+        else if (durationMs > 400 * YEAR_MS) {
+            enabled.year = true;
+        }
+        else {
+            if (durationMs < 2 * DAY_MS) {
+                enabled.hour = true;
+            }
+            else if (durationMs < 2 * MONTH_MS) {
+                enabled.day = true;
+            }
+            else if (durationMs < 2 * YEAR_MS) {
+                enabled.month = true;
+            }
+            else {
+                enabled.year = true;
+            }
+        }
+    }
+    return enabled;
+}
+export function alignTimestampToGranularity(ts, granularity) {
+    const d = new Date(ts);
+    if (granularity === 'hour') {
+        d.setUTCMinutes(0, 0, 0);
+    }
+    else if (granularity === 'day') {
+        d.setUTCHours(0, 0, 0, 0);
+    }
+    else if (granularity === 'month') {
+        d.setUTCDate(1);
+        d.setUTCHours(0, 0, 0, 0);
+    }
+    else if (granularity === 'year') {
+        d.setUTCMonth(0, 1);
+        d.setUTCHours(0, 0, 0, 0);
+    }
+    return d.getTime();
+}
+export function changeBarGranularity(widgetId, granularity) {
+    const widgets = DashboardStore.dashboard?.widgets || [];
+    const w = widgets.find((widget) => widget.id === widgetId);
+    if (w) {
+        w.config = w.config || {};
+        w.config.barGranularity = granularity;
+        renderWidgetContent(w);
+    }
+}
+export function changeBarMode(widgetId, mode) {
+    const widgets = DashboardStore.dashboard?.widgets || [];
+    const w = widgets.find((widget) => widget.id === widgetId);
+    if (w) {
+        w.config = w.config || {};
+        w.config.barMode = mode;
+        renderWidgetContent(w);
+    }
+}
 export async function renderTimeseries(w, body, cfg) {
     const keys = cfg.keys || [];
     if (!keys.length) {
@@ -86,9 +162,33 @@ export async function renderTimeseries(w, body, cfg) {
         return;
     DashboardStore.pendingRenders.add(w.id);
     const { startTs, endTs } = getTimeRange();
+    const isBar = cfg.chartType === 'bar';
+    let activeGranularity = cfg.barGranularity;
+    let activeMode = cfg.barMode;
+    let alignedStartTs = startTs;
+    if (isBar) {
+        const durationMs = endTs - startTs;
+        const enabled = getEnabledGranularities(durationMs);
+        if (!activeGranularity || !enabled[activeGranularity]) {
+            if (enabled.day)
+                activeGranularity = 'day';
+            else if (enabled.hour)
+                activeGranularity = 'hour';
+            else if (enabled.month)
+                activeGranularity = 'month';
+            else if (enabled.year)
+                activeGranularity = 'year';
+            cfg.barGranularity = activeGranularity;
+        }
+        if (!activeMode) {
+            activeMode = 'max';
+            cfg.barMode = activeMode;
+        }
+        alignedStartTs = alignTimestampToGranularity(startTs, activeGranularity);
+    }
     let data;
     try {
-        data = await DashboardService.fetchWidgetData(keys, startTs, endTs);
+        data = await DashboardService.fetchWidgetData(keys, alignedStartTs, endTs, activeGranularity, activeMode);
     }
     catch (e) {
         DashboardStore.pendingRenders.delete(w.id);
@@ -98,7 +198,7 @@ export async function renderTimeseries(w, body, cfg) {
     const many = keys.length > 5; // threshold for "dense" chart mode
     const isStacked = !!cfg.stacked;
     const allKeysMeta = window.allKeys || [];
-    const { series, usedColors } = transformToChartSeries(data, keys, allKeysMeta, COLORS, isStacked, window.friendlyName);
+    const { series, usedColors } = transformToChartSeries(data, keys, allKeysMeta, COLORS, isStacked, window.friendlyName, isBar, activeGranularity);
     const yAxisOpts = calculateYAxisConstraints(series);
     const isRealtime = !DashboardStore.dashTw || DashboardStore.dashTw.mode === 'realtime';
     const realtimeMs = DashboardStore.dashTw ? DashboardStore.dashTw.realtimeMs : 3600000;
@@ -114,7 +214,7 @@ export async function renderTimeseries(w, body, cfg) {
         xaxisConfig.max = undefined;
     }
     else {
-        xaxisConfig.min = startTs;
+        xaxisConfig.min = alignedStartTs;
         xaxisConfig.max = endTs;
         xaxisConfig.range = undefined;
     }
@@ -124,7 +224,7 @@ export async function renderTimeseries(w, body, cfg) {
         try {
             // Verify the chart's container is still in the DOM
             const chartEl = document.getElementById('chart_' + w.id);
-            if (chartEl && chartEl.querySelector('.apexcharts-canvas')) {
+            if (!isBar && chartEl && chartEl.querySelector('.apexcharts-canvas')) {
                 existingChart.updateOptions({
                     xaxis: xaxisConfig,
                     yaxis: yAxisOpts,
@@ -132,15 +232,75 @@ export async function renderTimeseries(w, body, cfg) {
                 }, true, true);
                 return;
             }
-            // Chart container was destroyed – clean up and recreate
+            // Chart container was destroyed or it's a bar chart – clean up and recreate
             existingChart.destroy();
         }
         catch (e) { /* destroyed chart, ignore */ }
         delete DashboardStore.charts[w.id];
     }
-    body.innerHTML = '<div id="chart_' + w.id + '" style="width:100%;flex:1;min-height:0"></div>';
+    if (isBar) {
+        const durationMs = endTs - startTs;
+        const enabled = getEnabledGranularities(durationMs);
+        const btnClass = (g) => {
+            const isActive = activeGranularity === g;
+            const isGEnabled = enabled[g];
+            let cls = "px-2.5 py-0.5 text-[10px] font-semibold rounded-md transition-all ";
+            if (!isGEnabled) {
+                cls += "text-slate-600 opacity-25 cursor-not-allowed pointer-events-none border border-transparent";
+            }
+            else if (isActive) {
+                cls += "bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-sm shadow-sky-500/5";
+            }
+            else {
+                cls += "text-slate-400 hover:text-slate-200 cursor-pointer border border-transparent";
+            }
+            return cls;
+        };
+        const modeBtnClass = (m) => {
+            const isActive = activeMode === m;
+            let cls = "px-2.5 py-0.5 text-[10px] font-semibold rounded-md transition-all ";
+            if (isActive) {
+                cls += "bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-sm shadow-sky-500/5";
+            }
+            else {
+                cls += "text-slate-400 hover:text-slate-200 cursor-pointer border border-transparent";
+            }
+            return cls;
+        };
+        body.innerHTML = `
+            <div class="bar-chart-controls flex items-center justify-between mb-2 px-1 text-xs text-slate-400 gap-4 flex-wrap">
+                <!-- Granularity Group -->
+                <div class="flex items-center gap-2">
+                    <span class="text-[0.65rem] text-slate-500 font-bold uppercase tracking-wider">Granularity:</span>
+                    <div class="inline-flex rounded-lg p-0.5 bg-slate-950/80 border border-slate-800/80 backdrop-blur-md">
+                        <button class="${btnClass('hour')}" onclick="changeBarGranularity('${w.id}', 'hour')">Hour</button>
+                        <button class="${btnClass('day')}" onclick="changeBarGranularity('${w.id}', 'day')">Day</button>
+                        <button class="${btnClass('month')}" onclick="changeBarGranularity('${w.id}', 'month')">Month</button>
+                        <button class="${btnClass('year')}" onclick="changeBarGranularity('${w.id}', 'year')">Year</button>
+                    </div>
+                </div>
+                <!-- Mode Group -->
+                <div class="flex items-center gap-2">
+                    <span class="text-[0.65rem] text-slate-500 font-bold uppercase tracking-wider">Mode:</span>
+                    <div class="inline-flex rounded-lg p-0.5 bg-slate-950/80 border border-slate-800/80 backdrop-blur-md">
+                        <button class="${modeBtnClass('max')}" title="Max in Period" onclick="changeBarMode('${w.id}', 'max')">Max</button>
+                        <button class="${modeBtnClass('diff')}" title="Difference in Period (for meter readings)" onclick="changeBarMode('${w.id}', 'diff')">Diff</button>
+                    </div>
+                </div>
+            </div>
+            <div style="position:relative; flex:1; min-height:0; width:100%">
+                <div id="chart_${w.id}" style="position:absolute; inset:0"></div>
+            </div>
+        `;
+    }
+    else {
+        body.innerHTML = `
+            <div style="position:relative; flex:1; min-height:0; width:100%">
+                <div id="chart_${w.id}" style="position:absolute; inset:0"></div>
+            </div>
+        `;
+    }
     // ── Chart config adapts to series count ─────────────────────────
-    const isBar = cfg.chartType === 'bar';
     const options = {
         series: series,
         chart: {
@@ -156,12 +316,17 @@ export async function renderTimeseries(w, body, cfg) {
         colors: usedColors,
         stroke: {
             curve: 'straight',
-            width: many ? 1.5 : 2,
+            width: isBar ? 0 : (many ? 1.5 : 2),
         },
-        fill: {
+        fill: isBar ? {
+            type: 'solid',
+            opacity: 0.85
+        } : {
             type: 'gradient',
             gradient: {
-                shadeIntensity: 1, opacityFrom: many ? 0.08 : 0.45, opacityTo: 0.05,
+                shadeIntensity: 1,
+                opacityFrom: many ? 0.08 : 0.45,
+                opacityTo: 0.05,
                 stops: [0, 90, 100]
             }
         },
@@ -170,7 +335,7 @@ export async function renderTimeseries(w, body, cfg) {
             show: true, borderColor: 'rgba(255,255,255,0.05)',
             xaxis: { lines: { show: false } },
             yaxis: { lines: { show: true } },
-            padding: { top: 0, right: 0, bottom: 0, left: 10 }
+            padding: { top: 0, right: 0, bottom: 12, left: 10 }
         },
         xaxis: xaxisConfig,
         yaxis: yAxisOpts,
@@ -194,23 +359,33 @@ export async function renderTimeseries(w, body, cfg) {
             y: { formatter: (v) => window.formatNumber(v, 2) },
         }
     };
-    const chartEl = document.getElementById('chart_' + w.id);
-    if (!chartEl)
-        return; // safety: body may have been replaced by another widget
-    const chart = new window.ApexCharts(chartEl, options);
-    DashboardStore.charts[w.id] = chart; // register BEFORE render to prevent concurrent creation
-    chart.render().then(() => {
-        setTimeout(() => {
-            chart.windowResize?.();
-            window.dispatchEvent(new Event('resize'));
-        }, 100);
-        setTimeout(() => {
-            chart.windowResize?.();
-            window.dispatchEvent(new Event('resize'));
-        }, 500);
-    }).catch((e) => {
-        console.error('Chart render failed for', w.id, e);
-        delete DashboardStore.charts[w.id];
+    if (isBar) {
+        options.plotOptions = {
+            bar: {
+                columnWidth: '75%',
+                borderRadius: 4
+            }
+        };
+    }
+    requestAnimationFrame(() => {
+        const chartEl = document.getElementById('chart_' + w.id);
+        if (!chartEl)
+            return; // safety: body may have been replaced by another widget
+        const chart = new window.ApexCharts(chartEl, options);
+        DashboardStore.charts[w.id] = chart; // register BEFORE render to prevent concurrent creation
+        chart.render().then(() => {
+            setTimeout(() => {
+                chart.windowResize?.();
+                window.dispatchEvent(new Event('resize'));
+            }, 100);
+            setTimeout(() => {
+                chart.windowResize?.();
+                window.dispatchEvent(new Event('resize'));
+            }, 500);
+        }).catch((e) => {
+            console.error('Chart render failed for', w.id, e);
+            delete DashboardStore.charts[w.id];
+        });
     });
 }
 export function appendTimeseriesData(w, newData) {
@@ -218,6 +393,8 @@ export function appendTimeseriesData(w, newData) {
     if (!chart)
         return;
     const cfg = w.config || {};
+    if (cfg.chartType === 'bar')
+        return;
     const keys = cfg.keys || [];
     if (!keys.length)
         return;
@@ -303,5 +480,6 @@ export function getTimeRange() {
 Object.assign(window, {
     renderAllWidgets, addWidgetToGrid, renderWidgetContent, renderTimeseries, appendTimeseriesData,
     renderLatestValues, updateLatestValues, renderSingleValue, updateSingleValue,
-    miniSparkSvg, getTimeRange
+    miniSparkSvg, getTimeRange,
+    getEnabledGranularities, alignTimestampToGranularity, changeBarGranularity, changeBarMode
 });

@@ -104,7 +104,7 @@ export function LatestValuesWidget({ keys, allKeysMeta }: LatestValuesWidgetProp
                         const isNum = !isNaN(numVal);
 
                         return (
-                            <tr key={key}>
+                            <tr key={key} class="cursor-pointer" onClick={() => (window as any).openTelemetryDetails(key)}>
                                 <td>
                                     <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: color, marginRight: '0.5rem' }}></span>
                                     {(window as any).friendlyName ? (window as any).friendlyName(key) : key}

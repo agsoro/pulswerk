@@ -29,168 +29,182 @@
 <body class="bg-slate-900 text-slate-50 flex min-h-screen font-sans antialiased">
     <div id="app" class="w-full flex min-h-screen"></div>
 
-    <!-- History Modal -->
-    <div class="modal-overlay" id="historyModal" data-testid="history-modal">
-        <div class="modal-content animate-fade-in">
-            <div class="modal-header">
-                <div>
-                    <div class="modal-path" id="chartPath"></div>
-                    <h2 id="chartTitle" data-i18n="history">History</h2>
-                    <div class="flex gap-4 items-center">
-                        <div class="text-xs text-slate-400 font-mono" id="chartMeta"></div>
-                        <div class="flex items-baseline gap-1.5">
-                            <div id="chartLiveValue"
-                                 class="font-bold text-sky-400 bg-sky-400/10 px-2 py-0.5 rounded text-sm">---</div>
-                            <div class="edit-unit font-semibold text-slate-400 text-sm" id="chartUnit"></div>
+    <!-- Telemetry Details Modal -->
+    <div class="modal-overlay" id="telemetryDetailsModal" data-testid="telemetry-details-modal">
+        <div class="modal-content animate-fade-in w-[1200px] max-w-[98vw] h-[90vh] flex flex-col">
+            <!-- Modal Header -->
+            <div class="modal-header shrink-0">
+                <div class="flex-1 min-w-0 pr-8">
+                    <div class="modal-path" id="telPath"></div>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <h2 id="telTitle" class="truncate leading-snug">Telemetry Details</h2>
+                        <button class="btn-icon star-btn text-slate-400 hover:text-amber-400" id="telFavBtn" title="Favorite">
+                            <i class="far fa-star"></i>
+                        </button>
+                    </div>
+                    <div class="text-xs text-slate-400 font-mono truncate mt-1" id="telMeta"></div>
+                </div>
+                <button class="close-modal" onclick="closeTelemetryDetails()">&times;</button>
+            </div>
+
+            <!-- Modal Content (Full Width, Sidebar Removed) -->
+            <div class="flex-1 flex flex-col min-h-0">
+                <!-- Tab Header Controls -->
+                <div class="flex gap-2 border-b border-white/5 pb-2 mb-4 shrink-0" id="telTabHeader">
+                    <button id="tabBtn_trend" class="px-4 py-2 text-xs font-semibold rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20" onclick="switchTelemetryTab('trend')">Trend &amp; Control</button>
+                    <button id="tabBtn_properties" class="px-4 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" onclick="switchTelemetryTab('properties')">Extended Properties</button>
+                    <button id="tabBtn_schedule" class="px-4 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" style="display:none" onclick="switchTelemetryTab('schedule')">Switching Schedule</button>
+                </div>
+
+                <!-- Tab Contents Container -->
+                <div class="flex-1 overflow-y-auto min-h-0 pr-2">
+                    <!-- TAB 1: Trend & Control -->
+                    <div id="tabContent_trend" class="flex flex-col gap-6 h-full">
+                        <!-- Integrated Value & Inline Edit Controls -->
+                        <div class="glass rounded-xl p-5 border border-white/5 flex flex-col justify-between shrink-0">
+                            <div class="flex flex-col gap-3">
+                                <span class="text-xs text-slate-500 uppercase tracking-wider font-bold block">Telemetry Value</span>
+                                
+                                <!-- View Mode Row -->
+                                <div id="telValueViewMode" class="flex items-center justify-between">
+                                    <div class="flex items-baseline gap-1.5">
+                                        <span id="telLiveValue" class="text-4xl font-extrabold text-sky-400 tracking-tight tabular-nums">---</span>
+                                        <span id="telUnitLabel" class="text-sm font-bold text-slate-400 uppercase tracking-wider"></span>
+                                    </div>
+                                    <button type="button" id="telInlineEditStartBtn" class="px-4 py-2 bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-extrabold rounded-lg shadow-md shadow-sky-950/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 auth-write-only flex items-center gap-1.5 uppercase tracking-wider" onclick="startTelemetryEdit()">
+                                        <i class="fas fa-edit text-[10px]"></i> <span>Edit Value</span>
+                                    </button>
+                                </div>
+
+                                <!-- Edit Mode Row -->
+                                <div id="telValueEditMode" class="hidden flex items-center justify-between gap-4 flex-wrap bg-slate-900/60 border border-white/[0.06] p-4 rounded-xl shadow-lg shadow-black/30 backdrop-blur-md transition-all duration-300">
+                                    <div class="flex items-center gap-3">
+                                        <!-- Stepper Input Group (for analog) -->
+                                        <div id="inlineStepperGroup" class="flex items-center gap-2.5" style="display:none">
+                                            <button type="button" class="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all shadow-sm" onclick="step(-1)">
+                                                <i class="fas fa-minus text-[10px]"></i>
+                                            </button>
+                                            <input type="number" id="editValue" class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 w-28 text-center font-mono font-extrabold text-white text-base focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-inner">
+                                            <button type="button" class="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all shadow-sm" onclick="step(1)">
+                                                <i class="fas fa-plus text-[10px]"></i>
+                                            </button>
+                                            <span id="telEditUnitLabel" class="text-sm font-bold text-slate-400 ml-1 uppercase tracking-wider"></span>
+                                        </div>
+
+                                        <!-- Dropdown select Group (for enums) -->
+                                        <div id="inlineEnumGroup" style="display:none">
+                                            <select id="enumSelect" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-md cursor-pointer"></select>
+                                        </div>
+
+                                        <!-- Boolean Switch Group (for binaries) -->
+                                        <div id="inlineBoolGroup" class="flex items-center gap-4 bg-slate-950/40 border border-white/5 px-4 py-1.5 rounded-lg" style="display:none">
+                                            <span class="text-xs font-black tracking-widest text-slate-400 uppercase min-w-[2.5rem] text-center" id="boolLabel">OFF</span>
+                                            <label class="bool-toggle">
+                                                <input type="checkbox" id="boolInput" onchange="updateBoolLabel()">
+                                                <span class="bool-toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Action Buttons (Save/Cancel) -->
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" id="saveBtn" class="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-lg shadow-md shadow-emerald-950/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 flex items-center gap-1.5 uppercase tracking-wider" onclick="submitEdit(event)">
+                                            <i class="fas fa-save text-[10px]"></i> <span>Save Changes</span>
+                                        </button>
+                                        <button type="button" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-white/5 text-slate-300 hover:text-white text-xs font-extrabold rounded-lg hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 uppercase tracking-wider" onclick="cancelTelemetryEdit()">
+                                            <span>Cancel</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Status msg -->
+                                <div id="editStatus" class="status-msg"></div>
+                            </div>
+                        </div>
+
+                            <!-- Trend / History Chart Panel -->
+                            <div class="glass rounded-xl p-5 border border-white/5 flex flex-col gap-4 flex-1 min-h-[300px]">
+                                <div class="flex flex-wrap justify-between items-center gap-4 shrink-0">
+                                    <span class="text-xs text-slate-500 uppercase tracking-wider font-bold">Trend / History</span>
+                                    <div class="flex items-center gap-4">
+                                        <div id="historyTwContainer"></div>
+                                        <div id="chartLoading" class="hidden items-center gap-2 text-sky-400 text-xs">
+                                            <i class="fas fa-spinner fa-spin"></i> <span>Loading...</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="chart-container flex-1 min-h-0 bg-black/10 rounded-lg p-2">
+                                    <div id="historyChart" style="height: 100%"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB 2: Properties -->
+                        <div id="tabContent_properties" class="h-full" style="display:none">
+                            <div class="glass rounded-xl p-5 border border-white/5 flex flex-col h-full min-h-[300px]">
+                                <span class="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-4">Extended Properties</span>
+                                
+                                <div id="propsLoading" class="flex-1 flex flex-col items-center justify-center text-sky-400 gap-2 p-4">
+                                    <i class="fas fa-spinner fa-spin text-2xl"></i>
+                                    <span class="text-xs">Loading properties...</span>
+                                </div>
+
+                                <div id="propsEmpty" class="hidden flex-1 flex flex-col items-center justify-center text-slate-500 gap-2 p-4">
+                                    <i class="fas fa-info-circle text-2xl opacity-30"></i>
+                                    <span class="text-xs">No extended properties found.</span>
+                                </div>
+
+                                <div id="propsTable" class="overflow-y-auto hidden flex-1 border border-white/5 rounded-lg">
+                                    <table class="props-table">
+                                        <thead>
+                                            <tr class="text-[0.65rem] uppercase tracking-wider text-slate-500 font-bold bg-black/20">
+                                                <th class="p-2 border-b border-white/5">Property</th>
+                                                <th class="p-2 border-b border-white/5">Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="propsBody" class="text-xs"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB 3: Weekly Schedule (Conditional) -->
+                        <div id="tabContent_schedule" class="h-full" style="display:none">
+                            <div id="telScheduleSection" class="glass rounded-xl p-5 border border-white/5 flex flex-col gap-4 h-full min-h-[300px]">
+                                <div class="flex justify-between items-center border-b border-white/5 pb-2 shrink-0">
+                                    <span class="text-xs text-slate-500 uppercase tracking-wider font-bold">Weekly Switching Schedule</span>
+                                    <button class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded transition-colors auth-write-only"
+                                            id="btnEditSchedule" onclick="toggleScheduleEdit(true)">
+                                        <i class="fas fa-edit mr-1"></i> <span>Edit</span>
+                                    </button>
+                                </div>
+
+                                <div id="scheduleLoading" class="p-6 flex flex-col items-center justify-center text-sky-400 gap-2">
+                                    <i class="fas fa-spinner fa-spin text-2xl"></i>
+                                    <span class="text-xs">Loading Schedule...</span>
+                                </div>
+
+                                <div id="scheduleView" class="hidden flex-1 flex flex-col min-h-0 overflow-y-auto">
+                                    <div class="grid grid-cols-1 gap-2" id="scheduleGrid"></div>
+
+                                    <div class="status-msg mt-3" id="scheduleStatus"></div>
+
+                                    <div id="editScheduleActions" class="hidden flex justify-end gap-2 mt-4 pt-3 border-t border-white/5 shrink-0">
+                                        <button class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded transition-colors"
+                                                onclick="toggleScheduleEdit(false)">
+                                            <span>Cancel</span>
+                                        </button>
+                                        <button id="scheduleSaveBtn"
+                                                class="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-xs rounded transition-colors"
+                                                onclick="saveSchedule()">
+                                            <i class="fas fa-save mr-1"></i> <span>Save</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <button class="close-modal" onclick="closeHistory()">&times;</button>
-            </div>
-            
-            <div class="chart-controls">
-                <div id="historyTwContainer"></div>
-                <div id="chartLoading" class="hidden items-center gap-2 text-sky-400">
-                    <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading">Loading...</span>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <div id="historyChart" style="height: 100%"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Edit Modal -->
-    <div class="modal-overlay" id="editModal" data-testid="edit-modal">
-        <div class="modal-content edit-modal-content animate-fade-in">
-            <div class="modal-header">
-                <div>
-                    <div class="modal-path" id="editPath"></div>
-                    <h2 id="editTitle" data-i18n="edit_value">Edit Value</h2>
-                    <div class="text-xs text-slate-400 font-mono" id="editMeta"></div>
-                </div>
-                <button class="close-modal" onclick="closeEdit()">&times;</button>
-            </div>
-
-            <div class="edit-form">
-                <div class="input-group" id="stepperGroup" style="display:none">
-                    <label data-i18n="new_value">New Value</label>
-                    <div class="number-stepper">
-                        <button class="stepper-btn" onclick="step(-1)">−</button>
-                        <input type="number" id="editValue" class="stepper-input">
-                        <button class="stepper-btn" onclick="step(1)">+</button>
-                    </div>
-                    <div class="text-right text-xs text-slate-500 font-medium mt-1">
-                        <span data-i18n="current_value">Current</span>: <span id="currentVal"
-                                                                              class="text-slate-300">---</span> <span id="editUnitLabel"></span>
-                    </div>
-                </div>
-
-                <div class="input-group" id="enumGroup" style="display:none">
-                    <label data-i18n="new_value">New Value</label>
-                    <select id="enumSelect" class="enum-select"></select>
-                </div>
-
-                <div class="input-group" id="boolGroup" style="display:none">
-                    <div class="bool-toggle-wrap">
-                        <div class="bool-toggle-label" id="boolLabel">OFF</div>
-                        <label class="bool-toggle">
-                            <input type="checkbox" id="boolInput" onchange="updateBoolLabel()">
-                            <span class="bool-toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div id="editStatus" class="status-msg"></div>
-
-                <button type="button" class="save-btn auth-write-only" id="saveBtn" onclick="submitEdit(event)">
-                    <i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Properties Modal -->
-    <div class="modal-overlay" id="propsModal" data-testid="props-modal">
-        <div class="modal-content animate-fade-in">
-            <div class="modal-header">
-                <div>
-                    <div class="modal-path" id="propsPath"></div>
-                    <h2 id="propsTitle" data-i18n="properties">Properties</h2>
-                    <div class="text-xs text-slate-400 font-mono" id="propsMeta"></div>
-                </div>
-                <button class="close-modal" onclick="closeProperties()">&times;</button>
-            </div>
-
-            <div id="propsLoading" class="flex-1 flex flex-col items-center justify-center text-sky-400 gap-3">
-                <i class="fas fa-spinner fa-spin text-4xl"></i>
-                <span data-i18n="loading">Loading...</span>
-            </div>
-
-            <div id="propsEmpty" class="hidden flex-1 flex flex-col items-center justify-center text-slate-400 gap-3">
-                <i class="fas fa-search text-4xl opacity-20"></i>
-                <span data-i18n="no_properties_found">No extended properties found.</span>
-            </div>
-
-            <div id="propsTable" class="props-table-container hidden">
-                <table class="props-table">
-                    <thead>
-                        <tr>
-                            <th data-i18n="prop_name">Property</th>
-                            <th data-i18n="prop_value">Value</th>
-                        </tr>
-                    </thead>
-                    <tbody id="propsBody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- Schedule Modal -->
-    <div class="modal-overlay" id="scheduleModal" data-testid="schedule-modal">
-        <div class="modal-content animate-fade-in w-[600px] max-w-[95vw]">
-            <div class="modal-header">
-                <div>
-                    <div class="modal-path" id="schedulePath"></div>
-                    <h2 data-i18n="weekly_schedule">Weekly Schedule</h2>
-                    <div class="text-xs text-slate-400 font-mono" id="scheduleMeta"></div>
-                </div>
-                <button class="close-modal" onclick="closeSchedule()">&times;</button>
-            </div>
-
-            <div id="scheduleLoading" class="p-12 flex flex-col items-center justify-center text-sky-400 gap-3">
-                <i class="fas fa-spinner fa-spin text-4xl"></i>
-                <span data-i18n="loading">Loading Schedule...</span>
-            </div>
-
-            <div id="scheduleView" class="hidden p-4">
-                <div class="flex justify-between items-center mb-4">
-                    <span class="text-xs text-slate-500 uppercase tracking-wider font-bold"
-                          data-i18n="schedule_configuration">Schedule Configuration</span>
-                    <button class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded transition-colors auth-write-only"
-                            id="btnEditSchedule" onclick="toggleScheduleEdit(true)">
-                        <i class="fas fa-edit mr-1"></i> <span data-i18n="edit">Edit</span>
-                    </button>
-                </div>
-
-                <div class="grid grid-cols-1 gap-3" id="scheduleGrid">
-                    <!-- Day rows injected here -->
-                </div>
-
-                <div class="status-msg mt-4" id="scheduleStatus"></div>
-
-                <div id="editScheduleActions" class="hidden flex justify-end gap-2 mt-4 pt-4 border-t border-white/5">
-                    <button
-                        class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded transition-colors"
-                        onclick="toggleScheduleEdit(false)">
-                        <span data-i18n="cancel">Cancel</span>
-                    </button>
-                    <button id="scheduleSaveBtn"
-                            class="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-xs rounded transition-colors"
-                            onclick="saveSchedule()">
-                        <i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>
-                    </button>
                 </div>
             </div>
         </div>

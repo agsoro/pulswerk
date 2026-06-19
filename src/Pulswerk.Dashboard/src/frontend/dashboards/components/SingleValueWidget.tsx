@@ -61,11 +61,11 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }: SingleValu
     const friendlyName = (window as any).friendlyName ? (window as any).friendlyName(keyName) : keyName;
 
     return (
-        <div class="sv-card">
+        <div class="sv-card cursor-pointer hover:border-sky-500/55 transition-all" onClick={() => (window as any).openTelemetryDetails(keyName)}>
             <div class="sv-card-path">
                 {pp.length > 0 ? pp.map((p: any, i: number) => (
                     <span key={p.id}>
-                        <a href={`/plswk/Assets?node=${p.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                        <a href={`/plswk/Assets?node=${p.id}`} style={{ color: 'inherit', textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
                             {p.name}
                         </a>
                         {i < pp.length - 1 && <i class="fas fa-chevron-right" style={{ margin: '0 0.4rem', fontSize: '0.55rem', opacity: 0.4 }}></i>}
@@ -75,7 +75,7 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }: SingleValu
             <div class="sv-card-body">
                 <div class="sv-card-icon" dangerouslySetInnerHTML={{ __html: iconHtml }}></div>
                 <div class="sv-card-info">
-                    <a href={`/plswk/Assets?node=${meta.parentId || ''}`} class="sv-card-name" style={{ textDecoration: 'none', color: '#fff', display: 'block' }}>
+                    <a href={`/plswk/Assets?node=${meta.parentId || ''}`} class="sv-card-name" style={{ textDecoration: 'none', color: '#fff', display: 'block' }} onClick={(e) => e.stopPropagation()}>
                         {meta.name || friendlyName}
                     </a>
                     <div class="sv-card-fullname">{meta.fullName || keyName}</div>
@@ -84,13 +84,6 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }: SingleValu
                     <span class="sv-card-val" id={`svv_${widgetId}`} data-key={keyName}>{val}</span>
                     <span class="sv-card-units">{meta.units || ''}</span>
                 </div>
-            </div>
-            <div class="sv-card-actions">
-                <button class="btn-icon" title="Trend" onClick={() => (window as any).openHistory(keyName)}><i class="fas fa-chart-area"></i></button>
-                {meta.isWritable && (
-                    <button class="btn-icon" title="Edit Value" onClick={() => (window as any).openEdit(keyName)}><i class="fas fa-pen"></i></button>
-                )}
-                <button class="btn-icon" title="Properties" onClick={() => (window as any).openProperties(keyName)}><i class="fas fa-cog"></i></button>
             </div>
         </div>
     );

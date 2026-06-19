@@ -2,6 +2,7 @@
 let _currentHistoryKey: string | null = null;
 let _currentEditKey: string | null = null;
 let _currentPropsKey: string | null = null;
+let _currentScheduleKey: string | null = null;
 let _historyChart: any = null;
 let _historyRefreshTimer: any = null;
 let _historyTw: ITimeWindowSelector | null = null; // reusable TW selector instance
@@ -10,6 +11,7 @@ Object.defineProperties(window, {
     currentHistoryKey: { get: () => _currentHistoryKey, set: (v) => { _currentHistoryKey = v; }, configurable: true },
     currentEditKey: { get: () => _currentEditKey, set: (v) => { _currentEditKey = v; }, configurable: true },
     currentPropsKey: { get: () => _currentPropsKey, set: (v) => { _currentPropsKey = v; }, configurable: true },
+    currentScheduleKey: { get: () => _currentScheduleKey, set: (v) => { _currentScheduleKey = v; }, configurable: true },
     historyChart: { get: () => _historyChart, set: (v) => { _historyChart = v; }, configurable: true },
     historyRefreshTimer: { get: () => _historyRefreshTimer, set: (v) => { _historyRefreshTimer = v; }, configurable: true },
     historyTw: { get: () => _historyTw, set: (v) => { _historyTw = v; }, configurable: true }
@@ -17,70 +19,447 @@ Object.defineProperties(window, {
 
 // Initialize TW module for history modal (once)
 function ensureHistoryTw(): void {
-    if (historyTw) return;
+    console.log("DEBUG: ensureHistoryTw() called");
+    if (historyTw) {
+        console.log("DEBUG: historyTw already exists");
+        return;
+    }
     const container = document.getElementById('historyTwContainer');
-    if (!container) return;
-    historyTw = createTimeWindowSelector(container, {
-        mode: 'realtime',
-        realtimeMs: 3600000,
-        onChange: () => reloadHistory()
-    });
-}
-
-// --- History Modal ---
-async function openHistory(key: string): Promise<void> {
-    currentHistoryKey = key;
-    ensureHistoryTw();
-    await ensureKeysMeta(key);
-    const meta = resolveKeyMeta(key);
-    const path = meta.parentPath || [];
-    
-    document.getElementById('chartTitle')!.textContent = meta.name || key;
-    document.getElementById('chartUnit')!.textContent = meta.units || '';
-    document.getElementById('chartMeta')!.textContent = key;
-    renderModalBreadcrumb('chartPath', path);
-    
-    document.getElementById('historyModal')!.style.display = 'flex';
-    
-    // Fetch live value from API
-    document.getElementById('chartLiveValue')!.textContent = '---';
+    if (!container) {
+        console.warn("DEBUG: historyTwContainer element not found!");
+        return;
+    }
+    console.log("DEBUG: historyTwContainer found, creating time window selector. createTimeWindowSelector is:", typeof createTimeWindowSelector);
     try {
-        const data = await fetchLatestValues(key);
-        const raw = data?.[key];
-        if (raw != null) {
-            document.getElementById('chartLiveValue')!.textContent = 
-                typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
-        }
-    } catch(e) { /* non-critical */ }
-    
-    await reloadHistory();
-    startHistoryRefresh();
+        historyTw = createTimeWindowSelector(container, {
+            mode: 'realtime',
+            realtimeMs: 3600000,
+            onChange: () => reloadHistory()
+        });
+        console.log("DEBUG: time window selector created successfully");
+    } catch (e) {
+        console.error("DEBUG: createTimeWindowSelector threw exception:", e);
+        throw e;
+    }
 }
 
-function closeHistory(): void {
+// --- Tab Switching inside Details Modal ---
+function switchTelemetryTab(tabName: 'trend' | 'properties' | 'schedule'): void {
+    const trendContent = document.getElementById('tabContent_trend');
+    const propsContent = document.getElementById('tabContent_properties');
+    const schedContent = document.getElementById('tabContent_schedule');
+    
+    if (trendContent) trendContent.style.display = 'none';
+    if (propsContent) propsContent.style.display = 'none';
+    if (schedContent) schedContent.style.display = 'none';
+    
+    // Reset all tab button styles to inactive
+    ['trend', 'properties', 'schedule'].forEach(t => {
+        const btn = document.getElementById(`tabBtn_${t}`);
+        if (btn) {
+            btn.className = "px-4 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent";
+        }
+    });
+    
+    // Show active tab content
+    const activeContent = document.getElementById(`tabContent_${tabName}`);
+    if (activeContent) activeContent.style.display = 'flex';
+    
+    // Set active tab button style
+    const activeBtn = document.getElementById(`tabBtn_${tabName}`);
+    if (activeBtn) {
+        activeBtn.className = "px-4 py-2 text-xs font-semibold rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20";
+    }
+}
+
+// --- Unified Telemetry Details Modal ---
+async function openTelemetryDetails(key: string): Promise<void> {
+    console.log("DEBUG: openTelemetryDetails called with key:", key);
+    try {
+        currentHistoryKey = key;
+        currentEditKey = key;
+        currentPropsKey = key;
+        
+        console.log("DEBUG: calling ensureHistoryTw()");
+        ensureHistoryTw();
+        
+        // Load ALL keys metadata to populate the explorer sidebar fully
+        console.log("DEBUG: calling ensureKeysMeta()");
+        await ensureKeysMeta();
+        
+        console.log("DEBUG: resolving key meta");
+        const meta = resolveKeyMeta(key);
+        const path = meta.parentPath || [];
+        const enums = meta.enumValues || null;
+        const type = meta.type || '';
+        const isScheduleObj = type === 'OBJECT_SCHEDULE';
+        
+        console.log("DEBUG: meta resolved:", meta);
+        
+        // Reset active tab to Trend & Control on open
+        switchTelemetryTab('trend');
+        
+        // Toggle switching schedule tab button visibility
+        const scheduleTabBtn = document.getElementById('tabBtn_schedule');
+        if (scheduleTabBtn) {
+            scheduleTabBtn.style.display = isScheduleObj ? 'block' : 'none';
+        }
+        
+        // Render Sidebar explorer list
+        console.log("DEBUG: rendering sidebar list");
+        renderTelemetrySidebarList(key);
+        
+        // Set Header
+        const fn = (window as any).friendlyName;
+        const telTitle = document.getElementById('telTitle');
+        if (telTitle) telTitle.textContent = (fn ? fn(key) : null) || meta.name || key;
+        const telMeta = document.getElementById('telMeta');
+        if (telMeta) telMeta.textContent = meta.fullName || key;
+        const telUnitLabel = document.getElementById('telUnitLabel');
+        if (telUnitLabel) telUnitLabel.textContent = meta.units || '';
+        renderModalBreadcrumb('telPath', path);
+        
+        // Setup Favorite Star
+        const favBtn = document.getElementById('telFavBtn') as HTMLElement;
+        if (favBtn) {
+            if ((window as any).pwCanEditFavorites) {
+                favBtn.style.display = 'inline-flex';
+                const isFav = (window as any).pw_fav?.get('deziko_favorites')?.includes(key);
+                const starIcon = favBtn.querySelector('i');
+                if (starIcon) {
+                    if (isFav) {
+                        starIcon.className = 'fas fa-star text-amber-400';
+                        favBtn.classList.add('active');
+                    } else {
+                        starIcon.className = 'far fa-star text-slate-400';
+                        favBtn.classList.remove('active');
+                    }
+                }
+                favBtn.onclick = () => {
+                    if (typeof (window as any).toggleFavorite === 'function') {
+                        (window as any).toggleFavorite(key);
+                        // Update icon after toggle
+                        const nowFav = (window as any).pw_fav?.get('deziko_favorites')?.includes(key);
+                        const dynamicStarIcon = favBtn.querySelector('i');
+                        if (dynamicStarIcon) {
+                            if (nowFav) {
+                                dynamicStarIcon.className = 'fas fa-star text-amber-400';
+                                favBtn.classList.add('active');
+                            } else {
+                                dynamicStarIcon.className = 'far fa-star text-slate-400';
+                                favBtn.classList.remove('active');
+                            }
+                        }
+                        
+                        // Re-render sidebar to update the star if necessary, but keep selection
+                        renderTelemetrySidebarList(key);
+                    }
+                };
+            } else {
+                favBtn.style.display = 'none';
+            }
+        }
+        
+        // Hide all input groups by default
+        const stepperGroup = document.getElementById('inlineStepperGroup');
+        if (stepperGroup) stepperGroup.style.display = 'none';
+        const enumGroup = document.getElementById('inlineEnumGroup');
+        if (enumGroup) enumGroup.style.display = 'none';
+        const boolGroup = document.getElementById('inlineBoolGroup');
+        if (boolGroup) boolGroup.style.display = 'none';
+        
+        // Hide edit mode by default, show view mode
+        const viewMode = document.getElementById('telValueViewMode');
+        if (viewMode) viewMode.classList.remove('hidden');
+        const editMode = document.getElementById('telValueEditMode');
+        if (editMode) editMode.classList.add('hidden');
+        
+        const editStartBtn = document.getElementById('telInlineEditStartBtn');
+        if (editStartBtn) {
+            editStartBtn.style.display = (meta.isWritable && !isScheduleObj) ? 'inline-flex' : 'none';
+        }
+        
+        const status = document.getElementById('editStatus');
+        if (status) {
+            status.textContent = '';
+            status.className = 'status-msg';
+        }
+        
+        // Fetch live value
+        const telLiveValue = document.getElementById('telLiveValue');
+        if (telLiveValue) telLiveValue.textContent = '---';
+        
+        let currentVal = '---';
+        try {
+            console.log("DEBUG: fetching latest values");
+            const data = await fetchLatestValues(key);
+            const raw = data?.[key];
+            if (raw != null) {
+                currentVal = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, type) : String(raw);
+                if (telLiveValue) telLiveValue.textContent = currentVal;
+            }
+        } catch(e) { console.error("DEBUG: fetchLatestValues failed", e); }
+        
+        // Setup Write Controls if Writable
+        if (meta.isWritable && !isScheduleObj) {
+            if (enums && Object.keys(enums).length > 0) {
+                const sel = document.getElementById('enumSelect') as HTMLSelectElement;
+                if (sel) {
+                    sel.innerHTML = '';
+                    for (const [v, label] of Object.entries(enums)) {
+                        const opt = document.createElement('option');
+                        opt.value = v;
+                        opt.textContent = label;
+                        sel.appendChild(opt);
+                    }
+                    const matchOpt = Array.from(sel.options).find(o => o.textContent === currentVal);
+                    if (matchOpt) sel.value = matchOpt.value;
+                    else sel.value = currentVal;
+                }
+                if (enumGroup) enumGroup.style.display = 'block';
+            } else if (type && PulswerkValue.isBinary(type)) {
+                const input = document.getElementById('boolInput') as HTMLInputElement;
+                if (input) {
+                    input.checked = PulswerkValue.parseDisplay(currentVal, type) !== 0;
+                    updateBoolLabel();
+                }
+                if (boolGroup) boolGroup.style.display = 'flex';
+            } else {
+                const editInput = document.getElementById('editValue') as HTMLInputElement;
+                if (editInput) {
+                    editInput.value = String(parseFloat(currentVal) || 0);
+                    const units = (meta.units || '').trim().toLowerCase();
+                    if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
+                        editInput.step = '0.5';
+                    } else {
+                        editInput.step = '1';
+                    }
+                }
+                const editUnitLabel = document.getElementById('telEditUnitLabel');
+                if (editUnitLabel) {
+                    editUnitLabel.textContent = meta.units || '';
+                }
+                if (stepperGroup) stepperGroup.style.display = 'flex';
+            }
+        }
+        
+        // Load BACnet Properties
+        console.log("DEBUG: loading properties");
+        const props = await loadPropsForDetails(key);
+        
+        // Load Schedule if Schedule object
+        if (isScheduleObj) {
+            console.log("DEBUG: loading schedule");
+            await loadScheduleForDetails(key, props);
+        }
+        
+        // Open Modal
+        console.log("DEBUG: opening modal");
+        const detailsModal = document.getElementById('telemetryDetailsModal');
+        if (detailsModal) {
+            detailsModal.style.display = 'flex';
+            console.log("DEBUG: modal display set to flex successfully");
+        } else {
+            console.error("DEBUG: telemetryDetailsModal element not found in DOM!");
+        }
+        
+        // Load History Chart
+        console.log("DEBUG: reloading history");
+        await reloadHistory();
+        console.log("DEBUG: starting history refresh");
+        startHistoryRefresh();
+    } catch (err: any) {
+        console.error("DEBUG: openTelemetryDetails caught error:", err);
+        try {
+            fetch("/plswk/api/client-error", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    msg: "DEBUG: openTelemetryDetails caught: " + String(err),
+                    source: "modals.ts",
+                    line: 0,
+                    col: 0,
+                    stack: String(err?.stack || "")
+                })
+            }).catch(() => {});
+        } catch (e) {}
+    }
+}Location: openTelemetryDetails
+
+function closeTelemetryDetails(): void {
     stopHistoryRefresh();
-    document.getElementById('historyModal')!.style.display = 'none';
+    const detailsModal = document.getElementById('telemetryDetailsModal');
+    if (detailsModal) detailsModal.style.display = 'none';
     currentHistoryKey = null;
+    currentEditKey = null;
+    currentPropsKey = null;
+    currentScheduleKey = null;
+    
+    // Cleanup Chart
     if (historyChart) {
         historyChart.destroy();
         historyChart = null;
     }
     const container = document.getElementById('historyChart');
     if (container) container.innerHTML = '';
-    document.getElementById('chartTitle')!.textContent = '';
-    document.getElementById('chartUnit')!.textContent = '';
-    document.getElementById('chartMeta')!.textContent = '';
-    document.getElementById('chartLiveValue')!.textContent = '---';
-    const pathEl = document.getElementById('chartPath');
+    
+    // Clear elements
+    const telTitle = document.getElementById('telTitle');
+    if (telTitle) telTitle.textContent = 'Telemetry Details';
+    const telUnitLabel = document.getElementById('telUnitLabel');
+    if (telUnitLabel) telUnitLabel.textContent = '';
+    const telMeta = document.getElementById('telMeta');
+    if (telMeta) telMeta.textContent = '';
+    const telLiveValue = document.getElementById('telLiveValue');
+    if (telLiveValue) telLiveValue.textContent = '---';
+    
+    const pathEl = document.getElementById('telPath');
     if (pathEl) pathEl.innerHTML = '';
+    
+    // Reset properties table
+    const propsBody = document.getElementById('propsBody');
+    if (propsBody) propsBody.innerHTML = '';
+    const propsTable = document.getElementById('propsTable');
+    if (propsTable) propsTable.classList.add('hidden');
+    const propsEmpty = document.getElementById('propsEmpty');
+    if (propsEmpty) propsEmpty.classList.add('hidden');
+    
+    // Reset schedule view
+    isEditingSchedule = false;
+    scheduleValueType = 'real';
+    scheduleStates = null;
+    const scheduleGrid = document.getElementById('scheduleGrid');
+    if (scheduleGrid) scheduleGrid.innerHTML = '';
+    
+    const status = document.getElementById('scheduleStatus');
+    if (status) { status.textContent = ''; status.className = 'status-msg'; }
+
+    // Clear search query in sidebar
+    const searchInput = document.getElementById('telSidebarSearch') as HTMLInputElement;
+    if (searchInput) searchInput.value = '';
+    const listContainer = document.getElementById('telSidebarList');
+    if (listContainer) listContainer.innerHTML = '';
+    
+    // Reset active tab button
+    switchTelemetryTab('trend');
 }
 
+// --- Telemetry Sidebar List Rendering ---
+function renderTelemetrySidebarList(activeKey: string): void {
+    const listContainer = document.getElementById('telSidebarList');
+    if (!listContainer) return;
+    
+    // Sort allKeys alphabetically by friendly name
+    const sortedKeys = [...allKeys].sort((a, b) => {
+        const nameA = a.name || a.key;
+        const nameB = b.name || b.key;
+        return nameA.localeCompare(nameB);
+    });
+    
+    listContainer.innerHTML = '';
+    
+    sortedKeys.forEach(k => {
+        const isSelected = k.key === activeKey;
+        const isFav = (window as any).pw_fav?.get('deziko_favorites')?.includes(k.key);
+        
+        const item = document.createElement('div');
+        item.className = `flex items-center gap-2 p-2 cursor-pointer rounded-lg transition-all text-left group hover:bg-white/[0.04] ${isSelected ? 'bg-sky-500/10 border-l-2 border-sky-400 pl-1.5' : ''}`;
+        item.dataset.sidebarKey = k.key;
+        
+        const pathStr = k.parentPath?.map(p => p.name).join(' › ') || '';
+        
+        item.innerHTML = `
+            <div class="shrink-0 text-[0.7rem] ${isFav ? 'text-amber-400' : 'text-slate-600 group-hover:text-slate-400'}">
+                <i class="${isFav ? 'fas' : 'far'} fa-star"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="font-semibold text-[0.75rem] truncate transition-colors ${isSelected ? 'text-sky-400 font-bold' : 'text-slate-200 group-hover:text-sky-400'}">${k.name || k.key}</div>
+                ${pathStr ? `<div class="text-[0.62rem] text-slate-500 truncate mt-0.5">${pathStr}</div>` : ''}
+                <div class="text-[0.6rem] text-slate-600 font-mono truncate mt-0.5">${k.key}</div>
+            </div>
+        `;
+        
+        item.onclick = () => {
+            if (k.key !== activeKey) {
+                openTelemetryDetails(k.key);
+            }
+        };
+        
+        listContainer.appendChild(item);
+    });
+    
+    // Apply existing query filter
+    filterTelemetrySidebar();
+}
+
+function filterTelemetrySidebar(): void {
+    const searchInput = document.getElementById('telSidebarSearch') as HTMLInputElement;
+    if (!searchInput) return;
+    const query = searchInput.value.toLowerCase().trim();
+    
+    const listContainer = document.getElementById('telSidebarList');
+    if (!listContainer) return;
+    
+    const items = listContainer.children;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i] as HTMLElement;
+        const key = (item.querySelector('.font-mono')?.textContent || '').toLowerCase();
+        const name = (item.querySelector('.font-semibold')?.textContent || '').toLowerCase();
+        const path = (item.querySelector('.text-\\[0\\.62rem\\]')?.textContent || '').toLowerCase();
+        
+        if (!query || key.includes(query) || name.includes(query) || path.includes(query)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    }
+}
+
+// --- Metadata Properties Helper ---
+async function loadPropsForDetails(key: string): Promise<any[]> {
+    const loader = document.getElementById('propsLoading');
+    const table = document.getElementById('propsTable');
+    const empty = document.getElementById('propsEmpty');
+    const body = document.getElementById('propsBody');
+    
+    if (loader) loader.classList.remove('hidden');
+    if (table) table.classList.add('hidden');
+    if (empty) empty.classList.add('hidden');
+    if (body) body.innerHTML = '';
+    
+    try {
+        const response = await fetch(`/plswk/api/properties?key=${encodeURIComponent(key)}`);
+        const props = await response.json();
+        
+        if (Array.isArray(props) && props.length > 0) {
+            if (body) {
+                props.forEach(p => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td class="p-2 border-b border-white/5 font-semibold text-slate-400">${p.name || ''}</td><td class="p-2 border-b border-white/5 font-mono text-slate-100">${p.value || ''}</td>`;
+                    body.appendChild(tr);
+                });
+            }
+            if (table) table.classList.remove('hidden');
+            return props;
+        } else {
+            if (empty) empty.classList.remove('hidden');
+            return [];
+        }
+    } catch (e) {
+        if (empty) empty.classList.remove('hidden');
+        console.error("Props load failed", e);
+        return [];
+    } finally {
+        if (loader) loader.classList.add('hidden');
+    }
+}
+
+// --- History reload & refresh ---
 async function reloadHistory(): Promise<void> {
     const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now(), mode: 'realtime' };
     const days = (range.endTs - range.startTs) / 86400000;
     const loader = document.getElementById('chartLoading')!;
-    loader.classList.remove('hidden');
-    loader.classList.add('flex');
+    if (loader) loader.classList.remove('hidden');
     
     try {
         let url = `/plswk/api/history?key=${encodeURIComponent(currentHistoryKey)}`;
@@ -97,15 +476,14 @@ async function reloadHistory(): Promise<void> {
     } catch (e) {
         console.error("History load failed", e);
     } finally {
-        loader.classList.remove('flex');
-        loader.classList.add('hidden');
+        if (loader) loader.classList.add('hidden');
     }
 }
 
 function renderChart(data: any[]): void {
     const options = {
         series: [{
-            name: document.getElementById('chartTitle')!.textContent,
+            name: document.getElementById('telTitle')?.textContent || 'Telemetry Details',
             data: data.map(d => ({ x: new Date(d.ts).getTime(), y: d.value }))
         }],
         chart: {
@@ -156,7 +534,6 @@ function renderChart(data: any[]): void {
     historyChart.render();
 }
 
-// --- History auto-refresh (10s) ---
 function startHistoryRefresh(): void {
     stopHistoryRefresh();
     historyRefreshTimer = setInterval(refreshHistoryData, 10_000);
@@ -171,7 +548,7 @@ function stopHistoryRefresh(): void {
 
 async function refreshHistoryData(): Promise<void> {
     if (!currentHistoryKey) return;
-    if (document.getElementById('historyModal')?.style.display !== 'flex') return;
+    if (document.getElementById('telemetryDetailsModal')?.style.display !== 'flex') return;
     const range = historyTw ? historyTw.getRange() : { startTs: Date.now() - 3600000, endTs: Date.now(), mode: 'realtime' };
     
     // In history mode, we don't auto-refresh because the data is static
@@ -193,7 +570,7 @@ async function refreshHistoryData(): Promise<void> {
         const raw = vals?.[currentHistoryKey];
         if (raw != null) {
             const meta = resolveKeyMeta(currentHistoryKey);
-            const lvEl = document.getElementById('chartLiveValue');
+            const lvEl = document.getElementById('telLiveValue');
             if (lvEl) lvEl.textContent = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
         }
 
@@ -207,94 +584,7 @@ async function refreshHistoryData(): Promise<void> {
     }
 }
 
-// --- Edit Modal ---
-async function openEdit(key: string): Promise<void> {
-    currentEditKey = key;
-    await ensureKeysMeta(key);
-    const meta = resolveKeyMeta(key);
-    const path = meta.parentPath || [];
-    const enums = meta.enumValues || null;
-    const type = meta.type || '';
-    
-    const fn = (window as any).friendlyName;
-    document.getElementById('editTitle')!.textContent = (fn ? fn(key) : null) || meta.name || key;
-    document.getElementById('editMeta')!.textContent = meta.fullName || key;
-    document.getElementById('editUnitLabel')!.textContent = meta.units || '';
-    renderModalBreadcrumb('editPath', path);
-    
-    // Hide all groups
-    document.getElementById('stepperGroup')!.style.display = 'none';
-    document.getElementById('enumGroup')!.style.display = 'none';
-    document.getElementById('boolGroup')!.style.display = 'none';
-    const status = document.getElementById('editStatus')!;
-    status.textContent = '';
-    status.className = 'status-msg';
-    
-    // Fetch current value from API
-    let currentVal = '---';
-    try {
-        const data = await fetchLatestValues(key);
-        const raw = data?.[key];
-        if (raw != null) {
-            currentVal = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
-        }
-    } catch(e) { /* use fallback */ }
-    document.getElementById('currentVal')!.textContent = currentVal;
-
-    if (enums && Object.keys(enums).length > 0) {
-        const sel = document.getElementById('enumSelect') as HTMLSelectElement;
-        sel.innerHTML = '';
-        for (const [v, label] of Object.entries(enums)) {
-            const opt = document.createElement('option');
-            opt.value = v;
-            opt.textContent = label;
-            sel.appendChild(opt);
-        }
-        // Match by label text (state text), not by value index
-        const matchOpt = Array.from(sel.options).find(o => o.textContent === currentVal);
-        if (matchOpt) sel.value = matchOpt.value;
-        else sel.value = currentVal; // fallback to numeric match
-        document.getElementById('enumGroup')!.style.display = 'block';
-    } else if (type && PulswerkValue.isBinary(type)) {
-        const input = document.getElementById('boolInput') as HTMLInputElement;
-        input.checked = PulswerkValue.parseDisplay(currentVal, type) !== 0;
-        updateBoolLabel();
-        document.getElementById('boolGroup')!.style.display = 'block';
-    } else {
-        const editInput = document.getElementById('editValue') as HTMLInputElement;
-        editInput.value = String(parseFloat(currentVal) || 0);
-        const units = (meta.units || '').trim().toLowerCase();
-        if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
-            editInput.step = '0.5';
-        } else {
-            editInput.step = '1';
-        }
-        document.getElementById('stepperGroup')!.style.display = 'block';
-    }
-    
-    document.getElementById('editModal')!.style.display = 'flex';
-}
-
-function closeEdit(): void {
-    document.getElementById('editModal')!.style.display = 'none';
-    currentEditKey = null;
-    const btn = document.getElementById('saveBtn') as HTMLButtonElement;
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
-    document.getElementById('editTitle')!.textContent = '';
-    document.getElementById('editMeta')!.textContent = '';
-    document.getElementById('editUnitLabel')!.textContent = '';
-    document.getElementById('currentVal')!.textContent = '---';
-    const editInput = document.getElementById('editValue') as HTMLInputElement;
-    editInput.value = '0';
-    editInput.step = '1';
-    const status = document.getElementById('editStatus')!;
-    status.textContent = '';
-    status.className = 'status-msg';
-    const pathEl = document.getElementById('editPath');
-    if (pathEl) pathEl.innerHTML = '';
-}
-
+// --- Stepper & Toggle input helpers ---
 function step(n: number): void {
     const input = document.getElementById('editValue') as HTMLInputElement;
     let stepVal = 1.0;
@@ -312,30 +602,87 @@ function step(n: number): void {
 
 function updateBoolLabel(): void {
     const input = document.getElementById('boolInput') as HTMLInputElement;
-    document.getElementById('boolLabel')!.textContent = input.checked ? 'ON' : 'OFF';
-    document.getElementById('boolLabel')!.className = 'bool-toggle-label ' + (input.checked ? 'text-sky-400' : 'text-slate-500');
+    if (!input) return;
+    const label = document.getElementById('boolLabel');
+    if (label) {
+        label.textContent = input.checked ? 'ON' : 'OFF';
+        label.className = 'bool-toggle-label ' + (input.checked ? 'text-sky-400' : 'text-slate-500');
+    }
 }
 
+function startTelemetryEdit(): void {
+    const viewMode = document.getElementById('telValueViewMode');
+    if (viewMode) viewMode.classList.add('hidden');
+    const editMode = document.getElementById('telValueEditMode');
+    if (editMode) editMode.classList.remove('hidden');
+}
+
+function cancelTelemetryEdit(): void {
+    const viewMode = document.getElementById('telValueViewMode');
+    if (viewMode) viewMode.classList.remove('hidden');
+    const editMode = document.getElementById('telValueEditMode');
+    if (editMode) editMode.classList.add('hidden');
+    
+    // Reset inputs
+    const telLiveValue = document.getElementById('telLiveValue');
+    const liveValText = telLiveValue ? telLiveValue.textContent || '' : '';
+    const key = currentEditKey;
+    if (key) {
+        const meta = resolveKeyMeta(key);
+        const type = meta.type || '';
+        const enums = meta.enumValues || null;
+        if (enums && Object.keys(enums).length > 0) {
+            const sel = document.getElementById('enumSelect') as HTMLSelectElement;
+            if (sel) {
+                const matchOpt = Array.from(sel.options).find(o => o.textContent === liveValText);
+                if (matchOpt) sel.value = matchOpt.value;
+                else sel.value = liveValText;
+            }
+        } else if (type && PulswerkValue.isBinary(type)) {
+            const input = document.getElementById('boolInput') as HTMLInputElement;
+            if (input) {
+                input.checked = PulswerkValue.parseDisplay(liveValText, type) !== 0;
+                updateBoolLabel();
+            }
+        } else {
+            const editInput = document.getElementById('editValue') as HTMLInputElement;
+            if (editInput) {
+                editInput.value = String(parseFloat(liveValText) || 0);
+            }
+        }
+    }
+}
+
+// --- Submit Writable Value Changes ---
 async function submitEdit(e?: Event): Promise<void> {
     if (e) e.preventDefault();
     const btn = document.getElementById('saveBtn') as HTMLButtonElement;
-    const status = document.getElementById('editStatus')!;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Sending...</span>';
-    status.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Sending update to device...';
-    status.className = 'status-msg info';
+    const status = document.getElementById('editStatus');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Sending...</span>';
+    }
+    if (status) {
+        status.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Sending update to device...';
+        status.className = 'status-msg info';
+    }
     
     let value = 0;
-    if (document.getElementById('stepperGroup')!.style.display !== 'none') {
-        value = parseFloat((document.getElementById('editValue') as HTMLInputElement).value) || 0;
-    } else if (document.getElementById('enumGroup')!.style.display !== 'none') {
-        value = parseInt((document.getElementById('enumSelect') as HTMLSelectElement).value, 10) || 0;
+    const stepperGroup = document.getElementById('inlineStepperGroup');
+    const enumGroup = document.getElementById('inlineEnumGroup');
+    if (stepperGroup && stepperGroup.style.display !== 'none') {
+        const editInput = document.getElementById('editValue') as HTMLInputElement;
+        value = parseFloat(editInput ? editInput.value : '0') || 0;
+    } else if (enumGroup && enumGroup.style.display !== 'none') {
+        const sel = document.getElementById('enumSelect') as HTMLSelectElement;
+        value = parseInt(sel ? sel.value : '0', 10) || 0;
         const meta = resolveKeyMeta(currentEditKey!);
         if (meta && meta.type && meta.type.includes('MULTI_STATE')) {
             value += 1;
         }
     } else {
-        value = (document.getElementById('boolInput') as HTMLInputElement).checked ? 1 : 0;
+        const input = document.getElementById('boolInput') as HTMLInputElement;
+        value = (input && input.checked) ? 1 : 0;
     }
     
     const token = (document.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement)?.value || '';
@@ -353,17 +700,30 @@ async function submitEdit(e?: Event): Promise<void> {
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
-                status.innerHTML = '<i class="fas fa-check-circle"></i> Success! Value updated.';
-                status.className = 'status-msg success';
-                btn.innerHTML = '<i class="fas fa-check"></i> <span>Updated</span>';
+                if (status) {
+                    status.innerHTML = '<i class="fas fa-check-circle"></i> Success! Value updated.';
+                    status.className = 'status-msg success';
+                }
+                if (btn) btn.innerHTML = '<i class="fas fa-check"></i> <span>Updated</span>';
                 
-                // If this is the current history key, reload the chart with a delay
-                // to ensure InfluxDB has indexed the new point.
-                if (currentHistoryKey === currentEditKey && historyChart) {
+                // Snappy local UI update
+                const meta = resolveKeyMeta(currentEditKey!);
+                const formatted = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(value, meta.type) : String(value);
+                const telLiveValue = document.getElementById('telLiveValue');
+                if (telLiveValue) telLiveValue.textContent = formatted;
+                
+                // If history chart is visible, reload chart with a slight delay
+                if (historyChart) {
                     setTimeout(reloadHistory, 1000);
                 }
                 
-                setTimeout(closeEdit, 1200);
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
+                    status.textContent = '';
+                    status.className = 'status-msg';
+                    cancelTelemetryEdit();
+                }, 1500);
             } else {
                 status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
                 status.className = 'status-msg error';
@@ -385,143 +745,39 @@ async function submitEdit(e?: Event): Promise<void> {
     }
 }
 
-// --- Properties Modal ---
-async function openProperties(key: string): Promise<void> {
-    currentPropsKey = key;
-    await ensureKeysMeta(key);
-    const meta = resolveKeyMeta(key);
-    const path = meta.parentPath || [];
-    
-    document.getElementById('propsTitle')!.textContent = meta.name || key;
-    document.getElementById('propsMeta')!.textContent = key;
-    renderModalBreadcrumb('propsPath', path);
-    
-    const loader = document.getElementById('propsLoading')!;
-    const table = document.getElementById('propsTable')!;
-    const empty = document.getElementById('propsEmpty')!;
-    const body = document.getElementById('propsBody')!;
-    
-    loader.classList.remove('hidden');
-    table.classList.add('hidden');
-    empty.classList.add('hidden');
-    body.innerHTML = '';
-    
-    document.getElementById('propsModal')!.style.display = 'flex';
-    
-    try {
-        const response = await fetch(`/plswk/api/properties?key=${encodeURIComponent(key)}`);
-        const props = await response.json();
-        
-        if (Array.isArray(props) && props.length > 0) {
-            props.forEach(p => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${p.name || ''}</td><td>${p.value || ''}</td>`;
-                body.appendChild(tr);
-            });
-            table.classList.remove('hidden');
-        } else {
-            empty.classList.remove('hidden');
-        }
-    } catch (e) {
-        empty.classList.remove('hidden');
-        console.error("Props load failed", e);
-    } finally {
-        loader.classList.add('hidden');
-    }
-}
-
-function closeProperties(): void {
-    document.getElementById('propsModal')!.style.display = 'none';
-    currentPropsKey = null;
-    document.getElementById('propsTitle')!.textContent = '';
-    document.getElementById('propsMeta')!.textContent = '';
-    document.getElementById('propsBody')!.innerHTML = '';
-    document.getElementById('propsTable')!.classList.add('hidden');
-    document.getElementById('propsEmpty')!.classList.add('hidden');
-    const pathEl = document.getElementById('propsPath');
-    if (pathEl) pathEl.innerHTML = '';
-}
-
-// --- Utils ---
-function renderModalBreadcrumb(id: string, path: any[]): void {
-    const container = document.getElementById(id);
-    if (!container) return;
-    container.innerHTML = '';
-    
-    path.forEach((p, index) => {
-        const span = document.createElement('span');
-        span.textContent = p.name;
-        container.appendChild(span);
-        
-        if (index < path.length - 1) {
-            const sep = document.createElement('span');
-            sep.className = 'sep';
-            sep.textContent = ' / ';
-            container.appendChild(sep);
-        }
-    });
-}
-
-// --- Schedule Modal ---
-let _currentScheduleData: any[] = [];
-let _isEditingSchedule: boolean = false;
-let _currentScheduleKey: string | null = null;
-let _scheduleValueType: string = 'real';    // 'boolean' | 'enumerated' | 'real'
-let _scheduleStates: string[] | null = null;         // ['Off','On'] or ['State1','State2',...]
-
-Object.defineProperties(window, {
-    currentScheduleData: { get: () => _currentScheduleData, set: (v) => { _currentScheduleData = v; }, configurable: true },
-    isEditingSchedule: { get: () => _isEditingSchedule, set: (v) => { _isEditingSchedule = v; }, configurable: true },
-    currentScheduleKey: { get: () => _currentScheduleKey, set: (v) => { _currentScheduleKey = v; }, configurable: true },
-    scheduleValueType: { get: () => _scheduleValueType, set: (v) => { _scheduleValueType = v; }, configurable: true },
-    scheduleStates: { get: () => _scheduleStates, set: (v) => { _scheduleStates = v; }, configurable: true }
-});
-
-async function openScheduleView(key: string): Promise<void> {
-    const modal = document.getElementById('scheduleModal')!;
-    const grid = document.getElementById('scheduleGrid')!;
-    const loading = document.getElementById('scheduleLoading')!;
-    const view = document.getElementById('scheduleView')!;
-    
-    await ensureKeysMeta(key);
-    const meta = resolveKeyMeta(key);
+// --- Weekly Switch Schedule View/Editor Helpers ---
+async function loadScheduleForDetails(key: string, props: any[]): Promise<void> {
+    const grid = document.getElementById('scheduleGrid');
+    const loading = document.getElementById('scheduleLoading');
+    const view = document.getElementById('scheduleView');
     
     currentScheduleKey = key;
     isEditingSchedule = false;
     scheduleValueType = 'real';
     scheduleStates = null;
     toggleScheduleEdit(false);
-
-    const path = meta.parentPath || [];
-    document.getElementById('schedulePath')!.textContent = path.map(p => p.name).join(' › ');
-    document.getElementById('scheduleMeta')!.textContent = key;
     
-    modal.style.display = 'flex';
-    loading.classList.remove('hidden');
-    view.classList.add('hidden');
-    grid.innerHTML = '';
+    if (loading) loading.classList.remove('hidden');
+    if (view) view.classList.add('hidden');
+    if (grid) grid.innerHTML = '';
     
     try {
-        const response = await fetch(`/plswk/api/properties?key=${encodeURIComponent(key)}`);
-        const props = await response.json();
         const schedProp = props.find((p: any) => p.name === 'Weekly Schedule');
         
-        // Read schedule metadata from backend
         const typeProp = props.find((p: any) => p.name === '_scheduleValueType');
         if (typeProp) scheduleValueType = typeProp.value;
         
         const statesProp = props.find((p: any) => p.name === '_scheduleStates');
         if (statesProp) {
-            try { scheduleStates = JSON.parse(statesProp.value); } catch(e) {}
+            try { statesProp.value && (scheduleStates = JSON.parse(statesProp.value)); } catch(e) {}
         }
         
-        // For boolean without explicit states, use defaults
         if (scheduleValueType === 'boolean' && !scheduleStates) {
             scheduleStates = ['Off', 'On'];
         }
         
-        loading.classList.add('hidden');
-        view.classList.remove('hidden');
+        if (loading) loading.classList.add('hidden');
+        if (view) view.classList.remove('hidden');
         
         currentScheduleData = [0,1,2,3,4,5,6].map(i => ({ dayIndex: i, entries: [] }));
         
@@ -569,23 +825,8 @@ async function openScheduleView(key: string): Promise<void> {
         
     } catch (error) {
         console.error("Schedule load error:", error);
-        grid.innerHTML = '<div class="text-center p-8 text-red-400">Failed to load schedule from device.</div>';
+        if (grid) grid.innerHTML = '<div class="text-center p-8 text-red-400">Failed to load schedule from device.</div>';
     }
-}
-
-function closeSchedule(): void {
-    document.getElementById('scheduleModal')!.style.display = 'none';
-    currentScheduleKey = null;
-    currentScheduleData = [];
-    isEditingSchedule = false;
-    scheduleValueType = 'real';
-    scheduleStates = null;
-    document.getElementById('scheduleGrid')!.innerHTML = '';
-    const pathEl = document.getElementById('schedulePath');
-    if (pathEl) pathEl.textContent = '';
-    document.getElementById('scheduleMeta')!.textContent = '';
-    const status = document.getElementById('scheduleStatus');
-    if (status) { status.textContent = ''; status.className = 'status-msg'; }
 }
 
 function formatScheduleValue(val: any): any {
@@ -613,7 +854,6 @@ function renderScheduleValueInput(dayIndex: number, entryIndex: number, value: a
                         onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseInt(this.value))">${options}</select>`;
     }
     
-    // Default: number input for real values
     return `<input type="number" step="0.1" class="bg-transparent text-sky-400 font-bold text-[0.7rem] border-none focus:ring-0 w-10 p-0 text-center" 
                    value="${value}" onchange="updateScheduleEntry(${dayIndex}, ${entryIndex}, 'value', parseFloat(this.value))">`;
 }
@@ -674,14 +914,15 @@ function toggleScheduleEdit(edit: boolean): void {
     if (btnEdit) btnEdit.classList.toggle('hidden', edit);
     if (btnActions) btnActions.classList.toggle('hidden', !edit);
     if (status) { status.textContent = ''; status.className = 'status-msg'; }
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> <span>Save</span>'; }
     renderSchedule();
 }
 
+// Custom schedule entry hooks
 function updateScheduleEntry(dayIdx: number, entryIdx: number, field: string, value: any): void {
     if (field === 'value') value = (scheduleValueType === 'real') ? parseFloat(value) : parseInt(value);
     currentScheduleData[dayIdx].entries[entryIdx][field] = value;
-    if (field === 'value') renderSchedule(); // re-render to update toggle/select state
+    if (field === 'value') renderSchedule();
 }
 
 function addScheduleEntry(dayIdx: number): void {
@@ -749,41 +990,70 @@ async function saveSchedule(): Promise<void> {
                 status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
                 status.className = 'status-msg error';
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
+                btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span>Save</span>';
             }
         } else {
             const err = await response.text();
             status.innerHTML = '<i class="fas fa-bug"></i> Error: ' + err;
             status.className = 'status-msg error';
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
+            btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span>Save</span>';
         }
     } catch (error) {
         console.error("Save error:", error);
         status.innerHTML = '<i class="fas fa-wifi"></i> Failed to connect';
         status.className = 'status-msg error';
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span data-i18n="save">Save</span>';
+        btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span>Save</span>';
     }
 }
 
-(window as any).openHistory = openHistory;
-(window as any).closeHistory = closeHistory;
+// --- Utils ---
+function renderModalBreadcrumb(id: string, path: any[]): void {
+    const container = document.getElementById(id);
+    if (!container) return;
+    container.innerHTML = '';
+    
+    path.forEach((p, index) => {
+        const span = document.createElement('span');
+        span.textContent = p.name;
+        container.appendChild(span);
+        
+        if (index < path.length - 1) {
+            const sep = document.createElement('span');
+            sep.className = 'sep';
+            sep.textContent = ' / ';
+            container.appendChild(sep);
+        }
+    });
+}
+
+// --- Compatibility Shims ---
+(window as any).openHistory = (key: string) => openTelemetryDetails(key);
+(window as any).openEdit = (key: string) => openTelemetryDetails(key);
+(window as any).openProperties = (key: string) => openTelemetryDetails(key);
+(window as any).openScheduleView = (key: string) => openTelemetryDetails(key);
+(window as any).openTelemetryDetails = openTelemetryDetails;
+(window as any).closeTelemetryDetails = closeTelemetryDetails;
+(window as any).closeHistory = closeTelemetryDetails;
+(window as any).closeEdit = closeTelemetryDetails;
+(window as any).closeProperties = closeTelemetryDetails;
+(window as any).closeSchedule = closeTelemetryDetails;
+
+// Expose internal hooks
 (window as any).reloadHistory = reloadHistory;
 (window as any).startHistoryRefresh = startHistoryRefresh;
 (window as any).stopHistoryRefresh = stopHistoryRefresh;
 (window as any).refreshHistoryData = refreshHistoryData;
-(window as any).openEdit = openEdit;
-(window as any).closeEdit = closeEdit;
 (window as any).step = step;
 (window as any).updateBoolLabel = updateBoolLabel;
 (window as any).submitEdit = submitEdit;
-(window as any).openProperties = openProperties;
-(window as any).closeProperties = closeProperties;
-(window as any).openScheduleView = openScheduleView;
-(window as any).closeSchedule = closeSchedule;
+(window as any).startTelemetryEdit = startTelemetryEdit;
+(window as any).cancelTelemetryEdit = cancelTelemetryEdit;
 (window as any).toggleScheduleEdit = toggleScheduleEdit;
 (window as any).updateScheduleEntry = updateScheduleEntry;
 (window as any).addScheduleEntry = addScheduleEntry;
 (window as any).removeScheduleEntry = removeScheduleEntry;
 (window as any).saveSchedule = saveSchedule;
+(window as any).filterTelemetrySidebar = filterTelemetrySidebar;
+(window as any).switchTelemetryTab = switchTelemetryTab;
