@@ -150,7 +150,8 @@ export function changeBarMode(widgetId: string, mode: string): void {
     }
 }
 
-export async function renderTimeseries(w: IWidget, body: HTMLElement, cfg: IWidgetConfig): Promise<void> {
+export async function renderTimeseries(w: IWidget, body: HTMLElement | null, cfg: IWidgetConfig): Promise<void> {
+    if (!body) return;
     const keys = cfg.keys || [];
     if (!keys.length) { body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>'; return; }
 
@@ -462,7 +463,8 @@ export function appendTimeseriesData(w: IWidget, newData: Record<string, string>
     }
 }
 
-export async function renderLatestValues(_w: IWidget, body: HTMLElement, cfg: IWidgetConfig): Promise<void> {
+export async function renderLatestValues(_w: IWidget, body: HTMLElement | null, cfg: IWidgetConfig): Promise<void> {
+    if (!body) return;
     const keys = cfg.keys || [];
     if (!keys.length) { body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>'; return; }
     const allKeysMeta = (window as any).allKeys || [];
@@ -473,7 +475,8 @@ export async function updateLatestValues(_w: IWidget, _cfg: IWidgetConfig): Prom
     // No-op: Preact component handles its own polling and updates
 }
 
-export async function renderSingleValue(w: IWidget, body: HTMLElement, cfg: IWidgetConfig): Promise<void> {
+export async function renderSingleValue(w: IWidget, body: HTMLElement | null, cfg: IWidgetConfig): Promise<void> {
+    if (!body) return;
     const key = cfg.key || (cfg.keys?.[0]) || '';
     if (!key) { body.innerHTML = `<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">${(window as any).t('no_key')}</p></div>`; return; }
     const allKeysMeta = (window as any).allKeys || [];

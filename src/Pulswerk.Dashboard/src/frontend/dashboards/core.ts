@@ -285,7 +285,12 @@ export function startPolling(): void {
 export function refreshAllWidgets(): void {
     if (!DashboardStore.dashboard?.widgets) return;
     DashboardStore.dashboard.widgets.forEach((w: any) => {
-        if (w.type === 'timeseries') (window as any).renderTimeseries(w, document.getElementById('wb_' + w.id)!, w.config || {});
+        if (w.type === 'timeseries') {
+            const body = document.getElementById('wb_' + w.id);
+            if (body) {
+                (window as any).renderTimeseries(w, body, w.config || {});
+            }
+        }
         // LatestValuesWidget and SingleValueWidget handle their own initial fetch in Preact
     });
     (window as any).updateAllScadaPoints();

@@ -317,8 +317,12 @@ export function refreshAllWidgets() {
     if (!DashboardStore.dashboard?.widgets)
         return;
     DashboardStore.dashboard.widgets.forEach((w) => {
-        if (w.type === 'timeseries')
-            window.renderTimeseries(w, document.getElementById('wb_' + w.id), w.config || {});
+        if (w.type === 'timeseries') {
+            const body = document.getElementById('wb_' + w.id);
+            if (body) {
+                window.renderTimeseries(w, body, w.config || {});
+            }
+        }
         // LatestValuesWidget and SingleValueWidget handle their own initial fetch in Preact
     });
     window.updateAllScadaPoints();

@@ -378,6 +378,9 @@ namespace Pulswerk.Dashboard.Controllers
                 else
                 {
                     Log.Warning($"[Server] SSE subscriptionId '{subscriptionId}' not found or expired.");
+                    Response.StatusCode = StatusCodes.Status410Gone;
+                    await Response.WriteAsync("Subscription not found or expired.");
+                    return;
                 }
             }
 

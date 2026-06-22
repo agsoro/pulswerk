@@ -83,14 +83,15 @@ export class DashboardService {
     static _es = null;
     static _listeners = new Map();
     static _reconnectTimeout = null;
-    static _scheduleReconnect() {
+    static _reconnectDelay = 50;
+    static _scheduleReconnect(delayMs = 50) {
         if (this._reconnectTimeout) {
             clearTimeout(this._reconnectTimeout);
         }
         this._reconnectTimeout = setTimeout(() => {
             this._reconnectSSE();
             this._reconnectTimeout = null;
-        }, 50);
+        }, delayMs);
     }
     static async _reconnectSSE() {
         if (this._es) {
@@ -116,6 +117,9 @@ export class DashboardService {
                 body: JSON.stringify({ keys: keysArray })
             });
             if (!response.ok) {
+                if (response.status === 404 || response.status === 405) {
+                    throw new Error('FallbackToQueryString');
+                }
                 throw new Error(`Subscribe failed: ${response.status}`);
             }
             const { subscriptionId } = await response.json();
@@ -126,6 +130,16 @@ export class DashboardService {
                 activeEs.close();
             }
             this._es = new EventSource(`/plswk/api/sse?subscriptionId=${encodeURIComponent(subscriptionId)}`);
+            this._es.onopen = () => {
+                this._reconnectDelay = 50; // Reset backoff on success
+            };
+            this._es.onerror = () => {
+                console.warn(`SSE connection error. Reconnecting in ${this._reconnectDelay}ms...`);
+                this._es?.close();
+                this._es = null;
+                this._reconnectDelay = Math.min(this._reconnectDelay === 50 ? 1000 : this._reconnectDelay * 2, 30000);
+                this._scheduleReconnect(this._reconnectDelay);
+            };
             this._es.onmessage = (e) => {
                 try {
                     const data = JSON.parse(e.data);
@@ -137,20 +151,37 @@ export class DashboardService {
             };
         }
         catch (err) {
-            console.warn('SSE subscription failed, falling back to query string:', err);
-            if (this._listeners.size === 0)
-                return;
-            const query = `?keys=${encodeURIComponent(keysArray.join(','))}`;
-            this._es = new EventSource('/plswk/api/sse' + query);
-            this._es.onmessage = (e) => {
-                try {
-                    const data = JSON.parse(e.data);
-                    this._listeners.forEach((_, cb) => cb(data));
-                }
-                catch (parseErr) {
-                    console.error('Failed to parse SSE data', parseErr);
-                }
-            };
+            if (err?.message === 'FallbackToQueryString') {
+                console.warn('SSE subscription endpoint not found, falling back to query string');
+                if (this._listeners.size === 0)
+                    return;
+                const query = `?keys=${encodeURIComponent(keysArray.join(','))}`;
+                this._es = new EventSource('/plswk/api/sse' + query);
+                this._es.onopen = () => {
+                    this._reconnectDelay = 50;
+                };
+                this._es.onerror = () => {
+                    console.warn(`SSE fallback connection error. Reconnecting in ${this._reconnectDelay}ms...`);
+                    this._es?.close();
+                    this._es = null;
+                    this._reconnectDelay = Math.min(this._reconnectDelay === 50 ? 1000 : this._reconnectDelay * 2, 30000);
+                    this._scheduleReconnect(this._reconnectDelay);
+                };
+                this._es.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        this._listeners.forEach((_, cb) => cb(data));
+                    }
+                    catch (parseErr) {
+                        console.error('Failed to parse SSE data', parseErr);
+                    }
+                };
+            }
+            else {
+                console.warn(`SSE subscription failed: ${err}. Reconnecting in ${this._reconnectDelay}ms...`);
+                this._reconnectDelay = Math.min(this._reconnectDelay === 50 ? 1000 : this._reconnectDelay * 2, 30000);
+                this._scheduleReconnect(this._reconnectDelay);
+            }
         }
     }
     static listenToLiveUpdates(keys, callback) {

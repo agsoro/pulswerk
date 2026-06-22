@@ -152,6 +152,8 @@ export function changeBarMode(widgetId, mode) {
     }
 }
 export async function renderTimeseries(w, body, cfg) {
+    if (!body)
+        return;
     const keys = cfg.keys || [];
     if (!keys.length) {
         body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>';
@@ -440,6 +442,8 @@ export function appendTimeseriesData(w, newData) {
     }
 }
 export async function renderLatestValues(_w, body, cfg) {
+    if (!body)
+        return;
     const keys = cfg.keys || [];
     if (!keys.length) {
         body.innerHTML = '<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">No keys configured</p></div>';
@@ -452,6 +456,8 @@ export async function updateLatestValues(_w, _cfg) {
     // No-op: Preact component handles its own polling and updates
 }
 export async function renderSingleValue(w, body, cfg) {
+    if (!body)
+        return;
     const key = cfg.key || (cfg.keys?.[0]) || '';
     if (!key) {
         body.innerHTML = `<div class="empty-state" style="padding:1rem"><p style="font-size:0.8rem">${window.t('no_key')}</p></div>`;
