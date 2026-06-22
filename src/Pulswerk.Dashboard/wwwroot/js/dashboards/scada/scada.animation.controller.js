@@ -20,6 +20,29 @@ export class ScadaAnimationController {
     ];
     static dotAnimations = new Map();
     static dotRafId = null;
+    static {
+        // Pause the rAF loop while the tab is hidden (browsers throttle rAF in
+        // background tabs anyway, often to ~1fps or less). On return to
+        // foreground, reset every animation's lastTime so dots don't jump,
+        // and restart the rAF loop if there are active animations.
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    if (ScadaAnimationController.dotRafId) {
+                        cancelAnimationFrame(ScadaAnimationController.dotRafId);
+                        ScadaAnimationController.dotRafId = null;
+                    }
+                }
+                else {
+                    const now = performance.now();
+                    ScadaAnimationController.dotAnimations.forEach((anim) => { anim.lastTime = now; });
+                    if (ScadaAnimationController.dotAnimations.size > 0 && !ScadaAnimationController.dotRafId) {
+                        ScadaAnimationController.dotRafId = requestAnimationFrame(ScadaAnimationController.animateDots);
+                    }
+                }
+            });
+        }
+    }
     static evaluateCondition(value, condition) {
         return ConditionEvaluator.evaluate(value, condition);
     }
@@ -128,7 +151,7 @@ export class ScadaAnimationController {
                 }
             });
         });
-        if (ScadaAnimationController.dotAnimations.size > 0 && !ScadaAnimationController.dotRafId) {
+        if (ScadaAnimationController.dotAnimations.size > 0 && !ScadaAnimationController.dotRafId && !document.hidden) {
             ScadaAnimationController.dotRafId = requestAnimationFrame(ScadaAnimationController.animateDots);
         }
     }
@@ -168,7 +191,12 @@ export class ScadaAnimationController {
             return;
         }
         ScadaAnimationController.dotAnimations.forEach((anim, _key) => {
-            const dt = (now - anim.lastTime) / 1000;
+            // Clamp dt to avoid huge jumps when the tab was backgrounded
+            // (browsers throttle rAF in hidden tabs, so `now - lastTime` can
+            // be many seconds or even minutes). A 100ms cap keeps motion smooth
+            // without teleporting dots across the entire path.
+            const rawDt = (now - anim.lastTime) / 1000;
+            const dt = Math.min(Math.max(rawDt, 0), 0.1);
             anim.lastTime = now;
             anim.dots.forEach((dot) => {
                 if (anim.reverse) {

@@ -24,6 +24,29 @@ export class ScadaAnimationController {
     static dotAnimations = new Map<string, any>();
     static dotRafId: number | null = null;
 
+    static {
+        // Pause the rAF loop while the tab is hidden (browsers throttle rAF in
+        // background tabs anyway, often to ~1fps or less). On return to
+        // foreground, reset every animation's lastTime so dots don't jump,
+        // and restart the rAF loop if there are active animations.
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    if (ScadaAnimationController.dotRafId) {
+                        cancelAnimationFrame(ScadaAnimationController.dotRafId);
+                        ScadaAnimationController.dotRafId = null;
+                    }
+                } else {
+                    const now = performance.now();
+                    ScadaAnimationController.dotAnimations.forEach((anim: any) => { anim.lastTime = now; });
+                    if (ScadaAnimationController.dotAnimations.size > 0 && !ScadaAnimationController.dotRafId) {
+                        ScadaAnimationController.dotRafId = requestAnimationFrame(ScadaAnimationController.animateDots);
+                    }
+                }
+            });
+        }
+    }
+
     static evaluateCondition(value: any, condition: string): boolean {
         return ConditionEvaluator.evaluate(value, condition);
     }
@@ -130,7 +153,7 @@ export class ScadaAnimationController {
                 }
             });
         });
-        if (ScadaAnimationController.dotAnimations.size > 0 && !ScadaAnimationController.dotRafId) {
+        if (ScadaAnimationController.dotAnimations.size > 0 && !ScadaAnimationController.dotRafId && !document.hidden) {
             ScadaAnimationController.dotRafId = requestAnimationFrame(ScadaAnimationController.animateDots);
         }
     }
@@ -161,7 +184,13 @@ export class ScadaAnimationController {
     static animateDots = (now: number): void => {
         if (ScadaAnimationController.dotAnimations.size === 0) { ScadaAnimationController.dotRafId = null; return; }
         ScadaAnimationController.dotAnimations.forEach((anim: any, _key: string) => {
-            const dt = (now - anim.lastTime) / 1000; anim.lastTime = now;
+            // Clamp dt to avoid huge jumps when the tab was backgrounded
+            // (browsers throttle rAF in hidden tabs, so `now - lastTime` can
+            // be many seconds or even minutes). A 100ms cap keeps motion smooth
+            // without teleporting dots across the entire path.
+            const rawDt = (now - anim.lastTime) / 1000;
+            const dt = Math.min(Math.max(rawDt, 0), 0.1);
+            anim.lastTime = now;
             anim.dots.forEach((dot: any) => {
                 if (anim.reverse) { dot.offset -= dot.speed * dt; if (dot.offset < 0) dot.offset += dot.totalLen; }
                 else { dot.offset += dot.speed * dt; if (dot.offset > dot.totalLen) dot.offset -= dot.totalLen; }

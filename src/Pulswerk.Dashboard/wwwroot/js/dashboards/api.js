@@ -84,6 +84,9 @@ export class DashboardService {
     static _listeners = new Map();
     static _reconnectTimeout = null;
     static _reconnectDelay = 50;
+    static _lastMessageAt = 0;
+    static _stalenessTimer = null;
+    static STALENESS_MS = 45000; // reconnect if no message (data or keepalive) for 45s
     static _scheduleReconnect(delayMs = 50) {
         if (this._reconnectTimeout) {
             clearTimeout(this._reconnectTimeout);
@@ -92,6 +95,74 @@ export class DashboardService {
             this._reconnectSSE();
             this._reconnectTimeout = null;
         }, delayMs);
+    }
+    static _ensureStalenessTimer() {
+        if (this._stalenessTimer)
+            return;
+        this._stalenessTimer = setInterval(() => {
+            // Only enforce staleness when the tab is visible — background tabs
+            // are throttled by the browser and would otherwise trigger spurious
+            // reconnects. Visibility change handling takes care of background tabs.
+            if (document.hidden)
+                return;
+            if (!this._es)
+                return;
+            if (this._listeners.size === 0)
+                return;
+            if (Date.now() - this._lastMessageAt > this.STALENESS_MS) {
+                console.warn(`SSE connection stale (no data for ${Math.round((Date.now() - this._lastMessageAt) / 1000)}s). Reconnecting...`);
+                this._es?.close();
+                this._es = null;
+                this._reconnectDelay = 50;
+                this._scheduleReconnect();
+            }
+        }, 15000);
+    }
+    static _stopStalenessTimer() {
+        if (this._stalenessTimer) {
+            clearInterval(this._stalenessTimer);
+            this._stalenessTimer = null;
+        }
+    }
+    static {
+        // Pause SSE while the tab is hidden (browser throttles background timers
+        // and rAF anyway, so live updates would just queue up uselessly). On
+        // return to foreground, reconnect immediately and re-fetch fresh values
+        // so the dashboard doesn't show stale data after a long background period.
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    // Drop the connection while hidden to avoid the browser
+                    // buffering a huge backlog of SSE messages.
+                    if (DashboardService._es) {
+                        DashboardService._es.close();
+                        DashboardService._es = null;
+                    }
+                }
+                else if (DashboardService._listeners.size > 0) {
+                    // Tab became visible again — reconnect and re-fetch fresh values.
+                    DashboardService._lastMessageAt = Date.now();
+                    DashboardService._reconnectDelay = 50;
+                    DashboardService._scheduleReconnect();
+                    DashboardService._refetchAllListeners();
+                }
+            });
+        }
+    }
+    static _refetchAllListeners() {
+        // After a long background period (or a stale connection), re-fetch the
+        // latest values for every listener so widgets show fresh data instead
+        // of whatever was last received over SSE. This is especially important
+        // for virtual telemetries, which are only pushed when their source
+        // values change — a stale tab can miss many intermediate evaluations.
+        for (const [cb, keys] of this._listeners.entries()) {
+            if (!keys.length)
+                continue;
+            DashboardService.fetchLatestValues(keys).then(data => {
+                if (data && typeof data === 'object')
+                    cb(data);
+            }).catch(() => { });
+        }
     }
     static async _reconnectSSE() {
         if (this._es) {
@@ -132,6 +203,8 @@ export class DashboardService {
             this._es = new EventSource(`/plswk/api/sse?subscriptionId=${encodeURIComponent(subscriptionId)}`);
             this._es.onopen = () => {
                 this._reconnectDelay = 50; // Reset backoff on success
+                this._lastMessageAt = Date.now();
+                this._ensureStalenessTimer();
             };
             this._es.onerror = () => {
                 console.warn(`SSE connection error. Reconnecting in ${this._reconnectDelay}ms...`);
@@ -141,6 +214,7 @@ export class DashboardService {
                 this._scheduleReconnect(this._reconnectDelay);
             };
             this._es.onmessage = (e) => {
+                this._lastMessageAt = Date.now();
                 try {
                     const data = JSON.parse(e.data);
                     this._listeners.forEach((_, cb) => cb(data));
@@ -159,6 +233,8 @@ export class DashboardService {
                 this._es = new EventSource('/plswk/api/sse' + query);
                 this._es.onopen = () => {
                     this._reconnectDelay = 50;
+                    this._lastMessageAt = Date.now();
+                    this._ensureStalenessTimer();
                 };
                 this._es.onerror = () => {
                     console.warn(`SSE fallback connection error. Reconnecting in ${this._reconnectDelay}ms...`);
@@ -168,6 +244,7 @@ export class DashboardService {
                     this._scheduleReconnect(this._reconnectDelay);
                 };
                 this._es.onmessage = (e) => {
+                    this._lastMessageAt = Date.now();
                     try {
                         const data = JSON.parse(e.data);
                         this._listeners.forEach((_, cb) => cb(data));
@@ -202,7 +279,17 @@ export class DashboardService {
         // Return unsubscribe function
         return () => {
             this._listeners.delete(callback);
-            this._scheduleReconnect();
+            if (this._listeners.size === 0) {
+                // No more listeners — close the connection and stop monitoring.
+                if (this._es) {
+                    this._es.close();
+                    this._es = null;
+                }
+                this._stopStalenessTimer();
+            }
+            else {
+                this._scheduleReconnect();
+            }
         };
     }
 }

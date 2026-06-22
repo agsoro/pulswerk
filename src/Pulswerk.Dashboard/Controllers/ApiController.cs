@@ -430,12 +430,33 @@ namespace Pulswerk.Dashboard.Controllers
 
             try
             {
+                // Send a keepalive comment every 15s so that proxies, load balancers,
+                // and the browser keep the SSE connection alive even when no telemetry
+                // updates flow for a long time. This also lets the client detect a
+                // dead connection faster (stale detection on the client side).
+                Task<Dictionary<string, string>>? readTask = null;
                 while (!HttpContext.RequestAborted.IsCancellationRequested)
                 {
-                    var values = await channel.Reader.ReadAsync(HttpContext.RequestAborted);
-                    var json = JsonSerializer.Serialize(values, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-                    await Response.WriteAsync($"data: {json}\n\n", HttpContext.RequestAborted);
-                    await Response.Body.FlushAsync(HttpContext.RequestAborted);
+                    readTask ??= channel.Reader.ReadAsync(HttpContext.RequestAborted).AsTask();
+
+                    var delayTask = Task.Delay(TimeSpan.FromSeconds(15), HttpContext.RequestAborted);
+                    var completed = await Task.WhenAny(readTask, delayTask);
+
+                    if (completed == readTask)
+                    {
+                        var values = await readTask;
+                        readTask = null;
+                        var json = JsonSerializer.Serialize(values, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                        await Response.WriteAsync($"data: {json}\n\n", HttpContext.RequestAborted);
+                        await Response.Body.FlushAsync(HttpContext.RequestAborted);
+                    }
+                    else
+                    {
+                        // SSE comment — ignored by EventSource clients but keeps the
+                        // TCP connection alive through proxies and prevents timeouts.
+                        await Response.WriteAsync($": keepalive {DateTime.UtcNow:O}\n\n", HttpContext.RequestAborted);
+                        await Response.Body.FlushAsync(HttpContext.RequestAborted);
+                    }
                 }
             }
             catch (OperationCanceledException) { }
