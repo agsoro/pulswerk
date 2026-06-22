@@ -113,6 +113,7 @@
     {
       "id": "knx-test",
       "type": "knx-ip",
+      "localPort": 51569,
       "address": "knx-sim",
       "port": 3671,
       "knxConnectionType": "tunneling",

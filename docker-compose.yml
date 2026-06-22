@@ -53,6 +53,7 @@ services:
     ports:
       - "5000:5000"
       - "47808:47808/udp"
+      - "51569:51569/udp"
     depends_on:
       influxdb:
         condition: service_started

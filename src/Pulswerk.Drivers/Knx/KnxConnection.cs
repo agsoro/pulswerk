@@ -143,17 +143,35 @@ namespace Pulswerk.Drivers.Knx
         {
             lock (_socketLock)
             {
-                _udpClient = new UdpClient(0); // Bind to random local port
-                
-                // Retrieve local IP by temporarily connecting a socket
-                using (var temp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
-                {
-                    temp.Connect(_gatewayEndPoint!);
-                    _localEndPoint = (IPEndPoint)temp.LocalEndPoint!;
-                    _localIp = _localEndPoint.Address;
-                }
-                
+                int bindPort = _config.LocalPort ?? 0;
+                _udpClient = new UdpClient(bindPort);
                 _localPort = ((IPEndPoint)_udpClient.Client.LocalEndPoint!).Port;
+
+                bool resolved = false;
+                if (!string.IsNullOrWhiteSpace(_config.LocalAddress))
+                {
+                    if (IPAddress.TryParse(_config.LocalAddress, out var parsedLocalIp))
+                    {
+                        _localIp = parsedLocalIp;
+                        resolved = true;
+                    }
+                    else
+                    {
+                        Log.Warning($"[KNX-{_config.Id}] Configured localAddress '{_config.LocalAddress}' is invalid. Falling back to auto-resolution.");
+                    }
+                }
+
+                if (!resolved)
+                {
+                    // Retrieve local IP by temporarily connecting a socket
+                    using (var temp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+                    {
+                        temp.Connect(_gatewayEndPoint!);
+                        _localEndPoint = (IPEndPoint)temp.LocalEndPoint!;
+                        _localIp = _localEndPoint.Address;
+                    }
+                }
+
                 Log.Info($"[KNX-{_config.Id}] Local tunnel endpoint resolved to {_localIp}:{_localPort}");
             }
 
