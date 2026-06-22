@@ -452,14 +452,55 @@ namespace Pulswerk.Dashboard.Controllers
             {
                 using var reader = new StreamReader(Request.Body);
                 var body = await reader.ReadToEndAsync();
-                var err = JsonSerializer.Deserialize<JsonElement>(body);
+                
+                // Limit log payload size to prevent OOM
+                if (body.Length > 65536)
+                {
+                    body = body.Substring(0, 65536);
+                }
 
-                var msg = err.TryGetProperty("msg", out var m) ? m.GetString() : "unknown";
-                var src = err.TryGetProperty("source", out var s) ? s.GetString() : "";
-                var line = err.TryGetProperty("line", out var l) ? l.GetInt32().ToString() : "?";
-                var col = err.TryGetProperty("col", out var c) ? c.GetInt32().ToString() : "?";
-                var stack = err.TryGetProperty("stack", out var st) ? st.GetString() : "";
-                var page = err.TryGetProperty("page", out var p) ? p.GetString() : "";
+                using var doc = JsonDocument.Parse(body);
+                var err = doc.RootElement;
+
+                string msg = "unknown";
+                if (err.TryGetProperty("msg", out var m))
+                {
+                    msg = m.ValueKind == JsonValueKind.String ? (m.GetString() ?? "unknown") : m.GetRawText();
+                }
+
+                string src = "";
+                if (err.TryGetProperty("source", out var s))
+                {
+                    src = s.ValueKind == JsonValueKind.String ? (s.GetString() ?? "") : s.GetRawText();
+                }
+
+                string line = "?";
+                if (err.TryGetProperty("line", out var l))
+                {
+                    if (l.ValueKind == JsonValueKind.Number && l.TryGetInt32(out var ln)) line = ln.ToString();
+                    else if (l.ValueKind == JsonValueKind.String) line = l.GetString() ?? "?";
+                    else line = l.GetRawText();
+                }
+
+                string col = "?";
+                if (err.TryGetProperty("col", out var c))
+                {
+                    if (c.ValueKind == JsonValueKind.Number && c.TryGetInt32(out var cl)) col = cl.ToString();
+                    else if (c.ValueKind == JsonValueKind.String) col = c.GetString() ?? "?";
+                    else col = c.GetRawText();
+                }
+
+                string stack = "";
+                if (err.TryGetProperty("stack", out var st))
+                {
+                    stack = st.ValueKind == JsonValueKind.String ? (st.GetString() ?? "") : st.GetRawText();
+                }
+
+                string page = "";
+                if (err.TryGetProperty("page", out var p))
+                {
+                    page = p.ValueKind == JsonValueKind.String ? (p.GetString() ?? "") : p.GetRawText();
+                }
 
                 Log.Warning($"[UI] JS Error on {page} at {src}:{line}:{col} — {msg}");
                 if (!string.IsNullOrEmpty(stack))

@@ -172,9 +172,9 @@ namespace Pulswerk.Core
         {
             var entry = new LogEntry(DateTime.UtcNow, LogSeverity.Warning, message, source);
             _buffer.Add(entry);
-            Console.ForegroundColor = ConsoleColor.Yellow;
+            try { Console.ForegroundColor = ConsoleColor.Yellow; } catch { }
             Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  WRN  {message}");
-            Console.ResetColor();
+            try { Console.ResetColor(); } catch { }
         }
 
         /// <summary>Log an error message.</summary>
@@ -182,9 +182,9 @@ namespace Pulswerk.Core
         {
             var entry = new LogEntry(DateTime.UtcNow, LogSeverity.Error, message, source);
             _buffer.Add(entry);
-            Console.ForegroundColor = ConsoleColor.Red;
+            try { Console.ForegroundColor = ConsoleColor.Red; } catch { }
             Console.Error.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  ERR  {message}");
-            Console.ResetColor();
+            try { Console.ResetColor(); } catch { }
         }
 
         /// <summary>Access the underlying log buffer for the dashboard.</summary>
