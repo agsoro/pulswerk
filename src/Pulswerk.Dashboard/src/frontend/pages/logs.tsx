@@ -121,9 +121,11 @@ export function LogsPage() {
 
                         const sevColor = isInfo ? 'text-emerald-500' : isWarn ? 'text-amber-500' : isErr ? 'text-red-500' : 'text-slate-400';
 
+                        const displayTime = log.timestamp ? new Date(log.timestamp).toLocaleString() : log.timestamp;
+
                         return (
                             <div key={idx} class="flex gap-4 leading-relaxed whitespace-pre-wrap break-all log-entry hover:bg-white/[0.02] py-0.5 rounded px-1" data-level={sev}>
-                                <span class="text-slate-500 shrink-0 w-[180px] select-none">[{log.timestamp}]</span>
+                                <span class="text-slate-500 shrink-0 w-[180px] select-none">[{displayTime}]</span>
                                 <span class={`shrink-0 w-[60px] font-extrabold uppercase ${sevColor} select-none`}>{sev}</span>
                                 <span class="text-sky-400 shrink-0 w-[120px] truncate select-none">[{log.source || 'system'}]</span>
                                 <span class="text-slate-200">{log.message}</span>

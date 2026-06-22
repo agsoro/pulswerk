@@ -51,6 +51,7 @@ export function LogsPage() {
                     const isWarn = sev === 'warning' || sev === 'warn';
                     const isErr = sev === 'error' || sev === 'crit' || sev === 'fatal';
                     const sevColor = isInfo ? 'text-emerald-500' : isWarn ? 'text-amber-500' : isErr ? 'text-red-500' : 'text-slate-400';
-                    return (_jsxs("div", { class: "flex gap-4 leading-relaxed whitespace-pre-wrap break-all log-entry hover:bg-white/[0.02] py-0.5 rounded px-1", "data-level": sev, children: [_jsxs("span", { class: "text-slate-500 shrink-0 w-[180px] select-none", children: ["[", log.timestamp, "]"] }), _jsx("span", { class: `shrink-0 w-[60px] font-extrabold uppercase ${sevColor} select-none`, children: sev }), _jsxs("span", { class: "text-sky-400 shrink-0 w-[120px] truncate select-none", children: ["[", log.source || 'system', "]"] }), _jsx("span", { class: "text-slate-200", children: log.message })] }, idx));
+                    const displayTime = log.timestamp ? new Date(log.timestamp).toLocaleString() : log.timestamp;
+                    return (_jsxs("div", { class: "flex gap-4 leading-relaxed whitespace-pre-wrap break-all log-entry hover:bg-white/[0.02] py-0.5 rounded px-1", "data-level": sev, children: [_jsxs("span", { class: "text-slate-500 shrink-0 w-[180px] select-none", children: ["[", displayTime, "]"] }), _jsx("span", { class: `shrink-0 w-[60px] font-extrabold uppercase ${sevColor} select-none`, children: sev }), _jsxs("span", { class: "text-sky-400 shrink-0 w-[120px] truncate select-none", children: ["[", log.source || 'system', "]"] }), _jsx("span", { class: "text-slate-200", children: log.message })] }, idx));
                 })) })] }));
 }
