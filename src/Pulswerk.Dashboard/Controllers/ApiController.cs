@@ -249,7 +249,7 @@ namespace Pulswerk.Dashboard.Controllers
                               .Reverse()
                               .Select(l => new LogEntryDto
                               {
-                                  Timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                                  Timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fffZ"),
                                   Severity = l.Severity.ToString().ToLowerInvariant(),
                                   Message = l.Message,
                                   Source = l.Source
