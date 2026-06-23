@@ -154,8 +154,19 @@ namespace Pulswerk.Drivers.Knx
                 {
                     if (IPAddress.TryParse(_config.LocalAddress, out var parsedLocalIp))
                     {
-                        _localIp = parsedLocalIp;
-                        resolved = true;
+                        // 0.0.0.0 / :: are bind-any wildcards, not routable addresses.
+                        // Advertising them in the HPAI control endpoint makes the KNX
+                        // gateway unable to send CONNECT_RESPONSE back to us, so fall
+                        // through to auto-resolution instead.
+                        if (parsedLocalIp.Equals(IPAddress.Any) || parsedLocalIp.Equals(IPAddress.IPv6Any))
+                        {
+                            Log.Info($"[KNX-{_config.Id}] Configured localAddress '{_config.LocalAddress}' is a wildcard (bind-any); auto-resolving routable local IP instead.");
+                        }
+                        else
+                        {
+                            _localIp = parsedLocalIp;
+                            resolved = true;
+                        }
                     }
                     else
                     {
@@ -172,14 +183,14 @@ namespace Pulswerk.Drivers.Knx
                         _localEndPoint = (IPEndPoint)temp.LocalEndPoint!;
                         _localIp = _localEndPoint.Address;
                     }
-                    Log.Debug($"[KNX-{_config.Id}] LocalAddress not configured; auto-resolved local IP via temp socket to {_localIp} (bindPort={bindPort})");
+                    Log.Info($"[KNX-{_config.Id}] LocalAddress not configured; auto-resolved local IP via temp socket to {_localIp} (bindPort={bindPort})");
                 }
                 else
                 {
-                    Log.Debug($"[KNX-{_config.Id}] Using configured LocalAddress '{_config.LocalAddress}' -> {_localIp} (bindPort={bindPort})");
+                    Log.Info($"[KNX-{_config.Id}] Using configured LocalAddress '{_config.LocalAddress}' -> {_localIp} (bindPort={bindPort})");
                 }
 
-                Log.Debug($"[KNX-{_config.Id}] Local tunnel endpoint resolved to {_localIp}:{_localPort}");
+                Log.Info($"[KNX-{_config.Id}] Local tunnel endpoint resolved to {_localIp}:{_localPort}");
             }
 
             if (_secureEnabled)
@@ -217,11 +228,11 @@ namespace Pulswerk.Drivers.Knx
                         // Client Public Key
                         Array.Copy(clientPublicKey, 0, sReq, 14, 32);
 
-                        Log.Debug($"[KNX-{_config.Id}] SESSION_REQUEST payload ({sReq.Length} bytes): {BitConverter.ToString(sReq)}");
-                        Log.Debug($"[KNX-{_config.Id}] Client public key: {BitConverter.ToString(clientPublicKey)}");
+                        Log.Info($"[KNX-{_config.Id}] SESSION_REQUEST payload ({sReq.Length} bytes): {BitConverter.ToString(sReq)}");
+                        Log.Info($"[KNX-{_config.Id}] Client public key: {BitConverter.ToString(clientPublicKey)}");
                         Log.Info($"[KNX-{_config.Id}] Sending SESSION_REQUEST to {_gatewayEndPoint}...");
                         int sent = await _udpClient!.SendAsync(sReq, sReq.Length, _gatewayEndPoint);
-                        Log.Debug($"[KNX-{_config.Id}] Sent {sent} bytes. Waiting up to 2s for SESSION_RESPONSE (0x0952)...");
+                        Log.Info($"[KNX-{_config.Id}] Sent {sent} bytes. Waiting up to 2s for SESSION_RESPONSE (0x0952)...");
 
                         // Wait up to 2 seconds for SESSION_RESPONSE (0x0952)
                         var receiveTask = _udpClient.ReceiveAsync(ct).AsTask();
@@ -232,7 +243,7 @@ namespace Pulswerk.Drivers.Knx
                         {
                             var result = await receiveTask;
                             byte[] res = result.Buffer;
-                            Log.Debug($"[KNX-{_config.Id}] Received {res.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(res)}");
+                            Log.Info($"[KNX-{_config.Id}] Received {res.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(res)}");
 
                             if (res.Length >= 56 && res[2] == 0x09 && res[3] == 0x52) // SESSION_RESPONSE
                             {
@@ -242,7 +253,7 @@ namespace Pulswerk.Drivers.Knx
                                 byte[] serverMac = new byte[16];
                                 Array.Copy(res, 40, serverMac, 0, 16);
 
-                                Log.Debug($"[KNX-{_config.Id}] SESSION_RESPONSE parsed. SSID={_secureSessionId}, serverPubKey={BitConverter.ToString(serverPublicKey)}, mac={BitConverter.ToString(serverMac)}");
+                                Log.Info($"[KNX-{_config.Id}] SESSION_RESPONSE parsed. SSID={_secureSessionId}, serverPubKey={BitConverter.ToString(serverPublicKey)}, mac={BitConverter.ToString(serverMac)}");
 
                                 // 3. Derive shared secret and session key
                                 byte[] sharedSecret = new byte[32];
@@ -256,10 +267,10 @@ namespace Pulswerk.Drivers.Knx
                                 _sessionKey = new byte[16];
                                 Array.Copy(keyMaterial, 0, _sessionKey, 0, 16);
 
-                                Log.Debug($"[KNX-{_config.Id}] Shared secret: {BitConverter.ToString(sharedSecret)}");
-                                Log.Debug($"[KNX-{_config.Id}] Key material (HMAC-SHA256): {BitConverter.ToString(keyMaterial)}");
-                                Log.Debug($"[KNX-{_config.Id}] Session key (first 16 bytes): {BitConverter.ToString(_sessionKey)}");
-                                Log.Debug($"[KNX-{_config.Id}] KnxUserId={_config.KnxUserId}, KnxPassword set={(string.IsNullOrEmpty(_config.KnxPassword) ? "NO" : "YES")} (len={_config.KnxPassword?.Length ?? 0})");
+                                Log.Info($"[KNX-{_config.Id}] Shared secret: {BitConverter.ToString(sharedSecret)}");
+                                Log.Info($"[KNX-{_config.Id}] Key material (HMAC-SHA256): {BitConverter.ToString(keyMaterial)}");
+                                Log.Info($"[KNX-{_config.Id}] Session key (first 16 bytes): {BitConverter.ToString(_sessionKey)}");
+                                Log.Info($"[KNX-{_config.Id}] KnxUserId={_config.KnxUserId}, KnxPassword set={(string.IsNullOrEmpty(_config.KnxPassword) ? "NO" : "YES")} (len={_config.KnxPassword?.Length ?? 0})");
                                 Log.Info($"[KNX-{_config.Id}] Secure session response received. SSID = {_secureSessionId}. Key derived successfully.");
 
                                 // 4. Send SESSION_AUTHENTICATE (0x0953) inside SECURE_WRAPPER (0x0950)
@@ -274,12 +285,12 @@ namespace Pulswerk.Drivers.Knx
                                 authPayload[7] = 0x00; // Reserved
                                 for (int i = 0; i < 7; i++) authPayload[8 + i] = (byte)(i ^ 0xAA);
 
-                                Log.Debug($"[KNX-{_config.Id}] SESSION_AUTHENTICATE plaintext ({authPayload.Length} bytes): {BitConverter.ToString(authPayload)}");
+                                Log.Info($"[KNX-{_config.Id}] SESSION_AUTHENTICATE plaintext ({authPayload.Length} bytes): {BitConverter.ToString(authPayload)}");
 
                                 byte[] wrappedAuth = EncryptFrame(authPayload);
-                                Log.Debug($"[KNX-{_config.Id}] SECURE_WRAPPER around SESSION_AUTHENTICATE ({wrappedAuth.Length} bytes): {BitConverter.ToString(wrappedAuth)}");
+                                Log.Info($"[KNX-{_config.Id}] SECURE_WRAPPER around SESSION_AUTHENTICATE ({wrappedAuth.Length} bytes): {BitConverter.ToString(wrappedAuth)}");
                                 int authSent = await _udpClient.SendAsync(wrappedAuth, wrappedAuth.Length, _gatewayEndPoint);
-                                Log.Debug($"[KNX-{_config.Id}] Sent {authSent} bytes. Waiting up to 2s for auth response...");
+                                Log.Info($"[KNX-{_config.Id}] Sent {authSent} bytes. Waiting up to 2s for auth response...");
 
                                 // Wait for confirmation
                                 receiveTask = _udpClient.ReceiveAsync(ct).AsTask();
@@ -290,7 +301,7 @@ namespace Pulswerk.Drivers.Knx
                                 {
                                     var authResResult = await receiveTask;
                                     byte[] authRes = authResResult.Buffer;
-                                    Log.Debug($"[KNX-{_config.Id}] Auth response: {authRes.Length} bytes from {authResResult.RemoteEndPoint}: {BitConverter.ToString(authRes)}");
+                                    Log.Info($"[KNX-{_config.Id}] Auth response: {authRes.Length} bytes from {authResResult.RemoteEndPoint}: {BitConverter.ToString(authRes)}");
 
                                     if (authRes.Length >= 22 && authRes[2] == 0x09 && authRes[3] == 0x50) // SECURE_WRAPPER
                                     {
@@ -301,7 +312,7 @@ namespace Pulswerk.Drivers.Knx
                                         }
                                         else
                                         {
-                                            Log.Debug($"[KNX-{_config.Id}] Decrypted auth response ({decryptedAuthRes.Length} bytes): {BitConverter.ToString(decryptedAuthRes)}");
+                                            Log.Info($"[KNX-{_config.Id}] Decrypted auth response ({decryptedAuthRes.Length} bytes): {BitConverter.ToString(decryptedAuthRes)}");
                                         }
                                         if (decryptedAuthRes != null && decryptedAuthRes.Length >= 8 && decryptedAuthRes[2] == 0x09 && decryptedAuthRes[3] == 0x53)
                                         {
@@ -378,8 +389,8 @@ namespace Pulswerk.Drivers.Knx
                 req[24] = 0x02; // KNX Link Layer
                 req[25] = 0x00; // Reserved
 
-                Log.Debug($"[KNX-{_config.Id}] CONNECT_REQUEST payload ({req.Length} bytes): {BitConverter.ToString(req)}");
-                Log.Debug($"[KNX-{_config.Id}] Target gateway endpoint: {_gatewayEndPoint}, local HPAI advertised: {_localIp}:{_localPort}");
+                Log.Info($"[KNX-{_config.Id}] CONNECT_REQUEST payload ({req.Length} bytes): {BitConverter.ToString(req)}");
+                Log.Info($"[KNX-{_config.Id}] Target gateway endpoint: {_gatewayEndPoint}, local HPAI advertised: {_localIp}:{_localPort}");
 
                 int attempts = 0;
                 while (attempts++ < 3 && !ct.IsCancellationRequested)
@@ -388,7 +399,7 @@ namespace Pulswerk.Drivers.Knx
                     {
                         Log.Info($"[KNX-{_config.Id}] Sending CONNECT_REQUEST (attempt {attempts}) to {_gatewayEndPoint}...");
                         int sent = await _udpClient!.SendAsync(req, req.Length, _gatewayEndPoint);
-                        Log.Debug($"[KNX-{_config.Id}] Sent {sent} bytes. Waiting up to 2s for CONNECT_RESPONSE...");
+                        Log.Info($"[KNX-{_config.Id}] Sent {sent} bytes. Waiting up to 2s for CONNECT_RESPONSE...");
 
                         // Wait up to 2 seconds for CONNECT_RESPONSE
                         var receiveTask = _udpClient.ReceiveAsync(ct).AsTask();
@@ -399,7 +410,7 @@ namespace Pulswerk.Drivers.Knx
                         {
                             var result = await receiveTask;
                             byte[] res = result.Buffer;
-                            Log.Debug($"[KNX-{_config.Id}] Received {res.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(res)}");
+                            Log.Info($"[KNX-{_config.Id}] Received {res.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(res)}");
 
                             if (res.Length >= 20 && res[2] == 0x02 && res[3] == 0x06) // CONNECT_RESPONSE
                             {
@@ -492,7 +503,7 @@ namespace Pulswerk.Drivers.Knx
             Array.Copy(ciphertext, 0, pkt, 14, ciphertext.Length);
             Array.Copy(mac, 0, pkt, 14 + ciphertext.Length, 16);
 
-            Log.Debug($"[KNX-{_config.Id}] EncryptFrame: ssid={_secureSessionId}, counter={counter}, plaintextLen={plaintext.Length}, nonce={BitConverter.ToString(nonce)}, sessionKey={BitConverter.ToString(_sessionKey)}");
+            Log.Info($"[KNX-{_config.Id}] EncryptFrame: ssid={_secureSessionId}, counter={counter}, plaintextLen={plaintext.Length}, nonce={BitConverter.ToString(nonce)}, sessionKey={BitConverter.ToString(_sessionKey)}");
 
             return pkt;
         }
@@ -526,7 +537,7 @@ namespace Pulswerk.Drivers.Knx
             counter |= (ulong)wrapperFrame[12] << 8;
             counter |= wrapperFrame[13];
 
-            Log.Debug($"[KNX-{_config.Id}] DecryptFrame: ssid={ssid}, counter={counter}, lastRecv={_recvSecureCounter}, frameLen={wrapperFrame.Length}");
+            Log.Info($"[KNX-{_config.Id}] DecryptFrame: ssid={ssid}, counter={counter}, lastRecv={_recvSecureCounter}, frameLen={wrapperFrame.Length}");
 
             if (counter <= _recvSecureCounter)
             {
@@ -563,7 +574,7 @@ namespace Pulswerk.Drivers.Knx
                 {
                     aesCcm.Decrypt(nonce, ciphertext, mac, plaintext, associatedData);
                 }
-                Log.Debug($"[KNX-{_config.Id}] DecryptFrame: success. plaintextLen={plaintext.Length}, nonce={BitConverter.ToString(nonce)}, mac={BitConverter.ToString(mac)}");
+                Log.Info($"[KNX-{_config.Id}] DecryptFrame: success. plaintextLen={plaintext.Length}, nonce={BitConverter.ToString(nonce)}, mac={BitConverter.ToString(mac)}");
                 return plaintext;
             }
             catch (Exception ex)
