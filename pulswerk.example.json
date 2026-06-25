@@ -50,6 +50,7 @@
       "knxSecureEnabled": true,
       "knxPassword": "mySecretSecurePassword123!",
       "knxUserId": 2,
+      "knxNatMode": false,
       "name": "KNX Test Gateway"
     }
   ],

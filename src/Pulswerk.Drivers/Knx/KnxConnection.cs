@@ -40,6 +40,7 @@ namespace Pulswerk.Drivers.Knx
 
         private readonly bool _isRouting;
         private readonly string _connectionMode;
+        private readonly bool _natMode;
 
         private readonly bool _secureEnabled;
         private byte[]? _sessionKey;
@@ -52,6 +53,7 @@ namespace Pulswerk.Drivers.Knx
             _config = config;
             _connectionMode = (config.KnxConnectionType ?? "tunneling").ToLowerInvariant();
             _isRouting = _connectionMode == "routing";
+            _natMode = config.KnxNatMode;
             _secureEnabled = config.KnxSecureEnabled;
             _sendSecureCounter = 0;
             _recvSecureCounter = 0;
@@ -61,6 +63,12 @@ namespace Pulswerk.Drivers.Knx
         public byte[]? GetCachedValue(ushort groupAddress)
         {
             return _rawCache.TryGetValue(groupAddress, out var val) ? val : null;
+        }
+
+        /// <summary>True once a tunnel/routing session is established with the gateway.</summary>
+        public bool IsConnected
+        {
+            get { lock (_stateLock) { return _connected; } }
         }
 
         public void Start()
@@ -218,12 +226,8 @@ namespace Pulswerk.Drivers.Knx
                         sReq[2] = 0x09; sReq[3] = 0x51; // SESSION_REQUEST type
                         sReq[4] = 0x00; sReq[5] = 0x2E; // Length = 46
 
-                        // HPAI Control Endpoint
-                        sReq[6] = 0x08; sReq[7] = 0x01; // Length=8, UDP
-                        byte[] ipBytes = _localIp!.GetAddressBytes();
-                        Array.Copy(ipBytes, 0, sReq, 8, 4);
-                        sReq[12] = (byte)((_localPort >> 8) & 0xFF);
-                        sReq[13] = (byte)(_localPort & 0xFF);
+                        // HPAI Control Endpoint (route-back in NAT mode)
+                        WriteHpai(sReq, 6);
 
                         // Client Public Key
                         Array.Copy(clientPublicKey, 0, sReq, 14, 32);
@@ -370,18 +374,11 @@ namespace Pulswerk.Drivers.Knx
                 req[2] = 0x02; req[3] = 0x05; // CONNECT_REQUEST type
                 req[4] = 0x00; req[5] = 0x1A; // Total length: 26
 
-                // HPAI Control Endpoint
-                req[6] = 0x08; req[7] = 0x01; // Length=8, Protocol=UDP
-                byte[] ipBytes = _localIp!.GetAddressBytes();
-                Array.Copy(ipBytes, 0, req, 8, 4);
-                req[12] = (byte)((_localPort >> 8) & 0xFF);
-                req[13] = (byte)(_localPort & 0xFF);
+                // HPAI Control Endpoint (route-back in NAT mode)
+                WriteHpai(req, 6);
 
-                // HPAI Data Endpoint
-                req[14] = 0x08; req[15] = 0x01; // Length=8, Protocol=UDP
-                Array.Copy(ipBytes, 0, req, 16, 4);
-                req[20] = (byte)((_localPort >> 8) & 0xFF);
-                req[21] = (byte)(_localPort & 0xFF);
+                // HPAI Data Endpoint (route-back in NAT mode)
+                WriteHpai(req, 14);
 
                 // CRI (Connection Request Information)
                 req[22] = 0x04; // CRI Structure Length
@@ -390,7 +387,7 @@ namespace Pulswerk.Drivers.Knx
                 req[25] = 0x00; // Reserved
 
                 Log.Debug($"[KNX-{_config.Id}] CONNECT_REQUEST payload ({req.Length} bytes): {BitConverter.ToString(req)}");
-                Log.Debug($"[KNX-{_config.Id}] Target gateway endpoint: {_gatewayEndPoint}, local HPAI advertised: {_localIp}:{_localPort}");
+                Log.Debug($"[KNX-{_config.Id}] Target gateway endpoint: {_gatewayEndPoint}, local HPAI advertised: {(_natMode ? "0.0.0.0:0 (NAT route-back)" : $"{_localIp}:{_localPort}")}");
 
                 int attempts = 0;
                 while (attempts++ < 3 && !ct.IsCancellationRequested)
@@ -414,10 +411,13 @@ namespace Pulswerk.Drivers.Knx
 
                             if (res.Length >= 20 && res[2] == 0x02 && res[3] == 0x06) // CONNECT_RESPONSE
                             {
-                                byte status = res[6];
+                                // CONNECT_RESPONSE body: communication_channel_id (res[6]),
+                                // status (res[7]), then HPAI + CRD.
+                                byte channelId = res[6];
+                                byte status = res[7];
                                 if (status == 0x00) // Success
                                 {
-                                    _channelId = res[7];
+                                    _channelId = channelId;
                                     _sendSeqNum = 0;
                                     lock (_stateLock)
                                     {
@@ -453,6 +453,35 @@ namespace Pulswerk.Drivers.Knx
 
                 Log.Error($"[KNX-{_config.Id}] Failed to establish KNX tunnel after 3 attempts. Gateway={_gatewayEndPoint}, Local={_localIp}:{_localPort}");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Writes an 8-byte KNXnet/IP HPAI structure into <paramref name="buffer"/>
+        /// at <paramref name="offset"/>. In NAT mode (<see cref="_natMode"/>) the
+        /// endpoint is written in route-back form (protocol=UDP, IP=0.0.0.0, port=0)
+        /// so the gateway replies to the actual UDP source address — required when the
+        /// gateway is reached across a router/NAT/firewall. Otherwise the host's real
+        /// local IP and bound port are advertised (flat-LAN behaviour).
+        /// </summary>
+        private void WriteHpai(byte[] buffer, int offset)
+        {
+            buffer[offset] = 0x08;     // structure length
+            buffer[offset + 1] = 0x01; // host protocol = UDP/IPv4
+
+            if (_natMode)
+            {
+                // IP (4) + port (2) = 0 → gateway must use the UDP source endpoint.
+                buffer[offset + 2] = 0; buffer[offset + 3] = 0;
+                buffer[offset + 4] = 0; buffer[offset + 5] = 0;
+                buffer[offset + 6] = 0; buffer[offset + 7] = 0;
+            }
+            else
+            {
+                byte[] ipBytes = _localIp!.GetAddressBytes();
+                Array.Copy(ipBytes, 0, buffer, offset + 2, 4);
+                buffer[offset + 6] = (byte)((_localPort >> 8) & 0xFF);
+                buffer[offset + 7] = (byte)(_localPort & 0xFF);
             }
         }
 
@@ -596,12 +625,8 @@ namespace Pulswerk.Drivers.Knx
             // CRI info
             req[6] = _channelId;
             req[7] = 0x00; // Reserved
-            // HPAI Control Endpoint
-            req[8] = 0x08; req[9] = 0x01; // Length=8, UDP
-            byte[] ipBytes = _localIp!.GetAddressBytes();
-            Array.Copy(ipBytes, 0, req, 10, 4);
-            req[14] = (byte)((_localPort >> 8) & 0xFF);
-            req[15] = (byte)(_localPort & 0xFF);
+            // HPAI Control Endpoint (route-back in NAT mode)
+            WriteHpai(req, 8);
 
             int missedHeartbeats = 0;
 
@@ -995,14 +1020,8 @@ namespace Pulswerk.Drivers.Knx
                 dis[4] = 0x00; dis[5] = 0x10;
                 dis[6] = _channelId;
                 dis[7] = 0x00;
-                dis[8] = 0x08; dis[9] = 0x01; // local UDP HPAI
-                if (_localIp != null)
-                {
-                    byte[] ipBytes = _localIp.GetAddressBytes();
-                    Array.Copy(ipBytes, 0, dis, 10, 4);
-                }
-                dis[14] = (byte)((_localPort >> 8) & 0xFF);
-                dis[15] = (byte)(_localPort & 0xFF);
+                // local UDP HPAI (route-back in NAT mode)
+                WriteHpai(dis, 8);
 
                 try
                 {

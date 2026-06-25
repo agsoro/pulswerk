@@ -77,6 +77,12 @@ namespace Pulswerk.Core
                             if (conn.KnxUserId < 1 || conn.KnxUserId > 255)
                                 errors.Add($"KNX connection '{conn.Id}' has secure enabled but invalid 'knxUserId' '{conn.KnxUserId}'. Expected range 1-255.");
                         }
+
+                        // NAT mode (route-back HPAI) only applies to tunnelling. Routing uses
+                        // multicast and cannot traverse a router/NAT in the first place.
+                        bool isRouting = string.Equals(conn.KnxConnectionType, "routing", StringComparison.OrdinalIgnoreCase);
+                        if (conn.KnxNatMode && isRouting)
+                            errors.Add($"KNX connection '{conn.Id}' has 'knxNatMode' enabled but 'knxConnectionType' is 'routing'. NAT mode applies only to tunnelling.");
                     }
                 }
             }

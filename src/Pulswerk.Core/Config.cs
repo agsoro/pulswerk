@@ -93,7 +93,17 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("knxPassword")] string? KnxPassword = null,
 
         /// <summary>KNX secure user ID for tunneling slot (default 2).</summary>
-        [property: JsonPropertyName("knxUserId")] int KnxUserId = 2
+        [property: JsonPropertyName("knxUserId")] int KnxUserId = 2,
+
+        /// <summary>
+        /// KNX NAT mode (route-back HPAI). When true, the driver advertises a
+        /// wildcard control/data endpoint (protocol=UDP, IP=0.0.0.0, port=0) in
+        /// all KNXnet/IP HPAI structures so the gateway replies to the UDP source
+        /// address. Required when the gateway is reached across a router/NAT/firewall
+        /// (e.g. a gateway on a different subnet behind OPNsense). Leave false for a
+        /// flat LAN where the gateway can reach the host's real IP directly.
+        /// </summary>
+        [property: JsonPropertyName("knxNatMode")] bool KnxNatMode = false
     )
     {
         /// <summary>Effective device name — explicit or derived from Id.</summary>

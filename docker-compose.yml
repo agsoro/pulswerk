@@ -53,6 +53,11 @@ services:
     ports:
       - "5000:5000"
       - "47808:47808/udp"
+      # KNX local endpoint. Pin the SAME container+host UDP port so the KNXnet/IP
+      # tunnel uses a deterministic source port. Combined with "localPort" in
+      # pulswerk.json this lets Docker bridge conntrack map the gateway's replies
+      # back to the container (and pairs with "knxNatMode": true for gateways behind a router/firewall), and lets you write a tight firewall rule
+      #   allow udp  <host-ip>:51569  ->  10.10.1.40:3671
       - "51569:51569/udp"
     depends_on:
       influxdb:
