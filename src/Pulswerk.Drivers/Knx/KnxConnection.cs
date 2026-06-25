@@ -786,7 +786,7 @@ namespace Pulswerk.Drivers.Knx
                         totalLen = (ushort)((data[4] << 8) | data[5]);
                     }
 
-                    if (serviceType == 0x0203) // TUNNELING_REQUEST
+                    if (serviceType == 0x0420) // TUNNELING_REQUEST
                     {
                         if (data.Length < 10) continue;
                         byte chan = data[7];
@@ -795,7 +795,7 @@ namespace Pulswerk.Drivers.Knx
                         // Send TUNNELING_ACK immediately
                         byte[] ack = new byte[10];
                         ack[0] = 0x06; ack[1] = 0x10;
-                        ack[2] = 0x02; ack[3] = 0x04; // TUNNELING_ACK
+                        ack[2] = 0x04; ack[3] = 0x21; // TUNNELING_ACK (0x0421)
                         ack[4] = 0x00; ack[5] = 0x0A; // Length=10
                         ack[6] = 0x04; // Structure length
                         ack[7] = chan;
@@ -817,7 +817,7 @@ namespace Pulswerk.Drivers.Knx
                         // Parse cEMI frame starting at index 10
                         ParseCemiFrame(data, 10, totalLen - 10);
                     }
-                    else if (serviceType == 0x0204) // TUNNELING_ACK
+                    else if (serviceType == 0x0421) // TUNNELING_ACK
                     {
                         byte ackSeq = data[8];
                         Log.Debug($"[KNX-{_config.Id}] Received TUNNELING_ACK for seq {ackSeq}");
@@ -829,7 +829,7 @@ namespace Pulswerk.Drivers.Knx
                             pending.TrySetResult(true);
                         }
                     }
-                    else if (serviceType == 0x0207) // CONNECTIONSTATE_RESPONSE
+                    else if (serviceType == 0x0208) // CONNECTIONSTATE_RESPONSE
                     {
                         byte chan = data[6];
                         byte status = data[7];
@@ -1055,8 +1055,8 @@ namespace Pulswerk.Drivers.Knx
 
             // Header
             pkt[0] = 0x06; pkt[1] = 0x10;
-            pkt[2] = (byte)(_isRouting ? 0x05 : 0x02);
-            pkt[3] = (byte)(_isRouting ? 0x30 : 0x03); // Routing Indication (0x0530) or Tunneling Request (0x0203)
+            pkt[2] = (byte)(_isRouting ? 0x05 : 0x04);
+            pkt[3] = (byte)(_isRouting ? 0x30 : 0x20); // ROUTING_INDICATION (0x0530) or TUNNELING_REQUEST (0x0420)
             pkt[4] = (byte)((totalLen >> 8) & 0xFF);
             pkt[5] = (byte)(totalLen & 0xFF);
 
