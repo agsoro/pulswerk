@@ -21,6 +21,17 @@ namespace Pulswerk.Drivers.Knx
 
         private readonly ConnectionConfig _config;
         private readonly ConcurrentDictionary<ushort, byte[]> _rawCache = new();
+
+        // All group addresses we know about (configured points + anything seen on the bus).
+        // Used to drive the throttled initial read sweep so the cache fills with current state.
+        private readonly ConcurrentDictionary<ushort, byte> _knownAddresses = new();
+        private Task? _readSweepTask;
+        private volatile bool _readSweepCompleted;
+
+        // Throttling for the initial read sweep (gentle on the bus).
+        private const int ReadSweepBatchSize = 10;
+        private const int ReadSweepBatchDelayMs = 1000;
+        private const int ReadSweepPerReadDelayMs = 50;
         
         private UdpClient? _udpClient;
         private IPEndPoint? _gatewayEndPoint;
@@ -94,6 +105,8 @@ namespace Pulswerk.Drivers.Knx
                     _connected = true;
 
                     _listenTask = Task.Run(() => ListenLoop(_cts.Token));
+                    _readSweepCompleted = false;
+                    TriggerReadSweep();
                 }
                 else
                 {
@@ -126,6 +139,11 @@ namespace Pulswerk.Drivers.Knx
                     {
                         // Start heartbeat loop
                         _heartbeatTask = Task.Run(() => HeartbeatLoop(ct), ct);
+
+                        // Fill the cache with current state via a throttled read sweep.
+                        // (Re-armed each connect; retriggered by the driver once configured points register.)
+                        _readSweepCompleted = false;
+                        TriggerReadSweep();
 
                         // Run the listener loop synchronously in this task until connection drops
                         await ListenLoop(ct);
@@ -841,6 +859,7 @@ namespace Pulswerk.Drivers.Knx
                 }
 
                 _rawCache[destAddr] = payload;
+                RegisterAddress(destAddr);
                 Log.Debug($"[KNX-{_config.Id}] Received address {FormatGroupAddress(destAddr)} value: {BitConverter.ToString(payload)}");
             }
             catch (Exception ex)
@@ -852,6 +871,83 @@ namespace Pulswerk.Drivers.Knx
         public async Task SendGroupRead(ushort groupAddress)
         {
             await SendCemiFrame(groupAddress, new byte[] { 0 }, isSmall: true, isWrite: false);
+        }
+
+        /// <summary>Register a group address so the throttled read sweep will refresh it.</summary>
+        public void RegisterAddress(ushort groupAddress)
+        {
+            if (groupAddress != 0)
+                _knownAddresses.TryAdd(groupAddress, 0);
+        }
+
+        /// <summary>Register multiple group addresses (e.g. all configured points of a device).</summary>
+        public void RegisterAddresses(IEnumerable<ushort> groupAddresses)
+        {
+            foreach (var ga in groupAddresses)
+                RegisterAddress(ga);
+        }
+
+        /// <summary>
+        /// Trigger a one-shot, throttled read sweep across all known group addresses to
+        /// populate the cache with the current state. Safe to call repeatedly; a sweep is
+        /// only started if one is not already running.
+        /// </summary>
+        public void TriggerReadSweep()
+        {
+            lock (_stateLock)
+            {
+                // Skip if a sweep already ran to completion for this connection, or one is in flight.
+                if (_readSweepCompleted) return;
+                if (_readSweepTask is { IsCompleted: false }) return;
+                if (_knownAddresses.IsEmpty) return; // nothing to read yet; will be retriggered once points register
+                var ct = _cts?.Token ?? CancellationToken.None;
+                _readSweepTask = Task.Run(() => ReadSweepLoop(ct), ct);
+            }
+        }
+
+        private async Task ReadSweepLoop(CancellationToken ct)
+        {
+            try
+            {
+                // Snapshot so addresses added mid-sweep don't extend this pass indefinitely.
+                var addresses = _knownAddresses.Keys.ToArray();
+                if (addresses.Length == 0) return;
+
+                Log.Info($"[KNX-{_config.Id}] Starting throttled read sweep for {addresses.Length} group address(es)...");
+
+                int sent = 0;
+                foreach (var ga in addresses)
+                {
+                    if (ct.IsCancellationRequested) break;
+
+                    bool isConn;
+                    lock (_stateLock) { isConn = _connected; }
+                    if (!isConn) break;
+
+                    try { await SendGroupRead(ga); }
+                    catch (Exception ex) { Log.Debug($"[KNX-{_config.Id}] Read sweep request failed for {FormatGroupAddress(ga)}: {ex.Message}"); }
+
+                    sent++;
+
+                    if (sent % ReadSweepBatchSize == 0)
+                    {
+                        try { await Task.Delay(ReadSweepBatchDelayMs, ct); }
+                        catch (TaskCanceledException) { break; }
+                    }
+                    else if (ReadSweepPerReadDelayMs > 0)
+                    {
+                        try { await Task.Delay(ReadSweepPerReadDelayMs, ct); }
+                        catch (TaskCanceledException) { break; }
+                    }
+                }
+
+                _readSweepCompleted = true;
+                Log.Info($"[KNX-{_config.Id}] Read sweep complete ({sent} request(s) sent).");
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"[KNX-{_config.Id}] Read sweep loop error: {ex.Message}");
+            }
         }
 
         public async Task SendGroupWrite(ushort groupAddress, byte[] data, bool isSmall)

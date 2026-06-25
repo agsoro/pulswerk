@@ -46,6 +46,7 @@ namespace Pulswerk.Drivers.Knx
                 try
                 {
                     ushort groupAddr = KnxConnection.ParseGroupAddress(point.GroupAddress);
+                    knxConn.RegisterAddress(groupAddr); // ensure the throttled read sweep covers this point
                     byte[]? rawBytes = knxConn.GetCachedValue(groupAddr);
 
                     if (rawBytes != null)
@@ -68,6 +69,10 @@ namespace Pulswerk.Drivers.Knx
                     Log.Error($"[KNX] Error reading point '{point.Key}' ({point.GroupAddress}) on device '{device.Name}': {ex.Message}");
                 }
             }
+
+            // Now that all configured addresses are registered, kick off the throttled
+            // read sweep (no-op if it already ran for this connection).
+            knxConn.TriggerReadSweep();
 
             return telemetryValues;
         }

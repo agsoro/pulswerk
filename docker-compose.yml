@@ -69,6 +69,7 @@ services:
       - INFLUXDB_BUCKET=telemetry
     volumes:
       - ./pulswerk.json:/app/pulswerk.json:ro    # production config (must exist)
+      - ./ets_export.xml:/app/ets_export.xml:ro  # KNX ETS group-address export referenced by pulswerk.json
       - influx-data:/var/lib/influxdb2:ro
       - pulswerk-data:/app/data
 
