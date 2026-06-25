@@ -58,7 +58,11 @@ namespace Pulswerk.Drivers.Knx
         private readonly SemaphoreSlim _sendGate = new(1, 1);
         private volatile TaskCompletionSource<bool>? _pendingAck;
         private volatile int _pendingAckSeq = -1;
-        private const int TunnelingAckTimeoutMs = 1000;
+        // The KNX spec allows up to 1s before retransmit, but under heavy inbound bus
+        // traffic our ACK can be briefly delayed in the receive queue, causing spurious
+        // retransmits. A slightly longer window avoids that while still recovering from
+        // genuinely lost ACKs.
+        private const int TunnelingAckTimeoutMs = 2000;
         private const int TunnelingAckRetries = 1;
 
         private readonly bool _isRouting;
