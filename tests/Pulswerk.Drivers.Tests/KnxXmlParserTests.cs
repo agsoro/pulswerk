@@ -72,5 +72,43 @@ namespace Pulswerk.Drivers.Tests
                 }
             }
         }
+
+        [Fact]
+        public void TestXmlParserSkipsFreiPlaceholderEntries()
+        {
+            string xmlContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<GroupAddress-Export xmlns=""http://knx.org/xml/ga-export/01"">
+  <GroupRange Name=""Zentral-/Allgemeinfunktionen"" RangeStart=""1"" RangeEnd=""2047"">
+    <GroupRange Name=""Beleuchtung"" RangeStart=""256"" RangeEnd=""511"">
+      <GroupAddress Name=""---frei---"" Address=""0/1/0"" />
+      <GroupAddress Name=""---frei---"" Address=""0/1/1"" />
+      <GroupAddress Name=""Ceiling Light"" Address=""0/1/2"" DPTs=""DPST-1-1"" />
+      <GroupAddress Name=""---frei---"" Address=""0/1/3"" />
+    </GroupRange>
+  </GroupRange>
+</GroupAddress-Export>";
+
+            string tempFile = Path.Combine(AppContext.BaseDirectory, $"temp_knx_export_{Guid.NewGuid():N}.xml");
+            try
+            {
+                File.WriteAllText(tempFile, xmlContent);
+
+                var points = KnxXmlParser.Parse(tempFile);
+
+                Assert.NotNull(points);
+                Assert.Single(points); // Only the named entry should remain
+
+                var p = points[0];
+                Assert.Equal("0/1/2", p.Address);
+                Assert.Equal("Ceiling Light", p.Name);
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+        }
     }
 }

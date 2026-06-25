@@ -52,7 +52,7 @@ namespace Pulswerk.Drivers.Knx
 
             if (localName == "GroupRange")
             {
-                string name = element.Attribute("Name")?.Value ?? "Unnamed Group";
+                string name = element.Attribute("Name")?.Value?.Trim() ?? "Unnamed Group";
                 var newPath = new List<string>(currentPath) { name };
 
                 foreach (var child in element.Elements())
@@ -62,17 +62,21 @@ namespace Pulswerk.Drivers.Knx
             }
             else if (localName == "GroupAddress")
             {
-                string address = element.Attribute("Address")?.Value ?? "";
+                string address = element.Attribute("Address")?.Value?.Trim() ?? "";
                 if (string.IsNullOrWhiteSpace(address))
                     return; // Skip if no address
 
-                string name = element.Attribute("Name")?.Value ?? $"KNX Point {address}";
-                string description = element.Attribute("Description")?.Value ?? "";
+                string name = element.Attribute("Name")?.Value?.Trim() ?? $"KNX Point {address}";
+                if (string.IsNullOrWhiteSpace(name) || IsFreePlaceholder(name))
+                    return; // Skip unused/free entries exported by ETS
+
+                string description = element.Attribute("Description")?.Value?.Trim() ?? "";
                 
-                // Read either DPT or DatapointType
-                string dptAttr = element.Attribute("DPT")?.Value 
-                              ?? element.Attribute("DatapointType")?.Value 
-                              ?? "";
+                // Read either DPT, DPTs or DatapointType (ETS ga-export uses DPTs plural)
+                string dptAttr = (element.Attribute("DPT")?.Value
+                              ?? element.Attribute("DPTs")?.Value
+                              ?? element.Attribute("DatapointType")?.Value
+                              ?? "").Trim();
 
                 string normalizedDpt = KnxDpt.NormalizeDpt(dptAttr);
 
@@ -92,6 +96,19 @@ namespace Pulswerk.Drivers.Knx
                     ParseElement(child, currentPath, points);
                 }
             }
+        }
+
+        private static bool IsFreePlaceholder(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return true;
+
+            var trimmed = name.Trim().Trim('-', '_').Trim();
+            return string.IsNullOrWhiteSpace(trimmed)
+                || trimmed.Equals("---frei---", StringComparison.OrdinalIgnoreCase)
+                || trimmed.Equals("frei", StringComparison.OrdinalIgnoreCase)
+                || trimmed.Equals("---free---", StringComparison.OrdinalIgnoreCase)
+                || trimmed.Equals("free", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
