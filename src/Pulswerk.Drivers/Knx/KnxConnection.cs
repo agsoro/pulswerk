@@ -52,6 +52,15 @@ namespace Pulswerk.Drivers.Knx
         private readonly object _stateLock = new();
         private readonly object _socketLock = new();
 
+        // KNXnet/IP tunneling requires each TUNNELING_REQUEST to be acknowledged with a
+        // TUNNELING_ACK (matching sequence number) before the next request is sent. We
+        // serialize sends with this semaphore and signal the matching ACK via _pendingAck.
+        private readonly SemaphoreSlim _sendGate = new(1, 1);
+        private volatile TaskCompletionSource<bool>? _pendingAck;
+        private volatile int _pendingAckSeq = -1;
+        private const int TunnelingAckTimeoutMs = 1000;
+        private const int TunnelingAckRetries = 1;
+
         private readonly bool _isRouting;
         private readonly string _connectionMode;
         private readonly bool _natMode;
@@ -340,6 +349,7 @@ namespace Pulswerk.Drivers.Knx
                                         if (decryptedAuthRes != null && decryptedAuthRes.Length >= 8 && decryptedAuthRes[2] == 0x09 && decryptedAuthRes[3] == 0x53)
                                         {
                                             _channelId = (byte)(_secureSessionId & 0xFF);
+                                            _sendSeqNum = 0;
                                             lock (_stateLock)
                                             {
                                                 _connected = true;
@@ -639,7 +649,7 @@ namespace Pulswerk.Drivers.Knx
             // Build CONNECTIONSTATE_REQUEST (16 bytes)
             byte[] req = new byte[16];
             req[0] = 0x06; req[1] = 0x10;
-            req[2] = 0x02; req[3] = 0x06; // CONNECTIONSTATE_REQUEST
+            req[2] = 0x02; req[3] = 0x07; // CONNECTIONSTATE_REQUEST (0x0207)
             req[4] = 0x00; req[5] = 0x10; // Length=16
             // CRI info
             req[6] = _channelId;
@@ -772,7 +782,15 @@ namespace Pulswerk.Drivers.Knx
                     }
                     else if (serviceType == 0x0204) // TUNNELING_ACK
                     {
-                        Log.Debug($"[KNX-{_config.Id}] Received TUNNELING_ACK for seq {data[8]}");
+                        byte ackSeq = data[8];
+                        Log.Debug($"[KNX-{_config.Id}] Received TUNNELING_ACK for seq {ackSeq}");
+
+                        // Release the sender waiting on this sequence number.
+                        var pending = _pendingAck;
+                        if (pending != null && _pendingAckSeq == ackSeq)
+                        {
+                            pending.TrySetResult(true);
+                        }
                     }
                     else if (serviceType == 0x0207) // CONNECTIONSTATE_RESPONSE
                     {
@@ -1009,10 +1027,11 @@ namespace Pulswerk.Drivers.Knx
 
             if (!_isRouting)
             {
-                // Connection Header (4 bytes)
+                // Connection Header (4 bytes). The sequence number (pkt[8]) is assigned
+                // later, under the send gate, so it stays in lock-step with the ACKs.
                 pkt[6] = 0x04;
                 pkt[7] = _channelId;
-                pkt[8] = _sendSeqNum++;
+                pkt[8] = 0x00;
                 pkt[9] = 0x00;
                 cemiOffset = 10;
             }
@@ -1051,24 +1070,83 @@ namespace Pulswerk.Drivers.Knx
                 Array.Copy(data, 0, pkt, cemiOffset + 11, data.Length);
             }
 
-            try
+            if (_isRouting)
             {
-                Log.Debug($"[KNX-{_config.Id}] Sending group packet to {FormatGroupAddress(groupAddress)}...");
-                if (_secureEnabled)
+                // Routing is connectionless multicast: just fire the frame, no ACK.
+                try
                 {
-                    byte[] securePkt = EncryptFrame(pkt);
-                    Log.Debug($"[KNX-{_config.Id}] TX {securePkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(securePkt)}");
-                    await client.SendAsync(securePkt, securePkt.Length, _gatewayEndPoint);
-                }
-                else
-                {
+                    Log.Debug($"[KNX-{_config.Id}] Sending group packet to {FormatGroupAddress(groupAddress)}...");
                     Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(pkt)}");
                     await client.SendAsync(pkt, pkt.Length, _gatewayEndPoint);
                 }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KNX-{_config.Id}] Failed to send KNX telegram: {ex.Message}");
+                }
+                return;
             }
-            catch (Exception ex)
+
+            // Tunneling: only one outstanding TUNNELING_REQUEST at a time. We assign the
+            // sequence number, send, and wait for the matching TUNNELING_ACK before
+            // releasing the gate so the gateway never sees out-of-order/unacked requests.
+            await _sendGate.WaitAsync();
+            try
             {
-                Log.Error($"[KNX-{_config.Id}] Failed to send KNX telegram: {ex.Message}");
+                byte seq = _sendSeqNum;
+                pkt[8] = seq;
+
+                var ackTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingAck = ackTcs;
+                _pendingAckSeq = seq;
+
+                Log.Debug($"[KNX-{_config.Id}] Sending group packet to {FormatGroupAddress(groupAddress)} (seq {seq})...");
+
+                bool acked = false;
+                for (int attempt = 0; attempt <= TunnelingAckRetries; attempt++)
+                {
+                    try
+                    {
+                        if (_secureEnabled)
+                        {
+                            byte[] securePkt = EncryptFrame(pkt);
+                            Log.Debug($"[KNX-{_config.Id}] TX {securePkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(securePkt)}");
+                            await client.SendAsync(securePkt, securePkt.Length, _gatewayEndPoint);
+                        }
+                        else
+                        {
+                            Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(pkt)}");
+                            await client.SendAsync(pkt, pkt.Length, _gatewayEndPoint);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[KNX-{_config.Id}] Failed to send KNX telegram: {ex.Message}");
+                        break;
+                    }
+
+                    var completed = await Task.WhenAny(ackTcs.Task, Task.Delay(TunnelingAckTimeoutMs));
+                    if (completed == ackTcs.Task)
+                    {
+                        acked = true;
+                        break;
+                    }
+
+                    if (attempt < TunnelingAckRetries)
+                        Log.Debug($"[KNX-{_config.Id}] No TUNNELING_ACK for seq {seq} within {TunnelingAckTimeoutMs}ms; retransmitting...");
+                }
+
+                if (!acked)
+                    Log.Warning($"[KNX-{_config.Id}] No TUNNELING_ACK for seq {seq} after {TunnelingAckRetries + 1} attempt(s).");
+
+                // Advance the sequence number for the next request regardless (the gateway
+                // expects monotonically increasing seq numbers, wrapping at 256).
+                _sendSeqNum = (byte)(seq + 1);
+            }
+            finally
+            {
+                _pendingAck = null;
+                _pendingAckSeq = -1;
+                _sendGate.Release();
             }
         }
 
@@ -1162,6 +1240,10 @@ namespace Pulswerk.Drivers.Knx
 
             CleanupSession();
             _cts?.Dispose();
+
+            // Unblock any sender waiting on an ACK and release pooled resources.
+            _pendingAck?.TrySetResult(false);
+            try { _sendGate.Dispose(); } catch { }
         }
     }
 }
