@@ -220,6 +220,17 @@ namespace Pulswerk.Drivers.Knx
                         _localIp = _localEndPoint.Address;
                     }
                     Log.Info($"[KNX-{_config.Id}] LocalAddress not configured; auto-resolved local IP via temp socket to {_localIp} (bindPort={bindPort})");
+
+                    // In NAT mode the data HPAI advertises this resolved IP so gateways
+                    // that ignore route-back for tunnelling (e.g. MDT) can reach us. When
+                    // running in a container the auto-resolved IP is the container's
+                    // internal address (e.g. 172.x), which the gateway CANNOT route to —
+                    // ACKs/telegrams will silently vanish. Set "localAddress" to the host
+                    // IP (and publish the same UDP port) to fix this.
+                    if (_natMode && IsLikelyContainerAddress(_localIp))
+                    {
+                        Log.Warning($"[KNX-{_config.Id}] NAT mode is enabled but 'localAddress' is not set; the auto-resolved local IP {_localIp} looks like a container/private address the gateway cannot route back to. TUNNELING_ACKs and bus telegrams may never arrive. Set 'localAddress' to the Docker HOST IP and publish UDP port {_localPort}.");
+                    }
                 }
                 else
                 {
@@ -504,6 +515,21 @@ namespace Pulswerk.Drivers.Knx
         /// whenever the gateway can route directly back to this host (the common case;
         /// the successful CONNECT_RESPONSE already proves the path).</para>
         /// </summary>
+        /// <summary>
+        /// Heuristic: does this look like a Docker/container bridge address (172.16/12)
+        /// that an external KNX gateway would not be able to route a reply back to?
+        /// Used only to emit a helpful warning when NAT mode lacks an explicit
+        /// <c>localAddress</c>.
+        /// </summary>
+        private static bool IsLikelyContainerAddress(IPAddress? ip)
+        {
+            if (ip == null || ip.AddressFamily != AddressFamily.InterNetwork)
+                return false;
+            byte[] b = ip.GetAddressBytes();
+            // 172.16.0.0 – 172.31.255.255 is the default Docker bridge range.
+            return b[0] == 172 && b[1] >= 16 && b[1] <= 31;
+        }
+
         private void WriteHpai(byte[] buffer, int offset, bool isDataEndpoint = false)
         {
             buffer[offset] = 0x08;     // structure length
