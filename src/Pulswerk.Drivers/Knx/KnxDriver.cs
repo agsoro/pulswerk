@@ -102,12 +102,15 @@ namespace Pulswerk.Drivers.Knx
                 }
             }
 
+            // Cache of created folder nodes keyed by their accumulated sub-path under the device node.
+            var folderCache = new Dictionary<string, AssetNodeDto>(StringComparer.OrdinalIgnoreCase);
+
             if (points != null)
             {
                 foreach (var point in points)
                 {
                     string pointKey = $"{device.Id}_{point.Key}";   // globally unique key
-                    
+
                     string niceName = !string.IsNullOrWhiteSpace(point.Name)
                         ? point.Name
                         : System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(point.Key.Replace("_", " "));
@@ -118,16 +121,46 @@ namespace Pulswerk.Drivers.Knx
                         desc = $"{point.Description} ({desc})";
                     }
 
-                    // Resolve dynamic point path nesting from XML
-                    var pointCombinedPath = new List<string>(device.Path ?? new List<string>());
-                    if (xmlPointPaths.TryGetValue(point.GroupAddress, out var xmlSubPath) && xmlSubPath != null)
-                    {
-                        pointCombinedPath.AddRange(xmlSubPath);
-                    }
+                    // Resolve the folder chain (group ranges) for this point from the XML export.
+                    var xmlSubPath = xmlPointPaths.TryGetValue(point.GroupAddress, out var sub) && sub != null
+                        ? sub
+                        : new List<string>();
 
-                    var pointParentPath = pointCombinedPath
-                        .Select(seg => new PathSegmentDto { Id = AssetNodeDto.PathSegmentId(seg), Name = seg })
-                        .ToList();
+                    // Walk/create the folder nodes under the device node so the tree nests properly.
+                    var parentNode = deviceNode;
+                    var pathAccum = new List<PathSegmentDto>(parentPath)
+                    {
+                        new PathSegmentDto { Id = device.Id, Name = device.Name }
+                    };
+                    string pathKey = "";
+
+                    foreach (var rawSegment in xmlSubPath)
+                    {
+                        var segment = rawSegment?.Trim();
+                        if (string.IsNullOrWhiteSpace(segment)) continue;
+
+                        pathKey = string.IsNullOrEmpty(pathKey) ? segment : $"{pathKey}/{segment}";
+                        string folderId = $"{device.Id}_{AssetNodeDto.PathSegmentId(pathKey)}";
+
+                        if (!folderCache.TryGetValue(pathKey, out var folderNode))
+                        {
+                            folderNode = new AssetNodeDto
+                            {
+                                Id = folderId,
+                                Name = segment,
+                                Type = "Folder",
+                                IsView = true
+                            };
+                            folderCache[pathKey] = folderNode;
+                            parentNode.Children.Add(folderNode);
+                        }
+
+                        pathAccum = new List<PathSegmentDto>(pathAccum)
+                        {
+                            new PathSegmentDto { Id = folderId, Name = segment }
+                        };
+                        parentNode = folderNode;
+                    }
 
                     var pDto = new TelemetryDto
                     {
@@ -139,15 +172,11 @@ namespace Pulswerk.Drivers.Knx
                         Type = point.Dpt.StartsWith("1.") ? "Binary" : "Analog",
                         Key = pointKey,
                         IsWritable = point.Writable,
-                        ParentPath = pointParentPath
+                        ParentId = parentNode.Id,
+                        ParentPath = pathAccum
                     };
 
-                    if (pointCombinedPath.Count > 0)
-                    {
-                        pDto.ParentId = AssetNodeDto.PathSegmentId(pointCombinedPath.Last());
-                    }
-
-                    deviceNode.Telemetries.Add(pDto);
+                    parentNode.Telemetries.Add(pDto);
                 }
             }
 
