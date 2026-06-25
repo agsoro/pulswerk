@@ -406,8 +406,11 @@ namespace Pulswerk.Drivers.Knx
                 // HPAI Control Endpoint (route-back in NAT mode)
                 WriteHpai(req, 6);
 
-                // HPAI Data Endpoint (route-back in NAT mode)
-                WriteHpai(req, 14);
+                // HPAI Data Endpoint. Advertise our real local IP:port here even in NAT
+                // mode so gateways that send TUNNELING_REQUEST/ACK to the literal data
+                // HPAI (e.g. MDT) can reach us — route-back-only data endpoints make the
+                // tunnelling ACKs disappear.
+                WriteHpai(req, 14, isDataEndpoint: true);
 
                 // CRI (Connection Request Information)
                 req[22] = 0x04; // CRI Structure Length
@@ -492,13 +495,21 @@ namespace Pulswerk.Drivers.Knx
         /// so the gateway replies to the actual UDP source address — required when the
         /// gateway is reached across a router/NAT/firewall. Otherwise the host's real
         /// local IP and bound port are advertised (flat-LAN behaviour).
+        ///
+        /// <para><paramref name="isDataEndpoint"/> should be true for the CONNECT_REQUEST
+        /// *data* HPAI. Some gateways (e.g. MDT) honour route-back only for the control
+        /// channel and send ongoing TUNNELING_REQUEST/ACK traffic to the literal data
+        /// HPAI; advertising 0.0.0.0:0 there makes those replies disappear. So even in
+        /// NAT mode we advertise our real local IP:port for the data endpoint, which works
+        /// whenever the gateway can route directly back to this host (the common case;
+        /// the successful CONNECT_RESPONSE already proves the path).</para>
         /// </summary>
-        private void WriteHpai(byte[] buffer, int offset)
+        private void WriteHpai(byte[] buffer, int offset, bool isDataEndpoint = false)
         {
             buffer[offset] = 0x08;     // structure length
             buffer[offset + 1] = 0x01; // host protocol = UDP/IPv4
 
-            if (_natMode)
+            if (_natMode && !isDataEndpoint)
             {
                 // IP (4) + port (2) = 0 → gateway must use the UDP source endpoint.
                 buffer[offset + 2] = 0; buffer[offset + 3] = 0;
