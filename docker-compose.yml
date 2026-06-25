@@ -58,6 +58,13 @@ services:
       # pulswerk.json this lets Docker bridge conntrack map the gateway's replies
       # back to the container (and pairs with "knxNatMode": true for gateways behind a router/firewall), and lets you write a tight firewall rule
       #   allow udp  <host-ip>:51569  ->  10.10.1.40:3671
+      #
+      # IMPORTANT: also set "localAddress": "<host-ip>" in pulswerk.json. Some
+      # gateways (e.g. MDT) send TUNNELING_REQUEST/ACK to the literal HPAI *data*
+      # endpoint rather than honouring NAT route-back. The auto-resolved local IP
+      # is the container's internal address (172.x) which the gateway can't reach,
+      # so the data HPAI must advertise the host IP. The published port below then
+      # forwards the gateway's tunnelling traffic into the container.
       - "51569:51569/udp"
     depends_on:
       influxdb:
