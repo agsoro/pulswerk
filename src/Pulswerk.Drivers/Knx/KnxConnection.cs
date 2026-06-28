@@ -389,7 +389,6 @@ namespace Pulswerk.Drivers.Knx
                     if (!isConn) break;
 
                     if (!_rxQueue.TryTake(out var data, 200, ct)) continue;
-                    Log.Debug($"[KNX-{_config.Id}] RX {data.Length} bytes: {BitConverter.ToString(data)}");
 
                     if (data.Length < 6) continue;
 
@@ -499,7 +498,6 @@ namespace Pulswerk.Drivers.Knx
 
                 _rawCache[destAddr] = payload;
                 RegisterAddress(destAddr);
-                Log.Debug($"[KNX-{_config.Id}] Received address {FormatGroupAddress(destAddr)} value: {BitConverter.ToString(payload)}");
 
                 // command 2 = GroupValueWrite  -> a device spontaneously pushing a new value
                 // command 1 = GroupValueResponse -> an answer to one of our own GroupValueRead
@@ -709,10 +707,8 @@ namespace Pulswerk.Drivers.Knx
                 byte seq = _sendSeqNum;
                 pkt[8] = seq;
 
-                Log.Debug($"[KNX-{_config.Id}] Sending group packet to {FormatGroupAddress(groupAddress)} (seq {seq})...");
                 try
                 {
-                    Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes: {BitConverter.ToString(pkt)}");
                     await SendKnxIpFrameAsync(pkt, _cts?.Token ?? default);
                 }
                 catch (Exception ex)
