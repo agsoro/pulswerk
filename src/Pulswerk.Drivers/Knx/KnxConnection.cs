@@ -85,18 +85,9 @@ namespace Pulswerk.Drivers.Knx
         private readonly object _stateLock = new();
         private readonly object _socketLock = new();
 
-        // KNXnet/IP tunneling requires each TUNNELING_REQUEST to be acknowledged with a
-        // TUNNELING_ACK (matching sequence number) before the next request is sent. We
-        // serialize sends with this semaphore and signal the matching ACK via _pendingAck.
+        // KNX tunnelling over TCP does not use TUNNELING_ACKs, so we just serialise sends
+        // (one TUNNELING_REQUEST written at a time) with this semaphore.
         private readonly SemaphoreSlim _sendGate = new(1, 1);
-        private volatile TaskCompletionSource<bool>? _pendingAck;
-        private volatile int _pendingAckSeq = -1;
-        // The KNX spec allows up to 1s before retransmit, but under heavy inbound bus
-        // traffic our ACK can be briefly delayed in the receive queue, causing spurious
-        // retransmits. A slightly longer window avoids that while still recovering from
-        // genuinely lost ACKs.
-        private const int TunnelingAckTimeoutMs = 2000;
-        private const int TunnelingAckRetries = 1;
 
         private readonly bool _secureEnabled;
         // All tunnelling traffic flows over a single TCP session (plain or secure). The
@@ -405,35 +396,17 @@ namespace Pulswerk.Drivers.Knx
                     if (serviceType == 0x0420) // TUNNELING_REQUEST
                     {
                         if (data.Length < 10) continue;
-                        byte chan = data[7];
-                        byte seq = data[8];
 
-                        // Send TUNNELING_ACK immediately
-                        byte[] ack = new byte[10];
-                        ack[0] = 0x06; ack[1] = 0x10;
-                        ack[2] = 0x04; ack[3] = 0x21; // TUNNELING_ACK (0x0421)
-                        ack[4] = 0x00; ack[5] = 0x0A; // Length=10
-                        ack[6] = 0x04; // Structure length
-                        ack[7] = chan;
-                        ack[8] = seq;
-                        ack[9] = 0x00; // Status=Success
-
-                        await SendKnxIpFrameAsync(ack, ct);
-
-                        // Parse cEMI frame starting at index 10
+                        // Over TCP we do NOT send TUNNELING_ACKs (the spec disables them;
+                        // TCP provides reliability). We just consume the cEMI payload. This
+                        // covers both bus telegrams (L_Data.ind) and our own send
+                        // confirmations (L_Data.con) the gateway echoes back.
                         ParseCemiFrame(data, 10, totalLen - 10);
                     }
-                    else if (serviceType == 0x0421) // TUNNELING_ACK
+                    else if (serviceType == 0x0421) // TUNNELING_ACK (not used over TCP; ignore)
                     {
-                        byte ackSeq = data[8];
-                        Log.Debug($"[KNX-{_config.Id}] Received TUNNELING_ACK for seq {ackSeq}");
-
-                        // Release the sender waiting on this sequence number.
-                        var pending = _pendingAck;
-                        if (pending != null && _pendingAckSeq == ackSeq)
-                        {
-                            pending.TrySetResult(true);
-                        }
+                        // KNX tunnelling over TCP does not use TUNNELING_ACK. If a gateway
+                        // sends one anyway, simply ignore it.
                     }
                     else if (serviceType == 0x0208) // CONNECTIONSTATE_RESPONSE
                     {
@@ -702,57 +675,33 @@ namespace Pulswerk.Drivers.Knx
                 Array.Copy(data, 0, pkt, cemiOffset + 11, data.Length);
             }
 
-            // Tunneling: only one outstanding TUNNELING_REQUEST at a time. We assign the
-            // sequence number, send, and wait for the matching TUNNELING_ACK before
-            // releasing the gate so the gateway never sees out-of-order/unacked requests.
+            // Tunnelling over TCP: per the KNXnet/IP spec, TUNNELING_REQUESTs are NOT
+            // acknowledged with TUNNELING_ACK over TCP — the reliable stream provides flow
+            // control and the sequence counter is ignored. So we simply serialise sends and
+            // write the frame; the gateway confirms with an inbound L_Data.con telegram
+            // (handled by the listener), not an ACK.
             await _sendGate.WaitAsync();
             try
             {
                 byte seq = _sendSeqNum;
                 pkt[8] = seq;
 
-                var ackTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _pendingAck = ackTcs;
-                _pendingAckSeq = seq;
-
                 Log.Debug($"[KNX-{_config.Id}] Sending group packet to {FormatGroupAddress(groupAddress)} (seq {seq})...");
-
-                bool acked = false;
-                for (int attempt = 0; attempt <= TunnelingAckRetries; attempt++)
+                try
                 {
-                    try
-                    {
-                        Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes: {BitConverter.ToString(pkt)}");
-                        await SendKnxIpFrameAsync(pkt, _cts?.Token ?? default);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"[KNX-{_config.Id}] Failed to send KNX telegram: {ex.Message}");
-                        break;
-                    }
-
-                    var completed = await Task.WhenAny(ackTcs.Task, Task.Delay(TunnelingAckTimeoutMs));
-                    if (completed == ackTcs.Task)
-                    {
-                        acked = true;
-                        break;
-                    }
-
-                    if (attempt < TunnelingAckRetries)
-                        Log.Debug($"[KNX-{_config.Id}] No TUNNELING_ACK for seq {seq} within {TunnelingAckTimeoutMs}ms; retransmitting...");
+                    Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes: {BitConverter.ToString(pkt)}");
+                    await SendKnxIpFrameAsync(pkt, _cts?.Token ?? default);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KNX-{_config.Id}] Failed to send KNX telegram: {ex.Message}");
                 }
 
-                if (!acked)
-                    Log.Warning($"[KNX-{_config.Id}] No TUNNELING_ACK for seq {seq} after {TunnelingAckRetries + 1} attempt(s).");
-
-                // Advance the sequence number for the next request regardless (the gateway
-                // expects monotonically increasing seq numbers, wrapping at 256).
+                // Advance the sequence number for the next request (wraps at 256).
                 _sendSeqNum = (byte)(seq + 1);
             }
             finally
             {
-                _pendingAck = null;
-                _pendingAckSeq = -1;
                 _sendGate.Release();
             }
         }
@@ -839,8 +788,6 @@ namespace Pulswerk.Drivers.Knx
             CleanupSession();
             _cts?.Dispose();
 
-            // Unblock any sender waiting on an ACK and release pooled resources.
-            _pendingAck?.TrySetResult(false);
             try { _sendGate.Dispose(); } catch { }
         }
     }

@@ -135,20 +135,8 @@ namespace KnxSim
                     }
                     else if (serviceType == 0x0420) // TUNNELING_REQUEST (Host writes or reads)
                     {
-                        byte chan = data[7];
-                        byte seq = data[8];
-
-                        // Send TUNNELING_ACK
-                        byte[] ack = new byte[10];
-                        ack[0] = 0x06; ack[1] = 0x10;
-                        ack[2] = 0x04; ack[3] = 0x21; // TUNNELING_ACK (0x0421)
-                        ack[4] = 0x00; ack[5] = 0x0A;
-                        ack[6] = 0x04;
-                        ack[7] = chan;
-                        ack[8] = seq;
-                        ack[9] = 0x00; // Success
-
-                        Send(ack);
+                        // KNX tunnelling over TCP does NOT use TUNNELING_ACK (TCP provides
+                        // reliability), so — like a real TCP gateway — we don't send one.
 
                         // Parse CEMI payload starting at index 10
                         if (data.Length >= 20)

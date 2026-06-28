@@ -52,6 +52,17 @@ namespace Pulswerk.Drivers.Knx
                     if (rawBytes != null)
                     {
                         object decodedValue = KnxDpt.Decode(rawBytes, point.Dpt);
+
+                        // DPT 1.xxx booleans should surface as their standardized state
+                        // label (e.g. "on"/"off", "open"/"close") rather than a raw
+                        // boolean, which would otherwise render as "True"/"False".
+                        if (decodedValue is bool boolValue)
+                        {
+                            string? stateLabel = KnxDpt.GetDpt1StateLabel(boolValue, point.Dpt);
+                            if (stateLabel != null)
+                                decodedValue = stateLabel.ToLowerInvariant();
+                        }
+
                         telemetryValues[point.Key] = decodedValue;
                     }
                     else
@@ -412,12 +423,11 @@ namespace Pulswerk.Drivers.Knx
             if (DptUnits.TryGetValue(dpt, out var unit))
                 return unit;
 
-            // DPT 1.xxx binary datapoints have no engineering unit; instead expose their
-            // standardized named states (e.g. "Off/On", "Open/Close") so the UI can render
-            // the value as a meaningful state rather than a bare 0/1.
-            var states = KnxDpt.GetDpt1States(dpt);
-            if (states != null)
-                return $"{states.Value.Zero}/{states.Value.One}";
+            // DPT 1.xxx binary datapoints have no engineering unit. The value itself is
+            // rendered as a meaningful state label (e.g. "on"/"off") in KnxDriver.Read,
+            // so no unit should be attached.
+            if (KnxDpt.GetDpt1States(dpt) != null)
+                return null;
 
             return null;
         }

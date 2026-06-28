@@ -112,6 +112,7 @@ namespace Pulswerk.Drivers.Knx
                     Log.Info($"[KNX-{_logId}] Secure TCP connected to {_gateway}. Starting handshake...");
                     if (!await HandshakeAsync(ct))
                     {
+                        Log.Error($"[KNX-{_logId}] Secure handshake did not complete; closing connection (will retry).");
                         Close();
                         return false;
                     }
@@ -138,11 +139,14 @@ namespace Pulswerk.Drivers.Knx
         // ── Handshake ────────────────────────────────────────────────────────────
         private async Task<bool> HandshakeAsync(CancellationToken ct)
         {
+            Log.Debug($"[KNX-{_logId}] Secure handshake: starting (user id {UserId}).");
+
             // 1. Generate ephemeral X25519 keypair.
             byte[] clientPriv = new byte[32];
             byte[] clientPub = new byte[32];
             new SecureRandom().NextBytes(clientPriv);
             X25519.GeneratePublicKey(clientPriv, 0, clientPub, 0);
+            Log.Debug($"[KNX-{_logId}] Secure handshake step 1/4: generated ephemeral X25519 key pair.");
 
             // 2. SESSION_REQUEST: header + HPAI(TCP route-back) + client public key.
             byte[] req = new byte[6 + 8 + 32];
@@ -151,12 +155,13 @@ namespace Pulswerk.Drivers.Knx
             req[6] = 0x08; req[7] = 0x02;
             Array.Copy(clientPub, 0, req, 14, 32);
             await WriteRawAsync(req, ct);
+            Log.Debug($"[KNX-{_logId}] Secure handshake step 2/4: SESSION_REQUEST sent; waiting for SESSION_RESPONSE...");
 
             // 3. SESSION_RESPONSE: SSID(2) + server public key(32) + MAC(16).
             byte[]? resp = await ReadRawFrameAsync(ct);
             if (resp == null || ReadServiceType(resp) != SESSION_RESPONSE || resp.Length < 6 + 50)
             {
-                Log.Warning($"[KNX-{_logId}] Expected SESSION_RESPONSE, got {(resp == null ? "nothing" : $"0x{ReadServiceType(resp):X4}")}.");
+                Log.Error($"[KNX-{_logId}] Secure handshake FAILED: expected SESSION_RESPONSE, got {(resp == null ? "nothing (connection closed/timeout)" : $"0x{ReadServiceType(resp):X4}, {resp.Length} bytes")}.");
                 return false;
             }
 
@@ -165,6 +170,7 @@ namespace Pulswerk.Drivers.Knx
             Array.Copy(resp, 8, serverPub, 0, 32);
             byte[] serverMac = new byte[16];
             Array.Copy(resp, 40, serverMac, 0, 16);
+            Log.Debug($"[KNX-{_logId}] Secure handshake step 3/4: SESSION_RESPONSE received (SSID={_sessionId}); verifying device authentication...");
 
             byte[] pubXor = KnxSecureCrypto.Xor(clientPub, serverPub);
 
@@ -176,14 +182,16 @@ namespace Pulswerk.Drivers.Knx
             var (_, respMacTr) = KnxSecureCrypto.Ctr(_deviceAuthCode!, KnxSecureCrypto.Counter0Handshake, Array.Empty<byte>(), serverMac);
             if (!ConstantTimeEquals(respMacCbc, respMacTr))
             {
-                Log.Error($"[KNX-{_logId}] SESSION_RESPONSE MAC verification failed — wrong commissioning password?");
+                Log.Error($"[KNX-{_logId}] Secure handshake FAILED: SESSION_RESPONSE MAC verification failed — the commissioning password is wrong.");
                 return false;
             }
+            Log.Debug($"[KNX-{_logId}] Secure handshake: device authentication MAC verified (commissioning password is correct).");
 
             // 5. Derive the session key: SHA256(ECDH shared secret)[:16].
             byte[] shared = new byte[32];
             X25519.ScalarMult(clientPriv, 0, serverPub, 0, shared, 0);
             _sessionKey = KnxSecureCrypto.SessionKeyFromSharedSecret(shared);
+            Log.Debug($"[KNX-{_logId}] Secure handshake: session key derived.");
 
             // 6. Build SESSION_AUTHENTICATE: reserved(0) + userId + MAC(16).
             //    MAC over additional_data = header(06 10 09 53 00 18) + reserved + userId + XOR(pubkeys),
@@ -201,27 +209,29 @@ namespace Pulswerk.Drivers.Knx
 
             // 7. SESSION_AUTHENTICATE must be wrapped in a SECURE_WRAPPER.
             await WriteRawAsync(Wrap(auth), ct);
+            Log.Debug($"[KNX-{_logId}] Secure handshake step 4/4: SESSION_AUTHENTICATE sent; waiting for SESSION_STATUS...");
 
             // 8. Expect a wrapped SESSION_STATUS (status 0 = authentication success).
             byte[]? statusWrapped = await ReadRawFrameAsync(ct);
             if (statusWrapped == null || ReadServiceType(statusWrapped) != SECURE_WRAPPER)
             {
-                Log.Warning($"[KNX-{_logId}] Expected wrapped SESSION_STATUS, got {(statusWrapped == null ? "nothing" : $"0x{ReadServiceType(statusWrapped):X4}")}.");
+                Log.Error($"[KNX-{_logId}] Secure handshake FAILED: expected wrapped SESSION_STATUS, got {(statusWrapped == null ? "nothing (connection closed/timeout)" : $"0x{ReadServiceType(statusWrapped):X4}")}.");
                 return false;
             }
             byte[]? status = Unwrap(statusWrapped);
             if (status == null || ReadServiceType(status) != SESSION_STATUS)
             {
-                Log.Error($"[KNX-{_logId}] SESSION_STATUS could not be decrypted/verified.");
+                Log.Error($"[KNX-{_logId}] Secure handshake FAILED: SESSION_STATUS could not be decrypted/verified (session key mismatch).");
                 return false;
             }
             byte statusCode = status.Length >= 7 ? status[6] : (byte)0xFF;
             if (statusCode != 0x00)
             {
-                Log.Error($"[KNX-{_logId}] Secure authentication rejected (status 0x{statusCode:X2}). Check user id / password.");
+                Log.Error($"[KNX-{_logId}] Secure handshake FAILED: authentication rejected by gateway (status 0x{statusCode:X2}). Check the user id / commissioning password.");
                 return false;
             }
 
+            Log.Info($"[KNX-{_logId}] Secure handshake SUCCEEDED (SSID={_sessionId}, user id {UserId}).");
             return true;
         }
 
