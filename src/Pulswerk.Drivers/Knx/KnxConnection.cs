@@ -109,6 +109,15 @@ namespace Pulswerk.Drivers.Knx
             return _rawCache.TryGetValue(groupAddress, out var val) ? val : null;
         }
 
+        /// <summary>
+        /// Raised when a genuinely unsolicited <c>GroupValueWrite</c> telegram arrives on
+        /// the bus (a device pushing a new value on its own), as opposed to a
+        /// <c>GroupValueResponse</c> answering one of our own read requests. The arguments
+        /// are the destination group address and the raw payload bytes. Subscribers can use
+        /// this to classify such updates as "push" traffic. Handlers must not throw.
+        /// </summary>
+        public event Action<ushort, byte[]>? OnUnsolicitedGroupWrite;
+
         /// <summary>True once a tunnel session is established with the gateway.</summary>
         public bool IsConnected
         {
@@ -491,6 +500,20 @@ namespace Pulswerk.Drivers.Knx
                 _rawCache[destAddr] = payload;
                 RegisterAddress(destAddr);
                 Log.Debug($"[KNX-{_config.Id}] Received address {FormatGroupAddress(destAddr)} value: {BitConverter.ToString(payload)}");
+
+                // command 2 = GroupValueWrite  -> a device spontaneously pushing a new value
+                // command 1 = GroupValueResponse -> an answer to one of our own GroupValueRead
+                //                                    requests (the throttled read sweep / poll = pull)
+                // Only genuine, unsolicited writes count as "push" traffic.
+                if (command == 2)
+                {
+                    var handler = OnUnsolicitedGroupWrite;
+                    if (handler != null)
+                    {
+                        try { handler(destAddr, payload); }
+                        catch (Exception ex) { Log.Debug($"[KNX-{_config.Id}] Unsolicited-write handler error: {ex.Message}"); }
+                    }
+                }
             }
             catch (Exception ex)
             {

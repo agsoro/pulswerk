@@ -111,6 +111,62 @@ namespace Pulswerk.Drivers.Tests
             Assert.Throws<FormatException>(() => KnxDpt.Encode("Frobnicate", "1.001", out _));
         }
 
+        // ── Unsolicited GroupValueWrite -> push telemetry decoding ────────────
+
+        private static Pulswerk.Core.DeviceConfig MakeKnxDevice(params Pulswerk.Core.KnxPointConfig[] points) =>
+            new(
+                Id: "knx-dev",
+                Name: "KNX Dev",
+                DeviceType: "knx",
+                ConnectionId: "knx-1",
+                KnxPoints: new System.Collections.Generic.List<Pulswerk.Core.KnxPointConfig>(points)
+            );
+
+        [Fact]
+        public void TestDecodePushUpdate_BooleanProducesLowercaseStateUnderBothKeys()
+        {
+            var driver = new KnxDriver();
+            var device = MakeKnxDevice(
+                new Pulswerk.Core.KnxPointConfig("rain", "1/2/3", "1.001"));
+
+            ushort ga = KnxConnection.ParseGroupAddress("1/2/3");
+
+            var onValues = driver.DecodePushUpdate(device, ga, new byte[] { 1 });
+            // Emitted under both the unscoped and device-scoped key, as "on" (not "True").
+            Assert.Equal("on", onValues["rain"]);
+            Assert.Equal("on", onValues["knx-dev_rain"]);
+
+            var offValues = driver.DecodePushUpdate(device, ga, new byte[] { 0 });
+            Assert.Equal("off", offValues["rain"]);
+            Assert.Equal("off", offValues["knx-dev_rain"]);
+        }
+
+        [Fact]
+        public void TestDecodePushUpdate_AnalogProducesNumericValue()
+        {
+            var driver = new KnxDriver();
+            var device = MakeKnxDevice(
+                new Pulswerk.Core.KnxPointConfig("temp", "2/0/1", "9.001"));
+
+            ushort ga = KnxConnection.ParseGroupAddress("2/0/1");
+            byte[] payload = KnxDpt.Encode(21.5, "9.001", out _);
+
+            var values = driver.DecodePushUpdate(device, ga, payload);
+            Assert.Equal(21.5, values["knx-dev_temp"]);
+        }
+
+        [Fact]
+        public void TestDecodePushUpdate_UnknownAddressYieldsNothing()
+        {
+            var driver = new KnxDriver();
+            var device = MakeKnxDevice(
+                new Pulswerk.Core.KnxPointConfig("temp", "2/0/1", "9.001"));
+
+            ushort otherGa = KnxConnection.ParseGroupAddress("7/7/7");
+            var values = driver.DecodePushUpdate(device, otherGa, new byte[] { 1 });
+            Assert.Empty(values);
+        }
+
         [Fact]
         public void TestDpt5Scaling()
         {

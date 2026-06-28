@@ -51,19 +51,7 @@ namespace Pulswerk.Drivers.Knx
 
                     if (rawBytes != null)
                     {
-                        object decodedValue = KnxDpt.Decode(rawBytes, point.Dpt);
-
-                        // DPT 1.xxx booleans should surface as their standardized state
-                        // label (e.g. "on"/"off", "open"/"close") rather than a raw
-                        // boolean, which would otherwise render as "True"/"False".
-                        if (decodedValue is bool boolValue)
-                        {
-                            string? stateLabel = KnxDpt.GetDpt1StateLabel(boolValue, point.Dpt);
-                            if (stateLabel != null)
-                                decodedValue = stateLabel.ToLowerInvariant();
-                        }
-
-                        telemetryValues[point.Key] = decodedValue;
+                        telemetryValues[point.Key] = DecodePointValue(rawBytes, point.Dpt);
                     }
                     else
                     {
@@ -267,6 +255,73 @@ namespace Pulswerk.Drivers.Knx
         public bool IsWritable(string key)
         {
             return true; 
+        }
+
+        // ── Value decoding ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Decodes a raw KNX payload for a given DPT into the telemetry value as it should
+        /// be surfaced to the dashboard. DPT 1.xxx booleans are converted to their
+        /// standardized lower-case state label (e.g. "on"/"off", "open"/"close") instead of
+        /// a raw boolean (which would otherwise render as "True"/"False").
+        /// </summary>
+        private static object DecodePointValue(byte[] rawBytes, string dpt)
+        {
+            object decodedValue = KnxDpt.Decode(rawBytes, dpt);
+
+            if (decodedValue is bool boolValue)
+            {
+                string? stateLabel = KnxDpt.GetDpt1StateLabel(boolValue, dpt);
+                if (stateLabel != null)
+                    decodedValue = stateLabel.ToLowerInvariant();
+            }
+
+            return decodedValue;
+        }
+
+        /// <summary>
+        /// Decodes an unsolicited bus telegram (a spontaneous <c>GroupValueWrite</c>) for the
+        /// given device into the set of telemetry key/value pairs it affects. A single group
+        /// address may back more than one configured point, so the result can contain
+        /// multiple entries. For parity with the normal poll path
+        /// (<see cref="DevicePoller"/>), each affected point is emitted under both its
+        /// unscoped key (<c>pointKey</c>) and its globally-unique device-scoped key
+        /// (<c>"{deviceId}_{pointKey}"</c>, matching <see cref="GetAssetHierarchy"/>).
+        /// Returns an empty dictionary when no point of the device maps to
+        /// <paramref name="groupAddress"/>.
+        /// </summary>
+        public Dictionary<string, object> DecodePushUpdate(DeviceConfig device, ushort groupAddress, byte[] payload)
+        {
+            var result = new Dictionary<string, object>();
+            if (payload == null || payload.Length == 0)
+                return result;
+
+            var points = GetEffectivePoints(device);
+            if (points == null || points.Count == 0)
+                return result;
+
+            foreach (var point in points)
+            {
+                ushort pointAddr;
+                try { pointAddr = KnxConnection.ParseGroupAddress(point.GroupAddress); }
+                catch { continue; }
+
+                if (pointAddr != groupAddress)
+                    continue;
+
+                try
+                {
+                    object value = DecodePointValue(payload, point.Dpt);
+                    result[point.Key] = value;
+                    result[$"{device.Id}_{point.Key}"] = value;
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug($"[KNX] Failed to decode pushed value for point '{point.Key}' ({point.GroupAddress}): {ex.Message}");
+                }
+            }
+
+            return result;
         }
 
         // ── XML Parsing Helpers ────────────────────────────────────────────────

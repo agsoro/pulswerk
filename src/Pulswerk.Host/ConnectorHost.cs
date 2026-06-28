@@ -412,12 +412,62 @@ namespace Pulswerk.Host
                 {
                     Log.Info($"[KNX] Initialising connection '{conn.Id}'...");
                     var knxConn = new KnxConnection(conn);
+
+                    // Unsolicited GroupValueWrite telegrams (a device spontaneously pushing
+                    // a new value) are genuine "push" traffic — feed them straight into the
+                    // telemetry pipeline tagged as push, mirroring the BACnet COV path,
+                    // instead of waiting for the next poll cycle to scrape the cache as pull.
+                    var capturedConn = conn;
+                    knxConn.OnUnsolicitedGroupWrite += (groupAddress, payload) =>
+                        HandleKnxPush(capturedConn, groupAddress, payload);
+
                     knxConn.Start();
                 }
                 catch (Exception ex)
                 {
                     Log.Error($"[KNX] Failed to start connection '{conn.Id}': {ex.Message}");
                 }
+            }
+        }
+
+        // Handles an unsolicited KNX GroupValueWrite by decoding it for every KNX device on
+        // the originating connection and publishing the affected telemetries as push traffic.
+        void HandleKnxPush(ConnectionConfig conn, ushort groupAddress, byte[] payload)
+        {
+            try
+            {
+                var devices = _cfg.Devices.Where(d =>
+                    string.Equals(d.DeviceType, "knx", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(d.ConnectionId, conn.Id, StringComparison.OrdinalIgnoreCase));
+
+                foreach (var device in devices)
+                {
+                    if (!_drivers.TryGetValue(device.Name, out var driver) || driver is not KnxDriver knxDriver)
+                        continue;
+
+                    var values = knxDriver.DecodePushUpdate(device, groupAddress, payload);
+                    if (values.Count == 0)
+                        continue;
+
+                    _dataStore.InsertBatch(values);
+                    var persisted = _dataService?.UpdateTelemetries(values, isPush: true);
+                    if (persisted != null)
+                    {
+                        foreach (var p in persisted)
+                        {
+                            if (!values.ContainsKey(p.Key))
+                                _dataStore.Insert(p.Key,
+                                    new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                    p.Value.val);
+                        }
+                    }
+
+                    _lastPolledAt[device.Name] = DateTime.UtcNow;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"[KNX] Failed to handle pushed value for {KnxConnection.FormatGroupAddress(groupAddress)} on '{conn.Id}': {ex.Message}");
             }
         }
 
