@@ -117,6 +117,7 @@
       "port": 3671,
       "knxSecureEnabled": false,
       "knxCommissioningPassword": "code-printed-on-the-bridge",
+      "knxStaleSeconds": 180,
       "name": "KNX Test Gateway"
     }
   ],

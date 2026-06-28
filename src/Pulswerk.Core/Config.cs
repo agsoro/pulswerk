@@ -117,7 +117,18 @@ namespace Pulswerk.Core
         /// connections the value from the first started KNX connection wins. Values
         /// &lt;= 0 are treated as 1. Defaults to 2 when not set.
         /// </summary>
-        [property: JsonPropertyName("knxMaxConcurrentConnects")] int? KnxMaxConcurrentConnects = null
+        [property: JsonPropertyName("knxMaxConcurrentConnects")] int? KnxMaxConcurrentConnects = null,
+
+        /// <summary>
+        /// Maximum age, in seconds, for which a cached KNX group value is considered
+        /// "live". Values that have not been refreshed (via an unsolicited bus write,
+        /// a read response, or the periodic read sweep) within this window are treated
+        /// as stale and are <b>not</b> emitted as telemetry, so the dashboard shows a
+        /// gap rather than a silently outdated value. Values &lt;= 0 disable staleness
+        /// checking (cached values are always returned). Defaults to 180 seconds
+        /// (3× the 60s read-sweep interval) when not set.
+        /// </summary>
+        [property: JsonPropertyName("knxStaleSeconds")] int? KnxStaleSeconds = null
     )
     {
         /// <summary>Effective device name — explicit or derived from Id.</summary>

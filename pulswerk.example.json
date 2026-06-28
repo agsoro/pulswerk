@@ -48,6 +48,7 @@
       "knxSecureEnabled": true,
       // knxCommissioningPassword: Device authentication code (FDSK) printed on the device label as hyphen groups over several lines (a line break on the label = a hyphen). Enter as ONE line keeping the hyphens between every group, exact case, e.g. label 'ABCDE-ABCDE / ABCDE-ABCDE' becomes 'ABCDE-ABCDE-ABCDE-ABCDE'.",
       "knxCommissioningPassword": "ABCDE-ABCDE-ABCDE-ABCDE-ABCDE-ABCDE",
+      "knxStaleSeconds": 180,
       "name": "KNX Test Gateway"
     }
   ],

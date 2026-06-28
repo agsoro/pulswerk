@@ -53,15 +53,11 @@ namespace Pulswerk.Drivers.Knx
                     {
                         telemetryValues[point.Key] = DecodePointValue(rawBytes, point.Dpt);
                     }
-                    else
-                    {
-                        // Trigger an asynchronous read request on the bus to populate the cache for next poll
-                        _ = Task.Run(async () =>
-                        {
-                            try { await knxConn.SendGroupRead(groupAddr); }
-                            catch (Exception ex) { Log.Debug($"[KNX] Auto-poll read request failed for {point.GroupAddress}: {ex.Message}"); }
-                        });
-                    }
+                    // If the value is missing or stale we do NOT issue an ad-hoc read here:
+                    // the throttled read sweep is the single, bus-friendly pulling mechanism
+                    // and already (re-)reads exactly the addresses that need it ("only
+                    // necessary pulling"). Firing a read on every poll cycle would bypass the
+                    // throttle and double-pull addresses the bus may push on its own.
                 }
                 catch (Exception ex)
                 {

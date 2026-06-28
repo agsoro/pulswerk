@@ -57,7 +57,35 @@ namespace Pulswerk.Drivers.Knx
         }
 
         private readonly ConnectionConfig _config;
-        private readonly ConcurrentDictionary<ushort, byte[]> _rawCache = new();
+
+        /// <summary>
+        /// A cached group value together with the UTC time it was last refreshed on the
+        /// bus. Timestamping lets readers distinguish live values from silently outdated
+        /// ones (a device that dropped off the bus keeps its last payload forever without
+        /// this). <see cref="Changed"/> records when the payload last actually changed
+        /// (as opposed to just being re-seen with the same bytes).
+        /// </summary>
+        private readonly struct CachedValue
+        {
+            public readonly byte[] Payload;
+            public readonly DateTime SeenUtc;
+            public readonly DateTime ChangedUtc;
+
+            public CachedValue(byte[] payload, DateTime seenUtc, DateTime changedUtc)
+            {
+                Payload = payload;
+                SeenUtc = seenUtc;
+                ChangedUtc = changedUtc;
+            }
+        }
+
+        private readonly ConcurrentDictionary<ushort, CachedValue> _rawCache = new();
+
+        // Maximum age for which a cached value is considered "live". Older values are not
+        // returned by GetCachedValue (when staleness checking is enabled). 0 disables the
+        // check. Configured from ConnectionConfig.KnxStaleSeconds.
+        private const int DefaultStaleSeconds = 180; // 3× the 60s read-sweep interval
+        private readonly TimeSpan _staleWindow;
 
         // All group addresses we know about (configured points + anything seen on the bus).
         // Used to drive the throttled read sweep so the cache fills with current state.
@@ -68,9 +96,10 @@ namespace Pulswerk.Drivers.Knx
         private const int ReadSweepBatchSize = 10;
         private const int ReadSweepBatchDelayMs = 1000;
         private const int ReadSweepPerReadDelayMs = 50;
-        // The sweep repeats periodically so that addresses which did not answer the
-        // initial GroupValueRead (or whose value changed without a broadcast) are
-        // refreshed instead of being stuck at "---" forever.
+        // How often we re-evaluate which addresses need pulling. The sweep itself only
+        // (re-)reads addresses that are MISSING or STALE — addresses the bus actively
+        // pushes (GroupValueWrite) stay fresh on their own and are never polled. This is
+        // the "only do necessary pulling" policy: pull is the fallback for silent points.
         private const int ReadSweepRepeatIntervalMs = 60_000;
         
         private IPEndPoint? _gatewayEndPoint;
@@ -101,12 +130,67 @@ namespace Pulswerk.Drivers.Knx
         {
             _config = config;
             _secureEnabled = config.KnxSecureEnabled;
+            int staleSeconds = config.KnxStaleSeconds ?? DefaultStaleSeconds;
+            _staleWindow = staleSeconds > 0 ? TimeSpan.FromSeconds(staleSeconds) : TimeSpan.Zero;
             _connections[config.Id] = this;
         }
 
+        /// <summary>
+        /// Returns the most recent payload cached for the given group address, or
+        /// <c>null</c> if nothing is cached <i>or</i> the cached value is older than the
+        /// configured staleness window. This keeps reported telemetry "live": a value that
+        /// has not been refreshed (via a bus write, a read response, or the periodic read
+        /// sweep) within the window is treated as absent rather than silently outdated.
+        /// </summary>
         public byte[]? GetCachedValue(ushort groupAddress)
         {
-            return _rawCache.TryGetValue(groupAddress, out var val) ? val : null;
+            if (!_rawCache.TryGetValue(groupAddress, out var val))
+                return null;
+
+            if (_staleWindow > TimeSpan.Zero && (DateTime.UtcNow - val.SeenUtc) > _staleWindow)
+                return null; // value is stale -> treat as not available
+
+            return val.Payload;
+        }
+
+        /// <summary>
+        /// Returns how long ago (UTC) the value for <paramref name="groupAddress"/> was
+        /// last seen on the bus, or <c>null</c> if it has never been cached. Useful for
+        /// diagnostics/health reporting irrespective of the staleness window.
+        /// </summary>
+        public TimeSpan? GetCachedValueAge(ushort groupAddress)
+        {
+            return _rawCache.TryGetValue(groupAddress, out var val)
+                ? DateTime.UtcNow - val.SeenUtc
+                : (TimeSpan?)null;
+        }
+
+        /// <summary>
+        /// Whether a group address needs to be pulled (GroupValueRead) right now. A pull is
+        /// only "necessary" when the value is missing entirely, or — when staleness checking
+        /// is enabled — when the last seen value is older than the staleness window. Addresses
+        /// that the bus keeps fresh via GroupValueWrite never become stale and are therefore
+        /// never pulled. When staleness checking is disabled (window == 0) we still pull
+        /// missing addresses once but never re-poll cached ones (the bus is trusted to push).
+        /// </summary>
+        private bool NeedsPull(ushort groupAddress)
+        {
+            if (!_rawCache.TryGetValue(groupAddress, out var val))
+                return true; // never seen -> must read once to populate
+
+            if (_staleWindow <= TimeSpan.Zero)
+                return false; // have a value and no staleness policy -> trust the bus
+
+            // Refresh slightly BEFORE the value would be hidden as stale, so a silent point
+            // is re-pulled in time to avoid a visible gap, while a bus-pushed point (whose
+            // SeenUtc keeps updating) never reaches this age and is therefore never polled.
+            // Threshold = stale window minus one sweep interval (floored to half the window).
+            var sweep = TimeSpan.FromMilliseconds(ReadSweepRepeatIntervalMs);
+            var refreshAfter = _staleWindow - sweep;
+            var floor = TimeSpan.FromTicks(_staleWindow.Ticks / 2);
+            if (refreshAfter < floor) refreshAfter = floor;
+
+            return (DateTime.UtcNow - val.SeenUtc) >= refreshAfter;
         }
 
         /// <summary>
@@ -456,8 +540,15 @@ namespace Pulswerk.Drivers.Knx
                 if (length < 10) return;
 
                 byte msgCode = data[offset];
-                // L_Data.ind = 0x29, L_Data.req = 0x11, L_Data.con = 0x2E
-                if (msgCode != 0x29 && msgCode != 0x11 && msgCode != 0x2E) return;
+                // L_Data.ind = 0x29 -> a telegram observed on the bus (real device traffic).
+                // L_Data.req = 0x11 -> a request frame.
+                // L_Data.con = 0x2E -> the gateway echoing back OUR OWN send as a local
+                //                      confirmation. It does NOT represent fresh bus state and
+                //                      must not be cached or surfaced as inbound telemetry,
+                //                      otherwise our own writes would masquerade as unsolicited
+                //                      device pushes and corrupt the value's freshness/source.
+                if (msgCode == 0x2E) return; // ignore send confirmations
+                if (msgCode != 0x29 && msgCode != 0x11) return;
 
                 byte addInfoLen = data[offset + 1];
                 int cemiPayloadOffset = offset + 2 + addInfoLen;
@@ -496,7 +587,20 @@ namespace Pulswerk.Drivers.Knx
                     Array.Copy(data, cemiPayloadOffset + 9, payload, 0, payload.Length);
                 }
 
-                _rawCache[destAddr] = payload;
+                // Store the value with a fresh "seen" timestamp so readers can tell live
+                // values from stale ones. Preserve the "changed" timestamp when the payload
+                // is byte-for-byte identical to the previous one (a re-seen, unchanged value),
+                // so we keep an accurate notion of when the value actually last changed.
+                var now = DateTime.UtcNow;
+                _rawCache.AddOrUpdate(
+                    destAddr,
+                    _ => new CachedValue(payload, now, now),
+                    (_, prev) =>
+                    {
+                        bool same = prev.Payload.Length == payload.Length
+                                    && prev.Payload.AsSpan().SequenceEqual(payload);
+                        return new CachedValue(payload, now, same ? prev.ChangedUtc : now);
+                    });
                 RegisterAddress(destAddr);
 
                 // command 2 = GroupValueWrite  -> a device spontaneously pushing a new value
@@ -560,29 +664,22 @@ namespace Pulswerk.Drivers.Knx
         {
             try
             {
-                bool firstPass = true;
-
                 while (!ct.IsCancellationRequested)
                 {
                     bool isConn;
                     lock (_stateLock) { isConn = _connected; }
                     if (!isConn) break;
 
-                    // Snapshot so addresses added mid-sweep don't extend this pass indefinitely.
-                    // On the first pass read everything; on later passes prioritise addresses
-                    // that still have no cached value (never answered / changed silently), but
-                    // still refresh the rest so stale values get corrected over time.
-                    var allAddresses = _knownAddresses.Keys.ToArray();
-                    var addresses = firstPass
-                        ? allAddresses
-                        : allAddresses.Where(ga => !_rawCache.ContainsKey(ga))
-                                      .Concat(allAddresses.Where(ga => _rawCache.ContainsKey(ga)))
-                                      .ToArray();
+                    // "Only necessary pulling": read ONLY the addresses that are missing or
+                    // stale. Addresses the bus actively pushes (GroupValueWrite) stay fresh
+                    // on their own (SeenUtc keeps updating) so NeedsPull returns false and we
+                    // never poll them. The snapshot prevents addresses added mid-pass from
+                    // extending this pass indefinitely.
+                    var addresses = _knownAddresses.Keys.Where(NeedsPull).ToArray();
 
                     if (addresses.Length > 0)
                     {
-                        int missing = addresses.Count(ga => !_rawCache.ContainsKey(ga));
-                        Log.Info($"[KNX-{_config.Id}] Starting throttled read sweep for {addresses.Length} group address(es) ({missing} still uncached)...");
+                        Log.Info($"[KNX-{_config.Id}] Read sweep: pulling {addresses.Length} group address(es) needing refresh (missing or stale)...");
 
                         int sent = 0;
                         foreach (var ga in addresses)
@@ -590,6 +687,10 @@ namespace Pulswerk.Drivers.Knx
                             if (ct.IsCancellationRequested) break;
                             lock (_stateLock) { isConn = _connected; }
                             if (!isConn) break;
+
+                            // The value may have been pushed by the bus since we built the
+                            // snapshot — skip it if it no longer needs pulling.
+                            if (!NeedsPull(ga)) continue;
 
                             try { await SendGroupRead(ga); }
                             catch (Exception ex) { Log.Debug($"[KNX-{_config.Id}] Read sweep request failed for {FormatGroupAddress(ga)}: {ex.Message}"); }
@@ -611,9 +712,7 @@ namespace Pulswerk.Drivers.Knx
                         Log.Info($"[KNX-{_config.Id}] Read sweep complete ({sent} request(s) sent).");
                     }
 
-                    firstPass = false;
-
-                    // Wait before the next periodic refresh sweep.
+                    // Wait before re-evaluating which addresses still need pulling.
                     try { await Task.Delay(ReadSweepRepeatIntervalMs, ct); }
                     catch (TaskCanceledException) { break; }
                 }
