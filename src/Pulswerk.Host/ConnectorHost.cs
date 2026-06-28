@@ -393,6 +393,19 @@ namespace Pulswerk.Host
 
         void StartKnxConnections()
         {
+            // Apply the process-wide concurrent-connect limit before starting any
+            // connection. The first KNX connection that specifies the value wins.
+            var maxConcurrent = _cfg.Connections
+                .Where(c => c.Type == "knx-ip" && c.KnxMaxConcurrentConnects.HasValue)
+                .Select(c => c.KnxMaxConcurrentConnects!.Value)
+                .Cast<int?>()
+                .FirstOrDefault();
+            if (maxConcurrent.HasValue)
+            {
+                Log.Info($"[KNX] Limiting concurrent tunnel handshakes to {maxConcurrent.Value}.");
+                KnxConnection.ConfigureMaxConcurrentConnects(maxConcurrent.Value);
+            }
+
             foreach (var conn in _cfg.Connections.Where(c => c.Type == "knx-ip"))
             {
                 try

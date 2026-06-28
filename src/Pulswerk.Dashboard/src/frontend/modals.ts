@@ -265,12 +265,7 @@ async function openTelemetryDetails(key: string): Promise<void> {
                 const editInput = document.getElementById('editValue') as HTMLInputElement;
                 if (editInput) {
                     editInput.value = String(parseFloat(currentVal) || 0);
-                    const units = (meta.units || '').trim().toLowerCase();
-                    if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
-                        editInput.step = '0.5';
-                    } else {
-                        editInput.step = '1';
-                    }
+                    editInput.step = (window as any).isTemperatureUnit(meta.units) ? '0.5' : '1';
                 }
                 const editUnitLabel = document.getElementById('telEditUnitLabel');
                 if (editUnitLabel) {
@@ -454,6 +449,15 @@ function filterTelemetrySidebar(): void {
 }
 
 // --- Metadata Properties Helper ---
+function escapeHtml(value: any): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 async function loadPropsForDetails(key: string): Promise<any[]> {
     const loader = document.getElementById('propsLoading');
     const table = document.getElementById('propsTable');
@@ -464,27 +468,55 @@ async function loadPropsForDetails(key: string): Promise<any[]> {
     if (table) table.classList.add('hidden');
     if (empty) empty.classList.add('hidden');
     if (body) body.innerHTML = '';
-    
+
+    // Helper to render the always-present rows: the internal real telemetry key
+    // and a deep-link to the Historical Data (TelemetryCrud) view for this key.
+    // These are only shown inside the Extended Properties tab.
+    const renderInternalRows = () => {
+        if (!body) return;
+        const crudUrl = `/plswk/TelemetryCrud?key=${encodeURIComponent(key)}`;
+
+        const keyRow = document.createElement('tr');
+        keyRow.innerHTML = `<td class="p-2 border-b border-white/5 font-semibold text-slate-400">Internal Key</td><td class="p-2 border-b border-white/5 font-mono text-slate-100 break-all">${escapeHtml(key)}</td>`;
+        body.appendChild(keyRow);
+
+        const linkRow = document.createElement('tr');
+        linkRow.innerHTML = `<td class="p-2 border-b border-white/5 font-semibold text-slate-400">Historical Data</td><td class="p-2 border-b border-white/5"><a href="${crudUrl}" class="inline-flex items-center gap-1.5 text-sky-400 hover:text-sky-300 hover:underline font-mono"><i class="fas fa-history text-[0.7rem]"></i><span>Open in Data view</span></a></td>`;
+        const linkEl = linkRow.querySelector('a');
+        if (linkEl) {
+            linkEl.addEventListener('click', () => {
+                // Close the details modal so it doesn't linger over the navigated view.
+                try { (window as any).closeTelemetryDetails?.(); } catch { /* ignore */ }
+            });
+        }
+        body.appendChild(linkRow);
+    };
+
     try {
         const response = await fetch(`/plswk/api/properties?key=${encodeURIComponent(key)}`);
         const props = await response.json();
-        
+
+        if (body) renderInternalRows();
+
         if (Array.isArray(props) && props.length > 0) {
             if (body) {
                 props.forEach(p => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td class="p-2 border-b border-white/5 font-semibold text-slate-400">${p.name || ''}</td><td class="p-2 border-b border-white/5 font-mono text-slate-100">${p.value || ''}</td>`;
+                    tr.innerHTML = `<td class="p-2 border-b border-white/5 font-semibold text-slate-400">${escapeHtml(p.name || '')}</td><td class="p-2 border-b border-white/5 font-mono text-slate-100">${escapeHtml(p.value || '')}</td>`;
                     body.appendChild(tr);
                 });
             }
             if (table) table.classList.remove('hidden');
             return props;
         } else {
-            if (empty) empty.classList.remove('hidden');
+            // Still show the table because the internal key / link rows are always present.
+            if (table) table.classList.remove('hidden');
             return [];
         }
     } catch (e) {
-        if (empty) empty.classList.remove('hidden');
+        // Even on failure, show the internal key + link rows.
+        if (body) renderInternalRows();
+        if (table) table.classList.remove('hidden');
         console.error("Props load failed", e);
         return [];
     } finally {
@@ -638,8 +670,7 @@ function step(n: number): void {
     let stepVal = 1.0;
     if (currentEditKey) {
         const meta = resolveKeyMeta(currentEditKey);
-        const units = (meta.units || '').trim().toLowerCase();
-        if (units === '°c' || units === '°k' || units === 'c' || units === 'k' || units === 'kelvin' || units === 'celsius') {
+        if ((window as any).isTemperatureUnit(meta.units)) {
             stepVal = 0.5;
         }
     }

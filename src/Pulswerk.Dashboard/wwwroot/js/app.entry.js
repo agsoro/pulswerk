@@ -172,7 +172,7 @@ export function App() {
     }
     else if (routePath === '/TelemetryCrud' && user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false) {
         pageTitle = 'Historical Data';
-        pageComponent = _jsx(TelemetryCrudPage, {});
+        pageComponent = _jsx(TelemetryCrudPage, { initialKey: searchParams.get('key') });
     }
     else {
         pageTitle = 'Home';

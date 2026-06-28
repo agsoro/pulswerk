@@ -43,12 +43,9 @@ namespace Pulswerk.Storage
         /// </summary>
         public void RegisterKey(string key, string units)
         {
-            if (string.IsNullOrEmpty(units)) return;
-
-            string u = units.ToLowerInvariant().Trim();
-            if (u == "kwh" || u == "wh" || u == "mwh" || u == "gwh" || u == "btu" || u == "kj" || u == "j" ||
-                u == "m³" || u == "m3" || u == "cubic meters" || u == "cubic-meters" ||
-                u == "l" || u == "liters" || u == "gal" || u == "gallons" || u == "ft³" || u == "ft3")
+            // Energy/volume classification lives in the shared Units registry so every
+            // component agrees on which units represent cumulative consumption.
+            if (Pulswerk.Core.Units.IsConsumption(units))
             {
                 lock (_lock)
                 {

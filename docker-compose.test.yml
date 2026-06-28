@@ -62,7 +62,7 @@ services:
     container_name: knx-sim
     restart: unless-stopped
     ports:
-      - "3671:3671/udp" # expose UDP port 3671 for KNX
+      - "3671:3671" # expose TCP port 3671 for KNX tunnelling
 
   # ── Pulswerk overrides for test environment ─────────────────────────────────
   pulswerk:

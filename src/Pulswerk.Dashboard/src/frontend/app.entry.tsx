@@ -217,7 +217,7 @@ export function App() {
         pageComponent = <TrajectoryPage />;
     } else if (routePath === '/TelemetryCrud' && user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false) {
         pageTitle = 'Historical Data';
-        pageComponent = <TelemetryCrudPage />;
+        pageComponent = <TelemetryCrudPage initialKey={searchParams.get('key')} />;
     } else {
         pageTitle = 'Home';
         pageComponent = <FavoritesPage />;

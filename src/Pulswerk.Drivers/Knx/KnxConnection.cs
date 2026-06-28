@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Concurrent;
-using System.IO;
+using System.Linq;
 using System.Net;
-using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Pulswerk.Core;
@@ -17,6 +15,45 @@ namespace Pulswerk.Drivers.Knx
         public static bool TryGetConnection(string id, out KnxConnection? conn)
         {
             return _connections.TryGetValue(id, out conn);
+        }
+
+        // ── Concurrent connection limiting ───────────────────────────────────
+        // Many KNXnet/IP gateways accept only a small number of simultaneous
+        // tunnel connections, and even a burst of connect attempts against the
+        // same gateway/network can cause handshakes to time out. We therefore cap
+        // how many tunnel handshakes may run concurrently across the whole process
+        // with a global semaphore. A connection holds a permit only while it is
+        // establishing its tunnel (handshake); once connected it releases the
+        // permit so other connections can establish theirs.
+        private const int DefaultMaxConcurrentConnects = 2;
+        private static int _maxConcurrentConnects = DefaultMaxConcurrentConnects;
+        private static SemaphoreSlim _connectGate = new(DefaultMaxConcurrentConnects, DefaultMaxConcurrentConnects);
+        private static readonly object _connectGateLock = new();
+
+        /// <summary>
+        /// Configures the maximum number of KNX tunnel handshakes that may run
+        /// concurrently across the process. Values &lt;= 0 are clamped to 1.
+        /// Safe to call before any connection is started (e.g. from host startup).
+        /// </summary>
+        public static void ConfigureMaxConcurrentConnects(int max)
+        {
+            if (max <= 0) max = 1;
+            lock (_connectGateLock)
+            {
+                if (max == _maxConcurrentConnects) return;
+                _maxConcurrentConnects = max;
+                // Replace the gate; existing in-flight handshakes finish against
+                // the old instance (they keep a local reference) and any waiters
+                // are unblocked so they re-acquire on the new gate.
+                var old = _connectGate;
+                _connectGate = new SemaphoreSlim(max, max);
+                try { old.Dispose(); } catch { }
+            }
+        }
+
+        private static SemaphoreSlim CurrentConnectGate()
+        {
+            lock (_connectGateLock) { return _connectGate; }
         }
 
         private readonly ConnectionConfig _config;
@@ -36,11 +73,7 @@ namespace Pulswerk.Drivers.Knx
         // refreshed instead of being stuck at "---" forever.
         private const int ReadSweepRepeatIntervalMs = 60_000;
         
-        private UdpClient? _udpClient;
         private IPEndPoint? _gatewayEndPoint;
-        private IPEndPoint? _localEndPoint;
-        private IPAddress? _localIp;
-        private int _localPort;
 
         private CancellationTokenSource? _cts;
         private Task? _listenTask;
@@ -65,25 +98,18 @@ namespace Pulswerk.Drivers.Knx
         private const int TunnelingAckTimeoutMs = 2000;
         private const int TunnelingAckRetries = 1;
 
-        private readonly bool _isRouting;
-        private readonly string _connectionMode;
-        private readonly bool _natMode;
-
         private readonly bool _secureEnabled;
-        private byte[]? _sessionKey;
-        private ushort _secureSessionId;
-        private ulong _sendSecureCounter;
-        private ulong _recvSecureCounter;
+        // All tunnelling traffic flows over a single TCP session (plain or secure). The
+        // session transparently wraps/unwraps frames when secure.
+        private KnxTcpSession? _session;
+        // (Decrypted) plain KNXnet/IP frames arriving on the session are queued here and
+        // consumed by the listener loop.
+        private readonly System.Collections.Concurrent.BlockingCollection<byte[]> _rxQueue = new();
 
         public KnxConnection(ConnectionConfig config)
         {
             _config = config;
-            _connectionMode = (config.KnxConnectionType ?? "tunneling").ToLowerInvariant();
-            _isRouting = _connectionMode == "routing";
-            _natMode = config.KnxNatMode;
             _secureEnabled = config.KnxSecureEnabled;
-            _sendSecureCounter = 0;
-            _recvSecureCounter = 0;
             _connections[config.Id] = this;
         }
 
@@ -92,7 +118,7 @@ namespace Pulswerk.Drivers.Knx
             return _rawCache.TryGetValue(groupAddress, out var val) ? val : null;
         }
 
-        /// <summary>True once a tunnel/routing session is established with the gateway.</summary>
+        /// <summary>True once a tunnel session is established with the gateway.</summary>
         public bool IsConnected
         {
             get { lock (_stateLock) { return _connected; } }
@@ -105,41 +131,24 @@ namespace Pulswerk.Drivers.Knx
                 if (_listenTask != null) return;
 
                 _cts = new CancellationTokenSource();
-                
+
                 string gatewayHost = _config.Address ?? "127.0.0.1";
                 int gatewayPort = _config.Port ?? 3671;
 
-                if (_isRouting)
+                Log.Info($"[KNX-{_config.Id}] Starting in TUNNELING mode over TCP (gateway={gatewayHost}:{gatewayPort}, secure={_secureEnabled})...");
+                IPAddress? gatewayIp;
+                if (!IPAddress.TryParse(gatewayHost, out gatewayIp))
                 {
-                    Log.Info($"[KNX-{_config.Id}] Starting in ROUTING mode (multicast 224.0.23.12:3671)...");
-                    _gatewayEndPoint = new IPEndPoint(IPAddress.Parse("224.0.23.12"), 3671);
-                    
-                    _udpClient = new UdpClient();
-                    _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                    _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 3671));
-                    _udpClient.JoinMulticastGroup(_gatewayEndPoint.Address);
-                    _connected = true;
+                    var addresses = Dns.GetHostAddresses(gatewayHost);
+                    Log.Info($"[KNX-{_config.Id}] DNS resolved '{gatewayHost}' to {addresses.Length} address(es): {string.Join(", ", addresses.Select(a => a.ToString()))}");
+                    if (addresses.Length == 0)
+                        throw new Exception($"Could not resolve KNX gateway host '{gatewayHost}'");
+                    gatewayIp = addresses[0];
+                }
+                _gatewayEndPoint = new IPEndPoint(gatewayIp!, gatewayPort);
+                Log.Info($"[KNX-{_config.Id}] Gateway endpoint resolved to {_gatewayEndPoint}");
 
-                    _listenTask = Task.Run(() => ListenLoop(_cts.Token));
-                    TriggerReadSweep();
-                }
-                else
-                {
-                    Log.Info($"[KNX-{_config.Id}] Starting in TUNNELING mode (gateway={gatewayHost}:{gatewayPort}, secure={_secureEnabled})...");
-                    IPAddress? gatewayIp;
-                    if (!IPAddress.TryParse(gatewayHost, out gatewayIp))
-                    {
-                        var addresses = Dns.GetHostAddresses(gatewayHost);
-                        Log.Info($"[KNX-{_config.Id}] DNS resolved '{gatewayHost}' to {addresses.Length} address(es): {string.Join(", ", addresses.Select(a => a.ToString()))}");
-                        if (addresses.Length == 0)
-                            throw new Exception($"Could not resolve KNX gateway host '{gatewayHost}'");
-                        gatewayIp = addresses[0];
-                    }
-                    _gatewayEndPoint = new IPEndPoint(gatewayIp!, gatewayPort);
-                    Log.Info($"[KNX-{_config.Id}] Gateway endpoint resolved to {_gatewayEndPoint}");
-                    
-                    _listenTask = Task.Run(() => TunnelingConnectionLoop(_cts.Token));
-                }
+                _listenTask = Task.Run(() => TunnelingConnectionLoop(_cts.Token));
             }
         }
 
@@ -149,7 +158,24 @@ namespace Pulswerk.Drivers.Knx
             {
                 try
                 {
-                    bool ok = await ConnectTunnelAsync(ct);
+                    // Limit concurrent tunnel handshakes across the process so we
+                    // don't overwhelm gateways/the network. The permit is held only
+                    // for the duration of the handshake and released as soon as the
+                    // tunnel is up (or the attempt fails), so an established tunnel
+                    // never ties up a slot needed by another connection.
+                    var gate = CurrentConnectGate();
+                    bool ok;
+                    Log.Debug($"[KNX-{_config.Id}] Waiting for connect slot (max {_maxConcurrentConnects} concurrent handshakes)...");
+                    await gate.WaitAsync(ct);
+                    try
+                    {
+                        ok = await ConnectTunnelAsync(ct);
+                    }
+                    finally
+                    {
+                        try { gate.Release(); } catch (ObjectDisposedException) { /* gate replaced by ConfigureMaxConcurrentConnects */ }
+                    }
+
                     if (ok)
                     {
                         // Start heartbeat loop
@@ -181,506 +207,121 @@ namespace Pulswerk.Drivers.Knx
             }
         }
 
+        /// <summary>
+        /// Establishes a KNXnet/IP tunnel over TCP (plain or secure). The TCP transport and,
+        /// for secure sessions, the handshake + per-frame encryption are handled by
+        /// <see cref="KnxTcpSession"/>. Here we perform the tunnelling CONNECT_REQUEST/RESPONSE
+        /// exchange on top of the session and funnel incoming frames into the listener queue.
+        /// </summary>
         private async Task<bool> ConnectTunnelAsync(CancellationToken ct)
         {
-            lock (_socketLock)
+            var session = new KnxTcpSession(_config.Id, _gatewayEndPoint!, _config);
+            session.FrameReceived += frame =>
             {
-                int bindPort = _config.LocalPort ?? 0;
-                _udpClient = new UdpClient(bindPort);
-                _localPort = ((IPEndPoint)_udpClient.Client.LocalEndPoint!).Port;
-
-                bool resolved = false;
-                if (!string.IsNullOrWhiteSpace(_config.LocalAddress))
-                {
-                    if (IPAddress.TryParse(_config.LocalAddress, out var parsedLocalIp))
-                    {
-                        // 0.0.0.0 / :: are bind-any wildcards, not routable addresses.
-                        // Advertising them in the HPAI control endpoint makes the KNX
-                        // gateway unable to send CONNECT_RESPONSE back to us, so fall
-                        // through to auto-resolution instead.
-                        if (parsedLocalIp.Equals(IPAddress.Any) || parsedLocalIp.Equals(IPAddress.IPv6Any))
-                        {
-                            Log.Info($"[KNX-{_config.Id}] Configured localAddress '{_config.LocalAddress}' is a wildcard (bind-any); auto-resolving routable local IP instead.");
-                        }
-                        else
-                        {
-                            _localIp = parsedLocalIp;
-                            resolved = true;
-                        }
-                    }
-                    else
-                    {
-                        Log.Warning($"[KNX-{_config.Id}] Configured localAddress '{_config.LocalAddress}' is invalid. Falling back to auto-resolution.");
-                    }
-                }
-
-                if (!resolved)
-                {
-                    // Retrieve local IP by temporarily connecting a socket
-                    using (var temp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
-                    {
-                        temp.Connect(_gatewayEndPoint!);
-                        _localEndPoint = (IPEndPoint)temp.LocalEndPoint!;
-                        _localIp = _localEndPoint.Address;
-                    }
-                    Log.Info($"[KNX-{_config.Id}] LocalAddress not configured; auto-resolved local IP via temp socket to {_localIp} (bindPort={bindPort})");
-
-                    // In NAT mode the data HPAI advertises this resolved IP so gateways
-                    // that ignore route-back for tunnelling (e.g. MDT) can reach us. When
-                    // running in a container the auto-resolved IP is the container's
-                    // internal address (e.g. 172.x), which the gateway CANNOT route to —
-                    // ACKs/telegrams will silently vanish. Set "localAddress" to the host
-                    // IP (and publish the same UDP port) to fix this.
-                    if (_natMode && IsLikelyContainerAddress(_localIp))
-                    {
-                        Log.Warning($"[KNX-{_config.Id}] NAT mode is enabled but 'localAddress' is not set; the auto-resolved local IP {_localIp} looks like a container/private address the gateway cannot route back to. TUNNELING_ACKs and bus telegrams may never arrive. Set 'localAddress' to the Docker HOST IP and publish UDP port {_localPort}.");
-                    }
-                }
-                else
-                {
-                    Log.Info($"[KNX-{_config.Id}] Using configured LocalAddress '{_config.LocalAddress}' -> {_localIp} (bindPort={bindPort})");
-                }
-
-                Log.Info($"[KNX-{_config.Id}] Local tunnel endpoint resolved to {_localIp}:{_localPort}");
-            }
-
-            if (_secureEnabled)
+                try { _rxQueue.Add(frame); } catch { /* queue completed during teardown */ }
+            };
+            session.Closed += () =>
             {
-                int attempts = 0;
-                while (attempts++ < 3 && !ct.IsCancellationRequested)
-                {
-                    try
-                    {
-                        Log.Info($"[KNX-{_config.Id}] Initiating secure tunneling handshake (attempt {attempts})...");
+                lock (_stateLock) { _connected = false; }
+            };
 
-                        // 1. Generate client ECDH Curve25519 keypair using BouncyCastle
-                        byte[] clientPrivateKey = new byte[32];
-                        byte[] clientPublicKey = new byte[32];
-                        var secureRandom = new Org.BouncyCastle.Security.SecureRandom();
-                        secureRandom.NextBytes(clientPrivateKey);
-                        clientPrivateKey[0] &= 248;
-                        clientPrivateKey[31] &= 127;
-                        clientPrivateKey[31] |= 64;
-                        Org.BouncyCastle.Math.EC.Rfc7748.X25519.GeneratePublicKey(clientPrivateKey, 0, clientPublicKey, 0);
-
-                        // 2. Build SESSION_REQUEST (46 bytes)
-                        byte[] sReq = new byte[46];
-                        sReq[0] = 0x06; sReq[1] = 0x10; // Header length & version
-                        sReq[2] = 0x09; sReq[3] = 0x51; // SESSION_REQUEST type
-                        sReq[4] = 0x00; sReq[5] = 0x2E; // Length = 46
-
-                        // HPAI Control Endpoint (route-back in NAT mode)
-                        WriteHpai(sReq, 6);
-
-                        // Client Public Key
-                        Array.Copy(clientPublicKey, 0, sReq, 14, 32);
-
-                        Log.Debug($"[KNX-{_config.Id}] SESSION_REQUEST payload ({sReq.Length} bytes): {BitConverter.ToString(sReq)}");
-                        Log.Debug($"[KNX-{_config.Id}] Client public key: {BitConverter.ToString(clientPublicKey)}");
-                        Log.Info($"[KNX-{_config.Id}] Sending SESSION_REQUEST to {_gatewayEndPoint}...");
-                        int sent = await _udpClient!.SendAsync(sReq, sReq.Length, _gatewayEndPoint);
-                        Log.Debug($"[KNX-{_config.Id}] Sent {sent} bytes. Waiting up to 2s for SESSION_RESPONSE (0x0952)...");
-
-                        // Wait up to 2 seconds for SESSION_RESPONSE (0x0952)
-                        var receiveTask = _udpClient.ReceiveAsync(ct).AsTask();
-                        var delayTask = Task.Delay(2000, ct);
-                        var completedTask = await Task.WhenAny(receiveTask, delayTask);
-
-                        if (completedTask == receiveTask)
-                        {
-                            var result = await receiveTask;
-                            byte[] res = result.Buffer;
-                            Log.Debug($"[KNX-{_config.Id}] Received {res.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(res)}");
-
-                            if (res.Length >= 56 && res[2] == 0x09 && res[3] == 0x52) // SESSION_RESPONSE
-                            {
-                                _secureSessionId = (ushort)((res[6] << 8) | res[7]);
-                                    byte[] serverPublicKey = new byte[32];
-                                Array.Copy(res, 8, serverPublicKey, 0, 32);
-                                byte[] serverMac = new byte[16];
-                                Array.Copy(res, 40, serverMac, 0, 16);
-
-                                Log.Debug($"[KNX-{_config.Id}] SESSION_RESPONSE parsed. SSID={_secureSessionId}, serverPubKey={BitConverter.ToString(serverPublicKey)}, mac={BitConverter.ToString(serverMac)}");
-
-                                // 3. Derive shared secret and session key
-                                byte[] sharedSecret = new byte[32];
-                                Org.BouncyCastle.Math.EC.Rfc7748.X25519.ScalarMult(clientPrivateKey, 0, serverPublicKey, 0, sharedSecret, 0);
-
-                                byte[] keyMaterial;
-                                using (var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(_config.KnxPassword ?? "")))
-                                {
-                                    keyMaterial = hmac.ComputeHash(sharedSecret);
-                                }
-                                _sessionKey = new byte[16];
-                                Array.Copy(keyMaterial, 0, _sessionKey, 0, 16);
-
-                                Log.Debug($"[KNX-{_config.Id}] Shared secret: {BitConverter.ToString(sharedSecret)}");
-                                Log.Debug($"[KNX-{_config.Id}] Key material (HMAC-SHA256): {BitConverter.ToString(keyMaterial)}");
-                                Log.Debug($"[KNX-{_config.Id}] Session key (first 16 bytes): {BitConverter.ToString(_sessionKey)}");
-                                Log.Debug($"[KNX-{_config.Id}] KnxUserId={_config.KnxUserId}, KnxPassword set={(string.IsNullOrEmpty(_config.KnxPassword) ? "NO" : "YES")} (len={_config.KnxPassword?.Length ?? 0})");
-                                Log.Info($"[KNX-{_config.Id}] Secure session response received. SSID = {_secureSessionId}. Key derived successfully.");
-
-                                // 4. Send SESSION_AUTHENTICATE (0x0953) inside SECURE_WRAPPER (0x0950)
-                                _sendSecureCounter = 1;
-                                _recvSecureCounter = 0;
-
-                                byte[] authPayload = new byte[15];
-                                authPayload[0] = 0x06; authPayload[1] = 0x10; // Header
-                                authPayload[2] = 0x09; authPayload[3] = 0x53; // SESSION_AUTHENTICATE
-                                authPayload[4] = 0x00; authPayload[5] = 0x0F; // Length = 15
-                                authPayload[6] = (byte)_config.KnxUserId;
-                                authPayload[7] = 0x00; // Reserved
-                                for (int i = 0; i < 7; i++) authPayload[8 + i] = (byte)(i ^ 0xAA);
-
-                                Log.Debug($"[KNX-{_config.Id}] SESSION_AUTHENTICATE plaintext ({authPayload.Length} bytes): {BitConverter.ToString(authPayload)}");
-
-                                byte[] wrappedAuth = EncryptFrame(authPayload);
-                                Log.Debug($"[KNX-{_config.Id}] SECURE_WRAPPER around SESSION_AUTHENTICATE ({wrappedAuth.Length} bytes): {BitConverter.ToString(wrappedAuth)}");
-                                int authSent = await _udpClient.SendAsync(wrappedAuth, wrappedAuth.Length, _gatewayEndPoint);
-                                Log.Debug($"[KNX-{_config.Id}] Sent {authSent} bytes. Waiting up to 2s for auth response...");
-
-                                // Wait for confirmation
-                                receiveTask = _udpClient.ReceiveAsync(ct).AsTask();
-                                delayTask = Task.Delay(2000, ct);
-                                completedTask = await Task.WhenAny(receiveTask, delayTask);
-
-                                if (completedTask == receiveTask)
-                                {
-                                    var authResResult = await receiveTask;
-                                    byte[] authRes = authResResult.Buffer;
-                                    Log.Debug($"[KNX-{_config.Id}] Auth response: {authRes.Length} bytes from {authResResult.RemoteEndPoint}: {BitConverter.ToString(authRes)}");
-
-                                    if (authRes.Length >= 22 && authRes[2] == 0x09 && authRes[3] == 0x50) // SECURE_WRAPPER
-                                    {
-                                        byte[]? decryptedAuthRes = DecryptFrame(authRes);
-                                        if (decryptedAuthRes == null)
-                                        {
-                                            Log.Warning($"[KNX-{_config.Id}] DecryptFrame returned null for auth response. MAC verification likely failed.");
-                                        }
-                                        else
-                                        {
-                                            Log.Debug($"[KNX-{_config.Id}] Decrypted auth response ({decryptedAuthRes.Length} bytes): {BitConverter.ToString(decryptedAuthRes)}");
-                                        }
-                                        if (decryptedAuthRes != null && decryptedAuthRes.Length >= 8 && decryptedAuthRes[2] == 0x09 && decryptedAuthRes[3] == 0x53)
-                                        {
-                                            _channelId = (byte)(_secureSessionId & 0xFF);
-                                            _sendSeqNum = 0;
-                                            lock (_stateLock)
-                                            {
-                                                _connected = true;
-                                            }
-                                            Log.Info($"[KNX-{_config.Id}] Secure tunnel authenticated successfully. Channel ID = {_channelId}");
-                                            return true;
-                                        }
-                                        else
-                                        {
-                                            Log.Warning($"[KNX-{_config.Id}] Auth response decrypted but unexpected content. ServiceType=0x{(decryptedAuthRes != null && decryptedAuthRes.Length >= 4 ? (decryptedAuthRes[2] << 8 | decryptedAuthRes[3]).ToString("X4") : "????")}");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        Log.Warning($"[KNX-{_config.Id}] Auth response is not a SECURE_WRAPPER. ServiceType=0x{(authRes.Length >= 4 ? (authRes[2] << 8 | authRes[3]).ToString("X4") : "????")}, len={authRes.Length}.");
-                                    }
-                                }
-                                else
-                                {
-                                    Log.Warning($"[KNX-{_config.Id}] Timed out waiting for auth response. No data within 2s.");
-                                }
-                            }
-                            else
-                            {
-                                Log.Warning($"[KNX-{_config.Id}] Unexpected response (not SESSION_RESPONSE). ServiceType=0x{(res.Length >= 4 ? (res[2] << 8 | res[3]).ToString("X4") : "????")}, len={res.Length}.");
-                            }
-                        }
-                        else
-                        {
-                            Log.Warning($"[KNX-{_config.Id}] Timed out waiting for SESSION_RESPONSE. No data within 2s.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warning($"[KNX-{_config.Id}] Secure handshake attempt {attempts} failed: {ex.GetType().Name}: {ex.Message}");
-                    }
-
-                    try { await Task.Delay(1000, ct); }
-                    catch (TaskCanceledException) { break; }
-                }
-
-                Log.Error($"[KNX-{_config.Id}] Failed to establish secure KNX tunnel after 3 attempts.");
+            if (!await session.ConnectAsync(ct))
+            {
+                session.Dispose();
                 return false;
             }
-            else
+
+            lock (_socketLock) { _session = session; }
+
+            // CONNECT_REQUEST over the TCP session. The control/data HPAIs are sent in
+            // route-back form (protocol=TCP, 0.0.0.0:0) because all traffic flows over the
+            // single TCP connection — the gateway answers on the same socket.
+            byte[] req = new byte[26];
+            req[0] = 0x06; req[1] = 0x10;
+            req[2] = 0x02; req[3] = 0x05; // CONNECT_REQUEST
+            req[4] = 0x00; req[5] = 0x1A; // length 26
+            WriteTcpHpai(req, 6);           // control endpoint (route-back)
+            WriteTcpHpai(req, 14);          // data endpoint (route-back)
+            req[22] = 0x04; // CRI length
+            req[23] = 0x04; // tunnelling connection
+            req[24] = 0x02; // KNX link layer
+            req[25] = 0x00; // reserved
+
+            for (int attempt = 1; attempt <= 3 && !ct.IsCancellationRequested; attempt++)
             {
-                // Prepare CONNECT_REQUEST (26 bytes)
-                byte[] req = new byte[26];
-                // Header
-                req[0] = 0x06; req[1] = 0x10; // Header length & KNXnet/IP version
-                req[2] = 0x02; req[3] = 0x05; // CONNECT_REQUEST type
-                req[4] = 0x00; req[5] = 0x1A; // Total length: 26
-
-                // HPAI Control Endpoint (route-back in NAT mode)
-                WriteHpai(req, 6);
-
-                // HPAI Data Endpoint. Advertise our real local IP:port here even in NAT
-                // mode so gateways that send TUNNELING_REQUEST/ACK to the literal data
-                // HPAI (e.g. MDT) can reach us — route-back-only data endpoints make the
-                // tunnelling ACKs disappear.
-                WriteHpai(req, 14, isDataEndpoint: true);
-
-                // CRI (Connection Request Information)
-                req[22] = 0x04; // CRI Structure Length
-                req[23] = 0x04; // Tunneling connection
-                req[24] = 0x02; // KNX Link Layer
-                req[25] = 0x00; // Reserved
-
-                Log.Debug($"[KNX-{_config.Id}] CONNECT_REQUEST payload ({req.Length} bytes): {BitConverter.ToString(req)}");
-                Log.Debug($"[KNX-{_config.Id}] Target gateway endpoint: {_gatewayEndPoint}, local HPAI advertised: {(_natMode ? "0.0.0.0:0 (NAT route-back)" : $"{_localIp}:{_localPort}")}");
-
-                int attempts = 0;
-                while (attempts++ < 3 && !ct.IsCancellationRequested)
+                try
                 {
-                    try
+                    Log.Info($"[KNX-{_config.Id}] Sending CONNECT_REQUEST (attempt {attempt})...");
+                    await session.SendFrameAsync(req, ct);
+
+                    byte[]? res = await DequeueFrameAsync(TimeSpan.FromSeconds(3), ct);
+                    if (res == null)
                     {
-                        Log.Info($"[KNX-{_config.Id}] Sending CONNECT_REQUEST (attempt {attempts}) to {_gatewayEndPoint}...");
-                        int sent = await _udpClient!.SendAsync(req, req.Length, _gatewayEndPoint);
-                        Log.Debug($"[KNX-{_config.Id}] Sent {sent} bytes. Waiting up to 2s for CONNECT_RESPONSE...");
-
-                        // Wait up to 2 seconds for CONNECT_RESPONSE
-                        var receiveTask = _udpClient.ReceiveAsync(ct).AsTask();
-                        var delayTask = Task.Delay(2000, ct);
-                        var completedTask = await Task.WhenAny(receiveTask, delayTask);
-
-                        if (completedTask == receiveTask)
-                        {
-                            var result = await receiveTask;
-                            byte[] res = result.Buffer;
-                            Log.Debug($"[KNX-{_config.Id}] Received {res.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(res)}");
-
-                            if (res.Length >= 20 && res[2] == 0x02 && res[3] == 0x06) // CONNECT_RESPONSE
-                            {
-                                // CONNECT_RESPONSE body: communication_channel_id (res[6]),
-                                // status (res[7]), then HPAI + CRD.
-                                byte channelId = res[6];
-                                byte status = res[7];
-                                if (status == 0x00) // Success
-                                {
-                                    _channelId = channelId;
-                                    _sendSeqNum = 0;
-                                    lock (_stateLock)
-                                    {
-                                        _connected = true;
-                                    }
-                                    Log.Info($"[KNX-{_config.Id}] Tunnel established successfully. Channel ID = {_channelId}");
-                                    return true;
-                                }
-                                else
-                                {
-                                    Log.Error($"[KNX-{_config.Id}] Gateway rejected connection request. Status code = 0x{status:X2}");
-                                    return false;
-                                }
-                            }
-                            else
-                            {
-                                Log.Warning($"[KNX-{_config.Id}] Unexpected response (not CONNECT_RESPONSE). ServiceType=0x{(res.Length >= 4 ? (res[2] << 8 | res[3]).ToString("X4") : "????")}, len={res.Length}.");
-                            }
-                        }
-                        else
-                        {
-                            Log.Warning($"[KNX-{_config.Id}] Timed out waiting for CONNECT_RESPONSE (attempt {attempts}). No data received within 2s.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warning($"[KNX-{_config.Id}] CONNECT_REQUEST attempt {attempts} failed: {ex.GetType().Name}: {ex.Message}");
+                        Log.Warning($"[KNX-{_config.Id}] No CONNECT_RESPONSE within timeout (attempt {attempt}).");
+                        continue;
                     }
 
-                    try { await Task.Delay(1000, ct); }
-                    catch (TaskCanceledException) { break; }
+                    ushort serviceType = (ushort)((res[2] << 8) | res[3]);
+                    if (serviceType == 0x0206 && res.Length >= 8) // CONNECT_RESPONSE
+                    {
+                        byte channelId = res[6];
+                        byte status = res[7];
+                        if (status == 0x00)
+                        {
+                            _channelId = channelId;
+                            _sendSeqNum = 0;
+                            lock (_stateLock) { _connected = true; }
+                            Log.Info($"[KNX-{_config.Id}] Tunnel established. Channel ID = {_channelId}");
+                            return true;
+                        }
+                        Log.Error($"[KNX-{_config.Id}] Gateway rejected CONNECT_REQUEST. Status 0x{status:X2}.");
+                        return false;
+                    }
+
+                    Log.Warning($"[KNX-{_config.Id}] Unexpected frame 0x{serviceType:X4} while waiting for CONNECT_RESPONSE.");
                 }
-
-                Log.Error($"[KNX-{_config.Id}] Failed to establish KNX tunnel after 3 attempts. Gateway={_gatewayEndPoint}, Local={_localIp}:{_localPort}");
-                return false;
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KNX-{_config.Id}] CONNECT_REQUEST attempt {attempt} failed: {ex.GetType().Name}: {ex.Message}");
+                }
             }
+
+            Log.Error($"[KNX-{_config.Id}] Failed to establish KNX tunnel.");
+            return false;
         }
 
         /// <summary>
-        /// Writes an 8-byte KNXnet/IP HPAI structure into <paramref name="buffer"/>
-        /// at <paramref name="offset"/>. In NAT mode (<see cref="_natMode"/>) the
-        /// endpoint is written in route-back form (protocol=UDP, IP=0.0.0.0, port=0)
-        /// so the gateway replies to the actual UDP source address — required when the
-        /// gateway is reached across a router/NAT/firewall. Otherwise the host's real
-        /// local IP and bound port are advertised (flat-LAN behaviour).
-        ///
-        /// <para><paramref name="isDataEndpoint"/> should be true for the CONNECT_REQUEST
-        /// *data* HPAI. Some gateways (e.g. MDT) honour route-back only for the control
-        /// channel and send ongoing TUNNELING_REQUEST/ACK traffic to the literal data
-        /// HPAI; advertising 0.0.0.0:0 there makes those replies disappear. So even in
-        /// NAT mode we advertise our real local IP:port for the data endpoint, which works
-        /// whenever the gateway can route directly back to this host (the common case;
-        /// the successful CONNECT_RESPONSE already proves the path).</para>
+        /// Writes an 8-byte route-back HPAI (protocol=TCP, IP/port all zero). Over a TCP
+        /// tunnel the gateway always replies on the established connection, so the literal
+        /// endpoint is never needed.
         /// </summary>
-        /// <summary>
-        /// Heuristic: does this look like a Docker/container bridge address (172.16/12)
-        /// that an external KNX gateway would not be able to route a reply back to?
-        /// Used only to emit a helpful warning when NAT mode lacks an explicit
-        /// <c>localAddress</c>.
-        /// </summary>
-        private static bool IsLikelyContainerAddress(IPAddress? ip)
-        {
-            if (ip == null || ip.AddressFamily != AddressFamily.InterNetwork)
-                return false;
-            byte[] b = ip.GetAddressBytes();
-            // 172.16.0.0 – 172.31.255.255 is the default Docker bridge range.
-            return b[0] == 172 && b[1] >= 16 && b[1] <= 31;
-        }
-
-        private void WriteHpai(byte[] buffer, int offset, bool isDataEndpoint = false)
+        private static void WriteTcpHpai(byte[] buffer, int offset)
         {
             buffer[offset] = 0x08;     // structure length
-            buffer[offset + 1] = 0x01; // host protocol = UDP/IPv4
-
-            if (_natMode && !isDataEndpoint)
-            {
-                // IP (4) + port (2) = 0 → gateway must use the UDP source endpoint.
-                buffer[offset + 2] = 0; buffer[offset + 3] = 0;
-                buffer[offset + 4] = 0; buffer[offset + 5] = 0;
-                buffer[offset + 6] = 0; buffer[offset + 7] = 0;
-            }
-            else
-            {
-                byte[] ipBytes = _localIp!.GetAddressBytes();
-                Array.Copy(ipBytes, 0, buffer, offset + 2, 4);
-                buffer[offset + 6] = (byte)((_localPort >> 8) & 0xFF);
-                buffer[offset + 7] = (byte)(_localPort & 0xFF);
-            }
+            buffer[offset + 1] = 0x02; // host protocol = TCP/IPv4
+            for (int i = 2; i < 8; i++) buffer[offset + i] = 0x00;
         }
 
-        private byte[] EncryptFrame(byte[] plaintext)
+        /// <summary>Pull the next frame from the RX queue, or null on timeout.</summary>
+        private async Task<byte[]?> DequeueFrameAsync(TimeSpan timeout, CancellationToken ct)
         {
-            if (_sessionKey == null) throw new InvalidOperationException("Session key not derived.");
-
-            ulong counter = _sendSecureCounter++;
-            byte[] nonce = new byte[12];
-            nonce[0] = (byte)((_secureSessionId >> 8) & 0xFF);
-            nonce[1] = (byte)(_secureSessionId & 0xFF);
-            nonce[2] = (byte)((counter >> 40) & 0xFF);
-            nonce[3] = (byte)((counter >> 32) & 0xFF);
-            nonce[4] = (byte)((counter >> 24) & 0xFF);
-            nonce[5] = (byte)((counter >> 16) & 0xFF);
-            nonce[6] = (byte)((counter >> 8) & 0xFF);
-            nonce[7] = (byte)(counter & 0xFF);
-
-            int totalLen = 6 + 2 + 6 + plaintext.Length + 16;
-            byte[] pkt = new byte[totalLen];
-
-            pkt[0] = 0x06; pkt[1] = 0x10;
-            pkt[2] = 0x09; pkt[3] = 0x50;
-            pkt[4] = (byte)((totalLen >> 8) & 0xFF);
-            pkt[5] = (byte)(totalLen & 0xFF);
-
-            pkt[6] = (byte)((_secureSessionId >> 8) & 0xFF);
-            pkt[7] = (byte)(_secureSessionId & 0xFF);
-
-            pkt[8] = (byte)((counter >> 40) & 0xFF);
-            pkt[9] = (byte)((counter >> 32) & 0xFF);
-            pkt[10] = (byte)((counter >> 24) & 0xFF);
-            pkt[11] = (byte)((counter >> 16) & 0xFF);
-            pkt[12] = (byte)((counter >> 8) & 0xFF);
-            pkt[13] = (byte)(counter & 0xFF);
-
-            byte[] associatedData = new byte[14];
-            Array.Copy(pkt, 0, associatedData, 0, 14);
-
-            byte[] ciphertext = new byte[plaintext.Length];
-            byte[] mac = new byte[16];
-
-            using (var aesCcm = new System.Security.Cryptography.AesCcm(_sessionKey))
+            await Task.Yield();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.Elapsed < timeout && !ct.IsCancellationRequested)
             {
-                aesCcm.Encrypt(nonce, plaintext, ciphertext, mac, associatedData);
+                if (_rxQueue.TryTake(out var frame, 100, ct))
+                    return frame;
             }
-
-            Array.Copy(ciphertext, 0, pkt, 14, ciphertext.Length);
-            Array.Copy(mac, 0, pkt, 14 + ciphertext.Length, 16);
-
-            Log.Debug($"[KNX-{_config.Id}] EncryptFrame: ssid={_secureSessionId}, counter={counter}, plaintextLen={plaintext.Length}, nonce={BitConverter.ToString(nonce)}, sessionKey={BitConverter.ToString(_sessionKey)}");
-
-            return pkt;
+            return null;
         }
 
-        private byte[]? DecryptFrame(byte[] wrapperFrame)
+        /// <summary>Sends a fully-formed plain KNXnet/IP frame to the gateway over the TCP session.</summary>
+        private async Task SendKnxIpFrameAsync(byte[] frame, CancellationToken ct = default)
         {
-            if (_sessionKey == null)
-            {
-                Log.Warning($"[KNX-{_config.Id}] DecryptFrame: session key is null.");
-                return null;
-            }
-            if (wrapperFrame.Length < 30)
-            {
-                Log.Warning($"[KNX-{_config.Id}] DecryptFrame: frame too short ({wrapperFrame.Length} bytes, need >= 30).");
-                return null;
-            }
-
-            ushort serviceType = (ushort)((wrapperFrame[2] << 8) | wrapperFrame[3]);
-            if (serviceType != 0x0950)
-            {
-                Log.Warning($"[KNX-{_config.Id}] DecryptFrame: not a SECURE_WRAPPER (serviceType=0x{serviceType:X4}).");
-                return null;
-            }
-
-            ushort ssid = (ushort)((wrapperFrame[6] << 8) | wrapperFrame[7]);
-            ulong counter = 0;
-            counter |= (ulong)wrapperFrame[8] << 40;
-            counter |= (ulong)wrapperFrame[9] << 32;
-            counter |= (ulong)wrapperFrame[10] << 24;
-            counter |= (ulong)wrapperFrame[11] << 16;
-            counter |= (ulong)wrapperFrame[12] << 8;
-            counter |= wrapperFrame[13];
-
-            Log.Debug($"[KNX-{_config.Id}] DecryptFrame: ssid={ssid}, counter={counter}, lastRecv={_recvSecureCounter}, frameLen={wrapperFrame.Length}");
-
-            if (counter <= _recvSecureCounter)
-            {
-                Log.Warning($"[KNX-{_config.Id}] Replay attack or out of order counter detected. Received {counter}, expected > {_recvSecureCounter}");
-                return null;
-            }
-            _recvSecureCounter = counter;
-
-            byte[] nonce = new byte[12];
-            nonce[0] = (byte)((ssid >> 8) & 0xFF);
-            nonce[1] = (byte)(ssid & 0xFF);
-            nonce[2] = (byte)((counter >> 40) & 0xFF);
-            nonce[3] = (byte)((counter >> 32) & 0xFF);
-            nonce[4] = (byte)((counter >> 24) & 0xFF);
-            nonce[5] = (byte)((counter >> 16) & 0xFF);
-            nonce[6] = (byte)((counter >> 8) & 0xFF);
-            nonce[7] = (byte)(counter & 0xFF);
-
-            int ciphertextLen = wrapperFrame.Length - 14 - 16;
-            byte[] ciphertext = new byte[ciphertextLen];
-            Array.Copy(wrapperFrame, 14, ciphertext, 0, ciphertextLen);
-
-            byte[] mac = new byte[16];
-            Array.Copy(wrapperFrame, wrapperFrame.Length - 16, mac, 0, 16);
-
-            byte[] associatedData = new byte[14];
-            Array.Copy(wrapperFrame, 0, associatedData, 0, 14);
-
-            byte[] plaintext = new byte[ciphertextLen];
-
-            try
-            {
-                using (var aesCcm = new System.Security.Cryptography.AesCcm(_sessionKey))
-                {
-                    aesCcm.Decrypt(nonce, ciphertext, mac, plaintext, associatedData);
-                }
-                Log.Debug($"[KNX-{_config.Id}] DecryptFrame: success. plaintextLen={plaintext.Length}, nonce={BitConverter.ToString(nonce)}, mac={BitConverter.ToString(mac)}");
-                return plaintext;
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[KNX-{_config.Id}] Decryption failed: {ex.GetType().Name}: {ex.Message}. ssid={ssid}, counter={counter}, ciphertextLen={ciphertextLen}, nonce={BitConverter.ToString(nonce)}, mac={BitConverter.ToString(mac)}, sessionKey={BitConverter.ToString(_sessionKey)}");
-                return null;
-            }
+            KnxTcpSession? session;
+            lock (_socketLock) { session = _session; }
+            if (session == null) throw new InvalidOperationException("TCP session not connected.");
+            await session.SendFrameAsync(frame, ct);
         }
 
         private async Task HeartbeatLoop(CancellationToken ct)
@@ -695,8 +336,8 @@ namespace Pulswerk.Drivers.Knx
             // CRI info
             req[6] = _channelId;
             req[7] = 0x00; // Reserved
-            // HPAI Control Endpoint (route-back in NAT mode)
-            WriteHpai(req, 8);
+            // HPAI Control Endpoint (route-back over TCP)
+            WriteTcpHpai(req, 8);
 
             int missedHeartbeats = 0;
 
@@ -710,22 +351,8 @@ namespace Pulswerk.Drivers.Knx
                     lock (_stateLock) { isConn = _connected; }
                     if (!isConn) break;
 
-                    UdpClient? client;
-                    lock (_socketLock) { client = _udpClient; }
-                    if (client == null) break;
-
                     Log.Debug($"[KNX-{_config.Id}] Sending CONNECTIONSTATE_REQUEST...");
-                    if (_secureEnabled)
-                    {
-                        byte[] secureReq = EncryptFrame(req);
-                        Log.Debug($"[KNX-{_config.Id}] TX {secureReq.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(secureReq)}");
-                        await client.SendAsync(secureReq, secureReq.Length, _gatewayEndPoint);
-                    }
-                    else
-                    {
-                        Log.Debug($"[KNX-{_config.Id}] TX {req.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(req)}");
-                        await client.SendAsync(req, req.Length, _gatewayEndPoint);
-                    }
+                    await SendKnxIpFrameAsync(req, ct);
 
                     // We let the listener loop process the response. If the listener loop detects
                     // a disconnect response or timeout, it handles the connection teardown.
@@ -750,9 +377,8 @@ namespace Pulswerk.Drivers.Knx
 
         private async Task ListenLoop(CancellationToken ct)
         {
-            UdpClient? client;
-            lock (_socketLock) { client = _udpClient; }
-            if (client == null) return;
+            // The TCP session delivers (decrypted) plain KNXnet/IP frames into _rxQueue.
+            await Task.Yield();
 
             while (!ct.IsCancellationRequested)
             {
@@ -762,10 +388,8 @@ namespace Pulswerk.Drivers.Knx
                     lock (_stateLock) { isConn = _connected; }
                     if (!isConn) break;
 
-                    var result = await client.ReceiveAsync(ct);
-                    byte[] data = result.Buffer;
-
-                    Log.Debug($"[KNX-{_config.Id}] RX {data.Length} bytes from {result.RemoteEndPoint}: {BitConverter.ToString(data)}");
+                    if (!_rxQueue.TryTake(out var data, 200, ct)) continue;
+                    Log.Debug($"[KNX-{_config.Id}] RX {data.Length} bytes: {BitConverter.ToString(data)}");
 
                     if (data.Length < 6) continue;
 
@@ -777,18 +401,6 @@ namespace Pulswerk.Drivers.Knx
                     ushort totalLen = (ushort)((data[4] << 8) | data[5]);
 
                     if (data.Length < totalLen) continue;
-
-                    if (_secureEnabled && serviceType == 0x0950)
-                    {
-                        byte[]? decrypted = DecryptFrame(data);
-                        if (decrypted == null || decrypted.Length < 6) continue;
-                        
-                        data = decrypted;
-                        headerLen = data[0];
-                        if (headerLen < 6 || data[1] != 0x10) continue;
-                        serviceType = (ushort)((data[2] << 8) | data[3]);
-                        totalLen = (ushort)((data[4] << 8) | data[5]);
-                    }
 
                     if (serviceType == 0x0420) // TUNNELING_REQUEST
                     {
@@ -806,17 +418,7 @@ namespace Pulswerk.Drivers.Knx
                         ack[8] = seq;
                         ack[9] = 0x00; // Status=Success
 
-                        if (_secureEnabled)
-                        {
-                            byte[] secureAck = EncryptFrame(ack);
-                            Log.Debug($"[KNX-{_config.Id}] TX {secureAck.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(secureAck)}");
-                            await client.SendAsync(secureAck, secureAck.Length, _gatewayEndPoint);
-                        }
-                        else
-                        {
-                            Log.Debug($"[KNX-{_config.Id}] TX {ack.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(ack)}");
-                            await client.SendAsync(ack, ack.Length, _gatewayEndPoint);
-                        }
+                        await SendKnxIpFrameAsync(ack, ct);
 
                         // Parse cEMI frame starting at index 10
                         ParseCemiFrame(data, 10, totalLen - 10);
@@ -849,11 +451,6 @@ namespace Pulswerk.Drivers.Knx
                         Log.Info($"[KNX-{_config.Id}] Disconnected cleanly from gateway.");
                         lock (_stateLock) { _connected = false; }
                         break;
-                    }
-                    else if (_isRouting && serviceType == 0x0530) // ROUTING_INDICATION
-                    {
-                        // Routing indication carries the CEMI frame starting directly at index 6
-                        ParseCemiFrame(data, 6, totalLen - 6);
                     }
                 }
                 catch (ObjectDisposedException)
@@ -1040,9 +637,9 @@ namespace Pulswerk.Drivers.Knx
 
         private async Task SendCemiFrame(ushort groupAddress, byte[] data, bool isSmall, bool isWrite)
         {
-            UdpClient? client;
-            lock (_socketLock) { client = _udpClient; }
-            if (client == null) return;
+            KnxTcpSession? session;
+            lock (_socketLock) { session = _session; }
+            if (session == null) return;
 
             bool isConn;
             lock (_stateLock) { isConn = _connected; }
@@ -1051,31 +648,25 @@ namespace Pulswerk.Drivers.Knx
             // CEMI length:
             // 2 (MsgCode, AddInfoLen) + 2 (Control) + 2 (Source) + 2 (Dest) + 1 (Len) + 2 (TPCI/APCI) + Payload (if large)
             int cemiLen = 11 + (isSmall ? 0 : data.Length);
-            
-            // Total length: Header + CRI (for routing: 6 header + CEMI)
-            // For Tunneling: 6 header + 4 connection header + CEMI
-            int totalLen = _isRouting ? (6 + cemiLen) : (10 + cemiLen);
+
+            // Total length: 6 header + 4 connection header + CEMI
+            int totalLen = 10 + cemiLen;
             byte[] pkt = new byte[totalLen];
 
             // Header
             pkt[0] = 0x06; pkt[1] = 0x10;
-            pkt[2] = (byte)(_isRouting ? 0x05 : 0x04);
-            pkt[3] = (byte)(_isRouting ? 0x30 : 0x20); // ROUTING_INDICATION (0x0530) or TUNNELING_REQUEST (0x0420)
+            pkt[2] = 0x04;
+            pkt[3] = 0x20; // TUNNELING_REQUEST (0x0420)
             pkt[4] = (byte)((totalLen >> 8) & 0xFF);
             pkt[5] = (byte)(totalLen & 0xFF);
 
-            int cemiOffset = 6;
-
-            if (!_isRouting)
-            {
-                // Connection Header (4 bytes). The sequence number (pkt[8]) is assigned
-                // later, under the send gate, so it stays in lock-step with the ACKs.
-                pkt[6] = 0x04;
-                pkt[7] = _channelId;
-                pkt[8] = 0x00;
-                pkt[9] = 0x00;
-                cemiOffset = 10;
-            }
+            // Connection Header (4 bytes). The sequence number (pkt[8]) is assigned
+            // later, under the send gate, so it stays in lock-step with the ACKs.
+            pkt[6] = 0x04;
+            pkt[7] = _channelId;
+            pkt[8] = 0x00;
+            pkt[9] = 0x00;
+            int cemiOffset = 10;
 
             // cEMI Frame
             pkt[cemiOffset] = 0x11;     // Message Code: L_Data.req
@@ -1111,22 +702,6 @@ namespace Pulswerk.Drivers.Knx
                 Array.Copy(data, 0, pkt, cemiOffset + 11, data.Length);
             }
 
-            if (_isRouting)
-            {
-                // Routing is connectionless multicast: just fire the frame, no ACK.
-                try
-                {
-                    Log.Debug($"[KNX-{_config.Id}] Sending group packet to {FormatGroupAddress(groupAddress)}...");
-                    Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(pkt)}");
-                    await client.SendAsync(pkt, pkt.Length, _gatewayEndPoint);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"[KNX-{_config.Id}] Failed to send KNX telegram: {ex.Message}");
-                }
-                return;
-            }
-
             // Tunneling: only one outstanding TUNNELING_REQUEST at a time. We assign the
             // sequence number, send, and wait for the matching TUNNELING_ACK before
             // releasing the gate so the gateway never sees out-of-order/unacked requests.
@@ -1147,17 +722,8 @@ namespace Pulswerk.Drivers.Knx
                 {
                     try
                     {
-                        if (_secureEnabled)
-                        {
-                            byte[] securePkt = EncryptFrame(pkt);
-                            Log.Debug($"[KNX-{_config.Id}] TX {securePkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(securePkt)}");
-                            await client.SendAsync(securePkt, securePkt.Length, _gatewayEndPoint);
-                        }
-                        else
-                        {
-                            Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes to {_gatewayEndPoint}: {BitConverter.ToString(pkt)}");
-                            await client.SendAsync(pkt, pkt.Length, _gatewayEndPoint);
-                        }
+                        Log.Debug($"[KNX-{_config.Id}] TX {pkt.Length} bytes: {BitConverter.ToString(pkt)}");
+                        await SendKnxIpFrameAsync(pkt, _cts?.Token ?? default);
                     }
                     catch (Exception ex)
                     {
@@ -1200,10 +766,10 @@ namespace Pulswerk.Drivers.Knx
             
             lock (_socketLock)
             {
-                if (_udpClient != null)
+                if (_session != null)
                 {
-                    try { _udpClient.Close(); } catch { }
-                    _udpClient = null;
+                    try { _session.Dispose(); } catch { }
+                    _session = null;
                 }
             }
         }
@@ -1250,31 +816,22 @@ namespace Pulswerk.Drivers.Knx
 
             _cts?.Cancel();
 
-            if (_connected && !_isRouting && _udpClient != null && _gatewayEndPoint != null)
+            if (_connected && _gatewayEndPoint != null)
             {
-                // Send DISCONNECT_REQUEST (16 bytes)
+                // Send DISCONNECT_REQUEST (16 bytes) over the TCP session.
                 byte[] dis = new byte[16];
                 dis[0] = 0x06; dis[1] = 0x10;
                 dis[2] = 0x02; dis[3] = 0x09; // DISCONNECT_REQUEST
                 dis[4] = 0x00; dis[5] = 0x10;
                 dis[6] = _channelId;
                 dis[7] = 0x00;
-                // local UDP HPAI (route-back in NAT mode)
-                WriteHpai(dis, 8);
+                WriteTcpHpai(dis, 8); // route-back over the TCP session
 
                 try
                 {
-                    if (_secureEnabled)
-                    {
-                        byte[] secureDis = EncryptFrame(dis);
-                        Log.Debug($"[KNX-{_config.Id}] TX {secureDis.Length} bytes to {_gatewayEndPoint} (DISCONNECT): {BitConverter.ToString(secureDis)}");
-                        _udpClient.Send(secureDis, secureDis.Length, _gatewayEndPoint);
-                    }
-                    else
-                    {
-                        Log.Debug($"[KNX-{_config.Id}] TX {dis.Length} bytes to {_gatewayEndPoint} (DISCONNECT): {BitConverter.ToString(dis)}");
-                        _udpClient.Send(dis, dis.Length, _gatewayEndPoint);
-                    }
+                    KnxTcpSession? session;
+                    lock (_socketLock) { session = _session; }
+                    session?.SendFrameAsync(dis).GetAwaiter().GetResult();
                 }
                 catch { }
             }

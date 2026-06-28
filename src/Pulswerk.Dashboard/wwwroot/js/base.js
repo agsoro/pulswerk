@@ -117,6 +117,13 @@ function friendlyName(key) {
     const parts = (key || '').split('_');
     return parts.length > 2 ? parts.slice(1, -1).join(' ') : key;
 }
+// ── Unit helpers ───────────────────────────────────────────────────────────
+// Single place that recognises temperature units, mirroring Pulswerk.Core.Units
+// on the backend. UIs use it to apply a finer 0.5° input step for temperatures.
+const TEMPERATURE_UNITS = new Set(['°c', '°k', 'c', 'k', 'kelvin', 'celsius', '°f', 'f', 'fahrenheit']);
+function isTemperatureUnit(units) {
+    return TEMPERATURE_UNITS.has((units || '').trim().toLowerCase());
+}
 // ── Custom Confirm Dialog ──────────────────────────────────────────────────
 async function pwConfirm(message, title = 'Confirm Action') {
     return new Promise((resolve) => {
@@ -445,6 +452,7 @@ window.ensureKeysMeta = ensureKeysMeta;
 window.fetchLatestValues = fetchLatestValues;
 window.esc = esc;
 window.friendlyName = friendlyName;
+window.isTemperatureUnit = isTemperatureUnit;
 window.getUserInitials = getUserInitials;
 window.loadUserIdentity = loadUserIdentity;
 window.applyRightsToUI = applyRightsToUI;

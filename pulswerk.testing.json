@@ -113,14 +113,10 @@
     {
       "id": "knx-test",
       "type": "knx-ip",
-      "localPort": 51569,
       "address": "knx-sim",
       "port": 3671,
-      "knxConnectionType": "tunneling",
-      "knxIndividualAddress": "15.15.250",
       "knxSecureEnabled": false,
-      "knxPassword": "mySecretSecurePassword123!",
-      "knxUserId": 2,
+      "knxCommissioningPassword": "code-printed-on-the-bridge",
       "name": "KNX Test Gateway"
     }
   ],

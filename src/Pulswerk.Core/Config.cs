@@ -80,30 +80,44 @@ namespace Pulswerk.Core
         /// <summary>Human-readable display name for this connection in the dashboard.</summary>
         [property: JsonPropertyName("name")] string? Name = null,
 
-        /// <summary>KNX connection mode ("tunneling" or "routing").</summary>
-        [property: JsonPropertyName("knxConnectionType")] string? KnxConnectionType = null,
-
-        /// <summary>KNX client individual physical address (default "15.15.250").</summary>
-        [property: JsonPropertyName("knxIndividualAddress")] string? KnxIndividualAddress = null,
-
         /// <summary>Whether KNX IP Secure is enabled.</summary>
         [property: JsonPropertyName("knxSecureEnabled")] bool KnxSecureEnabled = false,
 
-        /// <summary>KNX secure user password for tunneling.</summary>
-        [property: JsonPropertyName("knxPassword")] string? KnxPassword = null,
-
-        /// <summary>KNX secure user ID for tunneling slot (default 2).</summary>
-        [property: JsonPropertyName("knxUserId")] int KnxUserId = 2,
+        /// <summary>
+        /// The commissioning password / device authentication code (FDSK) printed on the
+        /// KNX IP Secure device. This is the <b>only</b> credential required for secure mode:
+        /// it is used both as the device authentication code and as the tunnel user password
+        /// (management slot).
+        /// <para>
+        /// <b>Format:</b> the code is printed on the device label (or the sticker shipped with
+        /// the bridge) as several groups of characters separated by hyphens, usually spread
+        /// over a few lines, e.g.:
+        /// <code>
+        ///   ABCDE-ABCDE
+        ///   ABCDE-ABCDE
+        /// </code>
+        /// The recommended form is a <b>single line keeping the hyphens</b> between every group,
+        /// e.g. <c>"ABCDE-ABCDE-ABCDE-ABCDE"</c>. Note that a line break on the label stands in
+        /// for a hyphen, so the two lines above mean <c>ABCDE-ABCDE-ABCDE-ABCDE</c> (four groups,
+        /// three hyphens). Letter case must match exactly as printed. The driver normalises the
+        /// value before use: leading/trailing whitespace is trimmed and any line breaks/spaces
+        /// between groups are converted to a single hyphen, so you may also paste the code
+        /// exactly as it appears on the multi-line label and it will still work. Do not omit the
+        /// hyphens between groups (they are part of the code).
+        /// </para>
+        /// </summary>
+        [property: JsonPropertyName("knxCommissioningPassword")] string? KnxCommissioningPassword = null,
 
         /// <summary>
-        /// KNX NAT mode (route-back HPAI). When true, the driver advertises a
-        /// wildcard control/data endpoint (protocol=UDP, IP=0.0.0.0, port=0) in
-        /// all KNXnet/IP HPAI structures so the gateway replies to the UDP source
-        /// address. Required when the gateway is reached across a router/NAT/firewall
-        /// (e.g. a gateway on a different subnet behind OPNsense). Leave false for a
-        /// flat LAN where the gateway can reach the host's real IP directly.
+        /// Maximum number of KNX tunnel handshakes that may run concurrently across
+        /// the whole process. KNXnet/IP gateways accept only a limited number of
+        /// simultaneous tunnel connections, and bursts of connect attempts can cause
+        /// handshakes to time out, so this caps how many connections establish their
+        /// tunnel at the same time. The limit is process-wide; when set on multiple
+        /// connections the value from the first started KNX connection wins. Values
+        /// &lt;= 0 are treated as 1. Defaults to 2 when not set.
         /// </summary>
-        [property: JsonPropertyName("knxNatMode")] bool KnxNatMode = false
+        [property: JsonPropertyName("knxMaxConcurrentConnects")] int? KnxMaxConcurrentConnects = null
     )
     {
         /// <summary>Effective device name — explicit or derived from Id.</summary>

@@ -29,6 +29,21 @@ namespace Pulswerk.Drivers.Ocpp
         private int _transactionIdCounter = 1000;
         private BillingStore? _billingStore;
 
+        // Fixed maximum per-phase charge current (A) and the default number of phases.
+        // The 100% power_limit reference is the TOTAL power capacity, i.e.
+        // DefaultMaxCurrentAmps * MaxPhases (= 16A x 3 phases).
+        public const double DefaultMaxCurrentAmps = 16.0;
+        public const int MaxPhases = 3;
+
+        // Minimum charge current per phase (IEC 61851 / OCPP). A car will not charge
+        // below this, so when a low power_limit would require less than this per phase
+        // we drop phases (e.g. to 1 phase @ 6A) instead of going below it.
+        public const double MinCurrentAmps = 6.0;
+
+        // Power_limit cut-off threshold (% of total capacity). At or above this we
+        // charge (at least minimally, 1 phase @ 6A); below it charging is shut off.
+        public const double MinChargePercent = 10.0;
+
         public event Action<string, string, object>? OnTelemetryUpdated;
 
         private OcppManagerService() { }
@@ -327,11 +342,83 @@ namespace Pulswerk.Drivers.Ocpp
             return false;
         }
 
+        /// <summary>
+        /// Resolves the maximum per-phase charge current (in Amperes) for the given
+        /// charge point. Falls back to the fixed <see cref="DefaultMaxCurrentAmps"/>
+        /// (16A) when no other value is available.
+        /// </summary>
+        public double GetMaxCurrentAmps(string chargePointId) => DefaultMaxCurrentAmps;
+
+        /// <summary>
+        /// Maximum total charge capacity used as the 100% reference for power_limit,
+        /// expressed in "phase-amperes" (per-phase current x max phases = 16A x 3).
+        /// </summary>
+        public double GetMaxTotalCapacity(string chargePointId) => GetMaxCurrentAmps(chargePointId) * MaxPhases;
+
+        /// <summary>
+        /// Converts a per-phase charge current (A) into a percentage of the TOTAL power
+        /// capacity (16A x 3 phases). The active <paramref name="phases"/> determines how
+        /// much of the total capacity the per-phase current represents.
+        /// </summary>
+        public double AmpsToPercent(string chargePointId, double amps, int phases)
+        {
+            double maxTotal = GetMaxTotalCapacity(chargePointId);
+            if (maxTotal <= 0) return 0.0;
+            double total = amps * Math.Max(phases, 1);
+            return Math.Clamp(Math.Round(total / maxTotal * 100.0, 1), 0.0, 100.0);
+        }
+
+        /// <summary>
+        /// Converts a power_limit percentage (0-100) of the TOTAL power capacity into a
+        /// per-phase charge current (A), given the active number of <paramref name="phases"/>.
+        /// The result is capped at the per-phase maximum (16A).
+        /// </summary>
+        public double PercentToAmps(string chargePointId, double percent, int phases)
+        {
+            double maxTotal = GetMaxTotalCapacity(chargePointId);
+            double totalAmps = Math.Clamp(percent, 0.0, 100.0) / 100.0 * maxTotal;
+            double perPhase = totalAmps / Math.Max(phases, 1);
+            return Math.Round(Math.Min(perPhase, GetMaxCurrentAmps(chargePointId)), 2);
+        }
+
+        /// <summary>
+        /// Resolves a power_limit percentage (of total capacity, 16A x 3) into the
+        /// per-phase current and phase count to actually apply:
+        ///  - Below <see cref="MinChargePercent"/> (10%): charging is shut off (0A).
+        ///  - At or above 10%: charge with at least the minimum (1 phase @ 6A), using
+        ///    the most phases that keep each phase at or above <see cref="MinCurrentAmps"/>.
+        /// </summary>
+        public (double Amps, int Phases) ResolveLimit(string chargePointId, double percent)
+        {
+            double maxPerPhase = GetMaxCurrentAmps(chargePointId);
+            double maxTotal = GetMaxTotalCapacity(chargePointId);
+
+            // Below the cut-off threshold we shut off charging entirely.
+            if (percent < MinChargePercent)
+                return (0.0, 1);
+
+            double totalAmps = Math.Clamp(percent, 0.0, 100.0) / 100.0 * maxTotal;
+
+            // Use the most phases that still keep each phase at or above the minimum,
+            // so we curtail by reducing phases before reducing below 6A per phase.
+            for (int phases = MaxPhases; phases >= 1; phases--)
+            {
+                double perPhase = totalAmps / phases;
+                if (perPhase >= MinCurrentAmps || phases == 1)
+                {
+                    // At/above 10% we always charge at least the minimum current.
+                    perPhase = Math.Clamp(perPhase, MinCurrentAmps, maxPerPhase);
+                    return (Math.Round(perPhase, 2), phases);
+                }
+            }
+
+            return (MinCurrentAmps, 1);
+        }
+
         // Dynamic charging curtailment (Smart Charging)
         public async Task<bool> SetChargingLimitAsync(string chargePointId, int connectorId, double maxCurrentAmps, int? numPhases = null)
         {
             Log.Info($"[OCPP] [{chargePointId}] Setting charge limit to {maxCurrentAmps}A" + (numPhases.HasValue ? $", Phases: {numPhases.Value}" : ""));
-            UpdateTelemetryValue(chargePointId, "power_limit", maxCurrentAmps);
             if (numPhases.HasValue)
             {
                 UpdateTelemetryValue(chargePointId, "charging_phases", (double)numPhases.Value);
@@ -345,7 +432,11 @@ namespace Pulswerk.Drivers.Ocpp
                 }
             }
 
-            int phases = numPhases ?? 3;
+            int phases = numPhases ?? MaxPhases;
+
+            // power_limit telemetry is exposed as a percentage of the TOTAL power
+            // capacity (16A x 3 phases), taking the active phase count into account.
+            UpdateTelemetryValue(chargePointId, "power_limit", AmpsToPercent(chargePointId, maxCurrentAmps, phases));
 
             string messageId = Guid.NewGuid().ToString("N")[..8];
             var profile = new

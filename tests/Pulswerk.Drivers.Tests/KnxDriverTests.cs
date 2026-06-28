@@ -51,6 +51,66 @@ namespace Pulswerk.Drivers.Tests
             Assert.Equal(false, KnxDpt.Decode(encodedFalse, "1.001"));
         }
 
+        [Theory]
+        [InlineData("1.001", "Off", "On")]
+        [InlineData("1.008", "Up", "Down")]
+        [InlineData("1.009", "Open", "Close")]
+        [InlineData("1.011", "Inactive", "Active")]
+        [InlineData("1.018", "Not occupied", "Occupied")]
+        [InlineData("1.019", "Closed", "Open")]
+        [InlineData("1.100", "Cooling", "Heating")]
+        // Different DPT-string spellings should normalize to the same sub-type.
+        [InlineData("DPST-1-9", "Open", "Close")]
+        public void TestDpt1NamedStates(string dpt, string zeroLabel, string oneLabel)
+        {
+            var states = KnxDpt.GetDpt1States(dpt);
+            Assert.NotNull(states);
+            Assert.Equal(zeroLabel, states!.Value.Zero);
+            Assert.Equal(oneLabel, states.Value.One);
+
+            Assert.Equal(zeroLabel, KnxDpt.GetDpt1StateLabel(false, dpt));
+            Assert.Equal(oneLabel, KnxDpt.GetDpt1StateLabel(true, dpt));
+        }
+
+        [Fact]
+        public void TestDpt1UnknownSubTypeFallsBackToBool()
+        {
+            // An unknown 1.xxx sub-type still resolves to a generic boolean meaning.
+            var states = KnxDpt.GetDpt1States("1.999");
+            Assert.NotNull(states);
+            Assert.Equal("False", states!.Value.Zero);
+            Assert.Equal("True", states.Value.One);
+
+            // A non-boolean DPT has no named states.
+            Assert.Null(KnxDpt.GetDpt1States("9.001"));
+            Assert.Null(KnxDpt.GetDpt1StateLabel(true, "9.001"));
+        }
+
+        [Theory]
+        [InlineData("1.009", "Open", false)]   // DPT_OpenClose: 0 = Open, 1 = Close
+        [InlineData("1.009", "Close", true)]
+        [InlineData("1.008", "Down", true)]
+        [InlineData("1.008", "Up", false)]
+        [InlineData("1.001", "On", true)]
+        [InlineData("1.001", "off", false)]   // case-insensitive
+        [InlineData("1.001", "1", true)]
+        [InlineData("1.001", "0", false)]
+        [InlineData("1.001", "true", true)]
+        [InlineData("1.001", "false", false)]
+        public void TestDpt1EncodeFromStateLabel(string dpt, string input, bool expectedBit)
+        {
+            byte[] encoded = KnxDpt.Encode(input, dpt, out bool isSmall);
+            Assert.True(isSmall);
+            Assert.Single(encoded);
+            Assert.Equal(expectedBit ? 1 : 0, encoded[0]);
+        }
+
+        [Fact]
+        public void TestDpt1EncodeRejectsUnknownState()
+        {
+            Assert.Throws<FormatException>(() => KnxDpt.Encode("Frobnicate", "1.001", out _));
+        }
+
         [Fact]
         public void TestDpt5Scaling()
         {
@@ -127,7 +187,7 @@ namespace Pulswerk.Drivers.Tests
                 Type: "knx-ip",
                 Address: "127.0.0.1",
                 KnxSecureEnabled: true,
-                KnxPassword: "" // Invalid empty password
+                KnxCommissioningPassword: "" // Invalid empty commissioning password
             );
 
             var cfg = new Pulswerk.Core.AppConfig(
@@ -142,65 +202,107 @@ namespace Pulswerk.Drivers.Tests
             Assert.ThrowsAny<Exception>(() => Pulswerk.Core.ConfigValidator.Validate(cfg));
         }
 
+        // ── KNX IP Secure crypto primitives ──────────────────────────────────
+        // All vectors below are taken from the worked examples in the KNX spec
+        // (Application Note AN159 v06 "KNXnet/IP Secure"), so a passing test proves
+        // our implementation matches the official reference, not just itself.
+
+        private static byte[] Hex(string s) =>
+            Convert.FromHexString(s.Replace(" ", "").Replace("\n", ""));
+
         [Fact]
-        public void TestKnxSecureCryptoFlow()
+        public void TestKnxSecure_DeriveUserPassword()
         {
-            byte[] clientPrivateKey = new byte[32];
-            byte[] clientPublicKey = new byte[32];
-            var secureRandom = new Org.BouncyCastle.Security.SecureRandom();
-            secureRandom.NextBytes(clientPrivateKey);
-            clientPrivateKey[0] &= 248;
-            clientPrivateKey[31] &= 127;
-            clientPrivateKey[31] |= 64;
+            // PBKDF2(user password "secret") from the spec example.
+            byte[] expected = Hex("03 fc ed b6 66 60 25 1e c8 1a 1a 71 69 01 69 6a");
+            Assert.Equal(expected, KnxSecureCrypto.DeriveUserPasswordHash("secret"));
+        }
 
-            Org.BouncyCastle.Math.EC.Rfc7748.X25519.GeneratePublicKey(clientPrivateKey, 0, clientPublicKey, 0);
+        [Fact]
+        public void TestKnxSecure_DeriveDeviceAuthenticationCode()
+        {
+            // PBKDF2(device authentication / commissioning password "trustme").
+            byte[] expected = Hex("e1 58 e4 01 20 47 bd 6c c4 1a af bc 5c 04 c1 fc");
+            Assert.Equal(expected, KnxSecureCrypto.DeriveDeviceAuthenticationCode("trustme"));
+        }
 
-            byte[] serverPrivateKey = new byte[32];
-            byte[] serverPublicKey = new byte[32];
-            secureRandom.NextBytes(serverPrivateKey);
-            serverPrivateKey[0] &= 248;
-            serverPrivateKey[31] &= 127;
-            serverPrivateKey[31] |= 64;
+        [Fact]
+        public void TestKnxSecure_CbcMac_RoutingIndicationExample()
+        {
+            // CBC-MAC of a RoutingIndication from the spec example.
+            byte[] key = Hex("00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f");
+            byte[] additionalData = Hex("06 10 09 50 00 37 00 00");
+            byte[] payload = Hex("06 10 05 30 00 11 29 00 bc d0 11 59 0a de 01 00 81");
+            byte[] block0 = Hex("c0 c1 c2 c3 c4 c5 00 fa 12 34 56 78 af fe 00 11");
 
-            Org.BouncyCastle.Math.EC.Rfc7748.X25519.GeneratePublicKey(serverPrivateKey, 0, serverPublicKey, 0);
+            byte[] mac = KnxSecureCrypto.CalculateMacCbc(key, additionalData, payload, block0);
+            Assert.Equal(Hex("bd 0a 29 4b 95 25 54 b2 35 39 20 4c 22 71 d2 6b"), mac);
+        }
 
-            byte[] clientSharedSecret = new byte[32];
-            Org.BouncyCastle.Math.EC.Rfc7748.X25519.ScalarMult(clientPrivateKey, 0, serverPublicKey, 0, clientSharedSecret, 0);
+        [Fact]
+        public void TestKnxSecure_Ctr_EncryptThenDecrypt()
+        {
+            // CTR encryption from the spec example, then verify it round-trips.
+            byte[] key = Hex("00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f");
+            byte[] counter0 = Hex("c0 c1 c2 c3 c4 c5 00 fa 12 34 56 78 af fe ff 00");
+            byte[] macCbc = Hex("bd 0a 29 4b 95 25 54 b2 35 39 20 4c 22 71 d2 6b");
+            byte[] payload = Hex("06 10 05 30 00 11 29 00 bc d0 11 59 0a de 01 00 81");
 
-            byte[] serverSharedSecret = new byte[32];
-            Org.BouncyCastle.Math.EC.Rfc7748.X25519.ScalarMult(serverPrivateKey, 0, clientPublicKey, 0, serverSharedSecret, 0);
+            var (encPayload, encMac) = KnxSecureCrypto.Ctr(key, counter0, payload, macCbc);
+            Assert.Equal(Hex("b7 ee 7e 8a 1c 2f 7b ba be c7 75 fd 6e 10 d0 bc 4b"), encPayload);
+            Assert.Equal(Hex("72 12 a0 3a aa e4 9d a8 56 89 77 4c 1d 2b 4d a4"), encMac);
 
-            Assert.Equal(clientSharedSecret, serverSharedSecret);
+            // CTR is symmetric: feeding the ciphertext back recovers the plaintext + MAC.
+            var (decPayload, decMac) = KnxSecureCrypto.Ctr(key, counter0, encPayload, encMac);
+            Assert.Equal(payload, decPayload);
+            Assert.Equal(macCbc, decMac);
+        }
 
-            byte[] keyMaterial;
-            using (var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes("test-password")))
-            {
-                keyMaterial = hmac.ComputeHash(clientSharedSecret);
-            }
-            byte[] sessionKey = new byte[16];
-            Array.Copy(keyMaterial, 0, sessionKey, 0, 16);
+        [Fact]
+        public void TestKnxSecure_CommissioningPasswordNormalization()
+        {
+            // The device authentication code (FDSK) is printed as hyphen groups over several
+            // lines. Pasting it with line breaks/whitespace must produce the same hash as the
+            // clean single-line form (hyphens are kept, only line breaks/whitespace stripped).
+            byte[] clean = KnxSecureCrypto.DeriveDeviceAuthenticationCode("ABCDE-ABCDE-ABCDE-ABCDE");
 
-            byte[] nonce = new byte[12];
-            secureRandom.NextBytes(nonce);
+            byte[] withNewlines = KnxSecureCrypto.DeriveDeviceAuthenticationCode(
+                KnxTcpSession.NormalizeForTesting("ABCDE-ABCDE\nABCDE-ABCDE"));
+            byte[] withWhitespace = KnxSecureCrypto.DeriveDeviceAuthenticationCode(
+                KnxTcpSession.NormalizeForTesting("  ABCDE-ABCDE\r\nABCDE-ABCDE\t"));
 
-            byte[] plaintext = System.Text.Encoding.UTF8.GetBytes("Hello, secure KNX IP!");
-            byte[] ciphertext = new byte[plaintext.Length];
-            byte[] mac = new byte[16];
-            byte[] associatedData = new byte[14];
-            secureRandom.NextBytes(associatedData);
+            Assert.Equal(clean, withNewlines);
+            Assert.Equal(clean, withWhitespace);
 
-            using (var aesCcm = new System.Security.Cryptography.AesCcm(sessionKey))
-            {
-                aesCcm.Encrypt(nonce, plaintext, ciphertext, mac, associatedData);
-            }
+            // Hyphens are significant: removing them yields a different (wrong) hash.
+            byte[] noHyphens = KnxSecureCrypto.DeriveDeviceAuthenticationCode("ABCDEABCDEABCDEABCDE");
+            Assert.NotEqual(clean, noHyphens);
+        }
 
-            byte[] decrypted = new byte[plaintext.Length];
-            using (var aesCcm = new System.Security.Cryptography.AesCcm(sessionKey))
-            {
-                aesCcm.Decrypt(nonce, ciphertext, mac, decrypted, associatedData);
-            }
+        [Fact]
+        public void TestKnxSecure_SessionKeyDerivation()
+        {
+            // ECDH(X25519) shared secret -> SHA256[:16] session key must match on both peers.
+            byte[] clientPriv = new byte[32];
+            byte[] clientPub = new byte[32];
+            var rnd = new Org.BouncyCastle.Security.SecureRandom();
+            rnd.NextBytes(clientPriv);
+            Org.BouncyCastle.Math.EC.Rfc7748.X25519.GeneratePublicKey(clientPriv, 0, clientPub, 0);
 
-            Assert.Equal(plaintext, decrypted);
+            byte[] serverPriv = new byte[32];
+            byte[] serverPub = new byte[32];
+            rnd.NextBytes(serverPriv);
+            Org.BouncyCastle.Math.EC.Rfc7748.X25519.GeneratePublicKey(serverPriv, 0, serverPub, 0);
+
+            byte[] clientShared = new byte[32];
+            Org.BouncyCastle.Math.EC.Rfc7748.X25519.ScalarMult(clientPriv, 0, serverPub, 0, clientShared, 0);
+            byte[] serverShared = new byte[32];
+            Org.BouncyCastle.Math.EC.Rfc7748.X25519.ScalarMult(serverPriv, 0, clientPub, 0, serverShared, 0);
+
+            Assert.Equal(clientShared, serverShared);
+            Assert.Equal(
+                KnxSecureCrypto.SessionKeyFromSharedSecret(clientShared),
+                KnxSecureCrypto.SessionKeyFromSharedSecret(serverShared));
         }
     }
 }

@@ -9,8 +9,11 @@ namespace KnxSim
 {
     class Program
     {
-        private static UdpClient? _server;
-        private static IPEndPoint? _clientEndPoint;
+        // The driver now speaks KNXnet/IP tunnelling over TCP, so the simulator is a TCP
+        // server. The KNXnet/IP framing is unchanged from UDP — frames are length-prefixed
+        // by the header (bytes 4..5) — only the transport differs.
+        private static TcpListener? _listener;
+        private static NetworkStream? _clientStream;
         private static byte _channelId = 1;
         private static byte _sendSeqNum = 0;
         private static readonly ConcurrentDictionary<ushort, byte[]> _states = new();
@@ -18,7 +21,7 @@ namespace KnxSim
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine("=== KNX IP Tunneling Simulator starting ===");
+            Console.WriteLine("=== KNX IP Tunneling Simulator starting (TCP) ===");
 
             // Initialize default values for simulated group addresses:
             // 1/1/10 (Temperature Sensor, DPT 9.001) -> default 21.5
@@ -34,8 +37,9 @@ namespace KnxSim
             // 1/4/1 (Simulated Dimmer, DPT 5.001) -> default 128
             _states[ParseGroupAddress("1/4/1")] = new byte[] { 128 };
 
-            _server = new UdpClient(3671);
-            Console.WriteLine("Listening on UDP port 3671...");
+            _listener = new TcpListener(IPAddress.Any, 3671);
+            _listener.Start();
+            Console.WriteLine("Listening on TCP port 3671...");
 
             // Start periodic sensor simulation updates task
             _ = Task.Run(SimulateSensorUpdates);
@@ -44,10 +48,37 @@ namespace KnxSim
             {
                 try
                 {
-                    var result = await _server.ReceiveAsync();
-                    byte[] data = result.Buffer;
-                    IPEndPoint remoteEP = result.RemoteEndPoint;
+                    using var client = await _listener.AcceptTcpClientAsync();
+                    client.NoDelay = true;
+                    Console.WriteLine($"[CONNECT] TCP client {client.Client.RemoteEndPoint} connected");
+                    using var stream = client.GetStream();
+                    lock (_sendLock) { _clientStream = stream; }
+                    try
+                    {
+                        await HandleClientAsync(stream);
+                    }
+                    finally
+                    {
+                        lock (_sendLock) { _clientStream = null; }
+                        Console.WriteLine("[DISCONNECT] TCP client disconnected");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Accept error: {ex.Message}");
+                }
+            }
+        }
 
+        private static async Task HandleClientAsync(NetworkStream stream)
+        {
+            while (true)
+            {
+                byte[]? data = await ReadFrameAsync(stream);
+                if (data == null) return; // client closed
+
+                try
+                {
                     if (data.Length < 6) continue;
 
                     byte headerLen = data[0];
@@ -55,51 +86,54 @@ namespace KnxSim
                     if (headerLen != 6 || version != 0x10) continue;
 
                     ushort serviceType = (ushort)((data[2] << 8) | data[3]);
-                    ushort totalLen = (ushort)((data[4] << 8) | data[5]);
 
                     if (serviceType == 0x0205) // CONNECT_REQUEST
                     {
-                        Console.WriteLine($"[CONNECT_REQUEST] from {remoteEP}");
-                        _clientEndPoint = remoteEP;
+                        Console.WriteLine("[CONNECT_REQUEST]");
 
                         byte[] response = new byte[20];
                         response[0] = 0x06; response[1] = 0x10; // Header
                         response[2] = 0x02; response[3] = 0x06; // CONNECT_RESPONSE
                         response[4] = 0x00; response[5] = 0x14; // Length=20
-                        response[6] = 0x00; // Status: Success
-                        response[7] = _channelId; // Channel ID
-                        // HPAI (8 bytes)
-                        response[8] = 0x08; response[9] = 0x01; // UDP
-                        byte[] ipBytes = remoteEP.Address.GetAddressBytes();
-                        Array.Copy(ipBytes, 0, response, 10, 4);
-                        response[14] = (byte)((remoteEP.Port >> 8) & 0xFF);
-                        response[15] = (byte)(remoteEP.Port & 0xFF);
+                        // Per KNXnet/IP spec, CONNECT_RESPONSE body is
+                        // communication_channel_id (byte 6) then status (byte 7).
+                        response[6] = _channelId; // Communication Channel ID
+                        response[7] = 0x00; // Status: E_NO_ERROR (Success)
+                        // HPAI (8 bytes) — route-back form (TCP).
+                        response[8] = 0x08; response[9] = 0x02; // TCP
+                        // IP + port left as zeros (route-back over the TCP connection).
                         // CRD (4 bytes)
                         response[16] = 0x04;
                         response[17] = 0x04; // Tunneling connection
                         response[18] = 0x11; response[19] = 0xff; // IA: 1.1.255
 
-                        lock (_sendLock)
-                        {
-                            _server.Send(response, response.Length, remoteEP);
-                        }
+                        Send(response);
                     }
-                    else if (serviceType == 0x0206) // CONNECTIONSTATE_REQUEST
+                    else if (serviceType == 0x0207) // CONNECTIONSTATE_REQUEST
                     {
                         byte chan = data[6];
                         byte[] response = new byte[8];
                         response[0] = 0x06; response[1] = 0x10;
-                        response[2] = 0x02; response[3] = 0x07; // CONNECTIONSTATE_RESPONSE
+                        response[2] = 0x02; response[3] = 0x08; // CONNECTIONSTATE_RESPONSE (0x0208)
                         response[4] = 0x00; response[5] = 0x08; // Length=8
                         response[6] = chan;
                         response[7] = 0x00; // Success
 
-                        lock (_sendLock)
-                        {
-                            _server.Send(response, response.Length, remoteEP);
-                        }
+                        Send(response);
                     }
-                    else if (serviceType == 0x0203) // TUNNELING_REQUEST (Host writes or reads)
+                    else if (serviceType == 0x0209) // DISCONNECT_REQUEST
+                    {
+                        byte chan = data[6];
+                        byte[] response = new byte[8];
+                        response[0] = 0x06; response[1] = 0x10;
+                        response[2] = 0x02; response[3] = 0x0A; // DISCONNECT_RESPONSE (0x020A)
+                        response[4] = 0x00; response[5] = 0x08;
+                        response[6] = chan;
+                        response[7] = 0x00;
+                        Send(response);
+                        return; // client will close the connection
+                    }
+                    else if (serviceType == 0x0420) // TUNNELING_REQUEST (Host writes or reads)
                     {
                         byte chan = data[7];
                         byte seq = data[8];
@@ -107,17 +141,14 @@ namespace KnxSim
                         // Send TUNNELING_ACK
                         byte[] ack = new byte[10];
                         ack[0] = 0x06; ack[1] = 0x10;
-                        ack[2] = 0x02; ack[3] = 0x04; // TUNNELING_ACK
+                        ack[2] = 0x04; ack[3] = 0x21; // TUNNELING_ACK (0x0421)
                         ack[4] = 0x00; ack[5] = 0x0A;
                         ack[6] = 0x04;
                         ack[7] = chan;
                         ack[8] = seq;
                         ack[9] = 0x00; // Success
 
-                        lock (_sendLock)
-                        {
-                            _server.Send(ack, ack.Length, remoteEP);
-                        }
+                        Send(ack);
 
                         // Parse CEMI payload starting at index 10
                         if (data.Length >= 20)
@@ -164,7 +195,7 @@ namespace KnxSim
                             }
                         }
                     }
-                    else if (serviceType == 0x0204) // TUNNELING_ACK from client
+                    else if (serviceType == 0x0421) // TUNNELING_ACK from client
                     {
                         // We received ack for a telegram we sent, nothing to do
                     }
@@ -176,10 +207,47 @@ namespace KnxSim
             }
         }
 
+        /// <summary>Reads exactly one KNXnet/IP frame off the TCP stream (length from header bytes 4..5).</summary>
+        private static async Task<byte[]?> ReadFrameAsync(NetworkStream stream)
+        {
+            byte[] header = new byte[6];
+            if (!await ReadExactAsync(stream, header, 0, 6)) return null;
+            if (header[0] != 0x06 || header[1] != 0x10) return null;
+
+            int totalLen = (header[4] << 8) | header[5];
+            if (totalLen < 6 || totalLen > 0xFFFF) return null;
+
+            byte[] frame = new byte[totalLen];
+            Array.Copy(header, frame, 6);
+            if (totalLen > 6 && !await ReadExactAsync(stream, frame, 6, totalLen - 6)) return null;
+            return frame;
+        }
+
+        private static async Task<bool> ReadExactAsync(NetworkStream stream, byte[] buffer, int offset, int count)
+        {
+            int read = 0;
+            while (read < count)
+            {
+                int n = await stream.ReadAsync(buffer.AsMemory(offset + read, count - read));
+                if (n == 0) return false;
+                read += n;
+            }
+            return true;
+        }
+
+        /// <summary>Writes a raw KNXnet/IP frame to the connected TCP client.</summary>
+        private static void Send(byte[] frame)
+        {
+            lock (_sendLock)
+            {
+                if (_clientStream == null) return;
+                try { _clientStream.Write(frame, 0, frame.Length); _clientStream.Flush(); }
+                catch (Exception ex) { Console.WriteLine($"Send error: {ex.Message}"); }
+            }
+        }
+
         private static void SendTelegram(ushort groupAddress, byte[] value, bool isWrite)
         {
-            if (_clientEndPoint == null || _server == null) return;
-
             bool isSmall = value.Length == 1 && value[0] <= 0x3F;
 
             int cemiLen = 11 + (isSmall ? 0 : value.Length);
@@ -187,7 +255,7 @@ namespace KnxSim
             byte[] pkt = new byte[totalLen];
 
             pkt[0] = 0x06; pkt[1] = 0x10;
-            pkt[2] = 0x02; pkt[3] = 0x03; // TUNNELING_REQUEST
+            pkt[2] = 0x04; pkt[3] = 0x20; // TUNNELING_REQUEST (0x0420)
             pkt[4] = (byte)((totalLen >> 8) & 0xFF);
             pkt[5] = (byte)(totalLen & 0xFF);
 
@@ -220,17 +288,7 @@ namespace KnxSim
                 Array.Copy(value, 0, pkt, cemiOffset + 11, value.Length);
             }
 
-            try
-            {
-                lock (_sendLock)
-                {
-                    _server.Send(pkt, pkt.Length, _clientEndPoint);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error sending telegram: {ex.Message}");
-            }
+            Send(pkt);
         }
 
         private static async Task SimulateSensorUpdates()
@@ -243,7 +301,7 @@ namespace KnxSim
             {
                 await Task.Delay(5000);
 
-                if (_clientEndPoint == null) continue;
+                lock (_sendLock) { if (_clientStream == null) continue; }
 
                 // 1. Simulating Temperature Sensor (DPT 9.001) - Random Walk
                 temp += (random.NextDouble() - 0.5) * 0.2;

@@ -75,7 +75,7 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }: SingleValu
             <div class="sv-card-body">
                 <div class="sv-card-icon" dangerouslySetInnerHTML={{ __html: iconHtml }}></div>
                 <div class="sv-card-info">
-                    <a href={`/plswk/Assets?node=${meta.parentId || ''}`} class="sv-card-name" style={{ textDecoration: 'none', color: '#fff', display: 'block' }} onClick={(e) => e.stopPropagation()}>
+                    <a href="#" class="sv-card-name" style={{ textDecoration: 'none', color: '#fff', display: 'block', cursor: 'pointer' }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); (window as any).openTelemetryDetails(keyName); }}>
                         {meta.name || friendlyName}
                     </a>
                     <div class="sv-card-fullname">{meta.fullName || keyName}</div>

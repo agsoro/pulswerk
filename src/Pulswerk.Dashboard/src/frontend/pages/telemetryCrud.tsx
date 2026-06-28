@@ -13,9 +13,9 @@ interface DataPoint {
     valueStr: string | null;
 }
 
-export function TelemetryCrudPage() {
+export function TelemetryCrudPage({ initialKey }: { initialKey?: string | null } = {}) {
     const [keys, setKeys] = useState<TelemetryKeyDto[]>([]);
-    const [selectedKey, setSelectedKey] = useState<string>('');
+    const [selectedKey, setSelectedKey] = useState<string>(initialKey || '');
     const [searchQuery, setSearchQuery] = useState<string>('');
     
     // Querying state
@@ -73,8 +73,13 @@ export function TelemetryCrudPage() {
                 if (res.ok) {
                     const data = await res.json();
                     setKeys(data);
-                    if (data.length > 0) {
-                        setSelectedKey(data[0].key);
+                    // Prefer a deep-linked key (?key=...) if it exists in the list,
+                    // otherwise fall back to the first available key.
+                    const wanted = initialKey && data.some((k: TelemetryKeyDto) => k.key === initialKey)
+                        ? initialKey
+                        : (data.length > 0 ? data[0].key : '');
+                    if (wanted) {
+                        setSelectedKey(wanted);
                     }
                 }
             } catch (e) {

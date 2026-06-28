@@ -45,12 +45,9 @@
       "type": "knx-ip",
       "address": "192.168.1.15",
       "port": 3671,
-      "knxConnectionType": "tunneling",
-      "knxIndividualAddress": "15.15.250",
       "knxSecureEnabled": true,
-      "knxPassword": "mySecretSecurePassword123!",
-      "knxUserId": 2,
-      "knxNatMode": false,
+      // knxCommissioningPassword: Device authentication code (FDSK) printed on the device label as hyphen groups over several lines (a line break on the label = a hyphen). Enter as ONE line keeping the hyphens between every group, exact case, e.g. label 'ABCDE-ABCDE / ABCDE-ABCDE' becomes 'ABCDE-ABCDE-ABCDE-ABCDE'.",
+      "knxCommissioningPassword": "ABCDE-ABCDE-ABCDE-ABCDE-ABCDE-ABCDE",
       "name": "KNX Test Gateway"
     }
   ],

@@ -172,13 +172,13 @@ namespace Pulswerk.Drivers.Tests
 
         /// <summary>
         /// Drives the PRODUCTION <see cref="Pulswerk.Drivers.Knx.KnxConnection"/> class
-        /// with <c>knxNatMode = true</c> against the real gateway and asserts that it
-        /// establishes a tunnel through the firewall. This validates the route-back HPAI
-        /// implementation end-to-end (not just a hand-rolled probe).
+        /// against the real gateway and asserts that it establishes a (plain) tunnel over
+        /// TCP. This validates the TCP tunnelling implementation end-to-end (not just a
+        /// hand-rolled probe).
         /// </summary>
         [Fact]
         [Trait("Category", "KnxGatewayIntegration")]
-        public async Task ProductionDriver_ConnectsWithNatMode()
+        public async Task ProductionDriver_ConnectsOverTcp()
         {
             var gw = GetGateway();
             if (gw is null)
@@ -190,14 +190,11 @@ namespace Pulswerk.Drivers.Tests
             var (host, port) = gw.Value;
 
             var config = new Pulswerk.Core.ConnectionConfig(
-                Id: "knx-integration-natmode",
+                Id: "knx-integration-tcp",
                 Type: "knx-ip",
                 Address: host,
                 Port: port,
-                KnxConnectionType: "tunneling",
-                KnxIndividualAddress: "15.15.250",
                 KnxSecureEnabled: false,
-                KnxNatMode: true,
                 Name: "Integration Gateway");
 
             var conn = new Pulswerk.Drivers.Knx.KnxConnection(config);
@@ -208,9 +205,9 @@ namespace Pulswerk.Drivers.Tests
                 // Wait up to 10s for the tunnel to come up.
                 bool connected = await WaitForAsync(() => conn.IsConnected, TimeSpan.FromSeconds(10));
                 Assert.True(connected,
-                    "Production KnxConnection did not establish a tunnel in NAT mode. " +
-                    "Check route-back HPAI implementation and firewall.");
-                _output.WriteLine("Production KnxConnection established a tunnel in NAT mode.");
+                    "Production KnxConnection did not establish a TCP tunnel. " +
+                    "Check the TCP tunnelling implementation and gateway reachability.");
+                _output.WriteLine("Production KnxConnection established a TCP tunnel.");
 
                 // The connection should be resolvable through the static registry.
                 Assert.True(Pulswerk.Drivers.Knx.KnxConnection.TryGetConnection(config.Id, out var fromRegistry));

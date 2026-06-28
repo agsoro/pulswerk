@@ -1,9 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs } from "preact/jsx-runtime";
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { t } from '../i18n';
-export function TelemetryCrudPage() {
+export function TelemetryCrudPage({ initialKey } = {}) {
     const [keys, setKeys] = useState([]);
-    const [selectedKey, setSelectedKey] = useState('');
+    const [selectedKey, setSelectedKey] = useState(initialKey || '');
     const [searchQuery, setSearchQuery] = useState('');
     // Querying state
     const [startQueryDate, setStartQueryDate] = useState(() => {
@@ -55,8 +55,13 @@ export function TelemetryCrudPage() {
                 if (res.ok) {
                     const data = await res.json();
                     setKeys(data);
-                    if (data.length > 0) {
-                        setSelectedKey(data[0].key);
+                    // Prefer a deep-linked key (?key=...) if it exists in the list,
+                    // otherwise fall back to the first available key.
+                    const wanted = initialKey && data.some((k) => k.key === initialKey)
+                        ? initialKey
+                        : (data.length > 0 ? data[0].key : '');
+                    if (wanted) {
+                        setSelectedKey(wanted);
                     }
                 }
             }

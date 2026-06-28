@@ -1,9 +1,124 @@
 using System;
+using System.Collections.Generic;
 
 namespace Pulswerk.Drivers.Knx
 {
     public static class KnxDpt
     {
+        // ── DPT 1.xxx named binary states ────────────────────────────────────────
+        // The KNX standard defines, for every 1-bit boolean sub-type (main number 1),
+        // the semantic meaning of the two bit values. The encoding is always 1 bit
+        // (B1), but the human-readable state for 0/1 depends on the sub-number.
+        // Keyed by normalized "1.yyy" sub-type, value = (label for bit 0, label for bit 1).
+        private static readonly Dictionary<string, (string Zero, string One)> Dpt1States =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["1.001"] = ("Off", "On"),                  // DPT_Switch
+                ["1.002"] = ("False", "True"),              // DPT_Bool
+                ["1.003"] = ("Disable", "Enable"),          // DPT_Enable
+                ["1.004"] = ("No ramp", "Ramp"),            // DPT_Ramp
+                ["1.005"] = ("No alarm", "Alarm"),          // DPT_Alarm
+                ["1.006"] = ("Low", "High"),                // DPT_BinaryValue
+                ["1.007"] = ("Decrease", "Increase"),       // DPT_Step
+                ["1.008"] = ("Up", "Down"),                 // DPT_UpDown
+                ["1.009"] = ("Open", "Close"),              // DPT_OpenClose
+                ["1.010"] = ("Stop", "Start"),              // DPT_Start
+                ["1.011"] = ("Inactive", "Active"),         // DPT_State
+                ["1.012"] = ("Not inverted", "Inverted"),   // DPT_Invert
+                ["1.013"] = ("Start/Stop", "Cyclically"),   // DPT_DimSendStyle
+                ["1.014"] = ("Fixed", "Calculated"),        // DPT_InputSource
+                ["1.015"] = ("No action", "Reset"),         // DPT_Reset
+                ["1.016"] = ("No action", "Acknowledge"),   // DPT_Ack
+                ["1.017"] = ("Trigger", "Trigger"),         // DPT_Trigger
+                ["1.018"] = ("Not occupied", "Occupied"),   // DPT_Occupancy
+                ["1.019"] = ("Closed", "Open"),             // DPT_Window_Door
+                ["1.021"] = ("OR", "AND"),                  // DPT_LogicalFunction
+                ["1.022"] = ("Scene A", "Scene B"),         // DPT_Scene_AB
+                ["1.023"] = ("Only move Up/Down", "Move Up/Down + StepStop"), // DPT_ShutterBlinds_Mode
+                ["1.024"] = ("Day", "Night"),               // DPT_DayNight
+                ["1.100"] = ("Cooling", "Heating"),         // DPT_Heat/Cool
+            };
+
+        /// <summary>
+        /// Returns the standardized state labels (for bit value 0 and 1) of a DPT 1.xxx
+        /// sub-type, or null when the DPT is not a known 1-bit boolean sub-type.
+        /// </summary>
+        public static (string Zero, string One)? GetDpt1States(string? dpt)
+        {
+            if (string.IsNullOrWhiteSpace(dpt))
+                return null;
+
+            string normalized = NormalizeDpt(dpt);
+            if (Dpt1States.TryGetValue(normalized, out var states))
+                return states;
+
+            // Unknown 1.xxx sub-type: fall back to the generic boolean meaning.
+            if (normalized.StartsWith("1.", StringComparison.Ordinal))
+                return ("False", "True");
+
+            return null;
+        }
+
+        /// <summary>
+        /// Maps a boolean value to its standardized KNX state label for the given DPT 1.xxx
+        /// sub-type (e.g. true + "1.001" => "On"). Returns null when <paramref name="dpt"/>
+        /// is not a 1-bit boolean datapoint type.
+        /// </summary>
+        public static string? GetDpt1StateLabel(bool value, string? dpt)
+        {
+            var states = GetDpt1States(dpt);
+            if (states == null)
+                return null;
+
+            return value ? states.Value.One : states.Value.Zero;
+        }
+
+        /// <summary>
+        /// Interprets a value as a DPT 1.xxx bit (0/1). Accepts native booleans, numbers,
+        /// the strings "0"/"1"/"true"/"false"/"on"/"off", and the standardized state labels
+        /// for the given sub-type (e.g. "Open"/"Close" for 1.009, "Up"/"Down" for 1.008).
+        /// </summary>
+        public static bool ParseDpt1Value(object value, string? dpt)
+        {
+            switch (value)
+            {
+                case bool bv:
+                    return bv;
+                case sbyte or byte or short or ushort or int or uint or long or ulong:
+                    return Convert.ToInt64(value) != 0;
+                case float or double or decimal:
+                    return Convert.ToDouble(value) != 0;
+            }
+
+            string? s = Convert.ToString(value)?.Trim();
+            if (string.IsNullOrEmpty(s))
+                return false;
+
+            // Generic boolean/numeric spellings.
+            if (bool.TryParse(s, out bool parsedBool))
+                return parsedBool;
+            if (long.TryParse(s, out long parsedNum))
+                return parsedNum != 0;
+            if (s.Equals("on", StringComparison.OrdinalIgnoreCase) ||
+                s.Equals("yes", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (s.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+                s.Equals("no", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            // Standardized state labels for the specific sub-type (e.g. "Open"/"Close").
+            var states = GetDpt1States(dpt);
+            if (states != null)
+            {
+                if (s.Equals(states.Value.One, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (s.Equals(states.Value.Zero, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            throw new FormatException($"Cannot interpret value '{s}' as a DPT 1.xxx (boolean) state.");
+        }
+
         public static object Decode(byte[] bytes, string dpt)
         {
             if (bytes == null || bytes.Length == 0)
@@ -86,7 +201,7 @@ namespace Pulswerk.Drivers.Knx
             if (dpt.StartsWith("1."))
             {
                 isSmall = true;
-                bool b = Convert.ToBoolean(value);
+                bool b = ParseDpt1Value(value, dpt);
                 return new byte[] { (byte)(b ? 1 : 0) };
             }
             else if (dpt.StartsWith("3.")) // 4-bit controlled (Dimming/Blinds: 1 control bit + 3 step bits)

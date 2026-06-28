@@ -55,34 +55,12 @@ namespace Pulswerk.Core
                     }
                     else if (conn.Type == "knx-ip")
                     {
+                        // KNX is always tunnelling over TCP.
                         if (string.IsNullOrWhiteSpace(conn.Address))
                             errors.Add($"KNX connection '{conn.Id}' is missing 'address' (IP of the KNX IP Gateway).");
 
-                        if (!string.IsNullOrWhiteSpace(conn.KnxIndividualAddress))
-                        {
-                            var parts = conn.KnxIndividualAddress.Split('.');
-                            if (parts.Length != 3 || 
-                                !int.TryParse(parts[0], out int area) || area < 0 || area > 15 ||
-                                !int.TryParse(parts[1], out int line) || line < 0 || line > 15 ||
-                                !int.TryParse(parts[2], out int member) || member < 0 || member > 255)
-                            {
-                                errors.Add($"KNX connection '{conn.Id}' has invalid individual address '{conn.KnxIndividualAddress}'. Expected 'area.line.member' format (0-15.0-15.0-255).");
-                            }
-                        }
-
-                        if (conn.KnxSecureEnabled)
-                        {
-                            if (string.IsNullOrWhiteSpace(conn.KnxPassword))
-                                errors.Add($"KNX connection '{conn.Id}' has secure enabled but is missing 'knxPassword'.");
-                            if (conn.KnxUserId < 1 || conn.KnxUserId > 255)
-                                errors.Add($"KNX connection '{conn.Id}' has secure enabled but invalid 'knxUserId' '{conn.KnxUserId}'. Expected range 1-255.");
-                        }
-
-                        // NAT mode (route-back HPAI) only applies to tunnelling. Routing uses
-                        // multicast and cannot traverse a router/NAT in the first place.
-                        bool isRouting = string.Equals(conn.KnxConnectionType, "routing", StringComparison.OrdinalIgnoreCase);
-                        if (conn.KnxNatMode && isRouting)
-                            errors.Add($"KNX connection '{conn.Id}' has 'knxNatMode' enabled but 'knxConnectionType' is 'routing'. NAT mode applies only to tunnelling.");
+                        if (conn.KnxSecureEnabled && string.IsNullOrWhiteSpace(conn.KnxCommissioningPassword))
+                            errors.Add($"KNX connection '{conn.Id}' has secure enabled but is missing 'knxCommissioningPassword' (the code printed on the IP bridge).");
                     }
                 }
             }

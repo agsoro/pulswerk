@@ -12,11 +12,11 @@ namespace Pulswerk.Core
 
         private static readonly System.Collections.Generic.Dictionary<string, (string Name, string Unit)> _metadata = new()
         {
-            [PowerKw] = ("Leistung", "kW"),
-            [EnergyImportKwh] = ("Energie Import", "kWh"),
-            [EnergyExportKwh] = ("Energie Export", "kWh"),
-            [PowerLimitPct] = ("Leistungsgrenze", "%"),
-            [UtilityLimitPct] = ("Netzgrenze", "%")
+            [PowerKw] = ("Leistung", Units.Kilowatt),
+            [EnergyImportKwh] = ("Energie Import", Units.KilowattHour),
+            [EnergyExportKwh] = ("Energie Export", Units.KilowattHour),
+            [PowerLimitPct] = ("Leistungsgrenze", Units.Percent),
+            [UtilityLimitPct] = ("Netzgrenze", Units.Percent)
         };
 
         public static string GetFriendlyName(string key) => _metadata.TryGetValue(key, out var m) ? m.Name : key;

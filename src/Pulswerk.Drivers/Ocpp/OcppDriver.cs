@@ -27,13 +27,15 @@ namespace Pulswerk.Drivers.Ocpp
 
         public IReadOnlyDictionary<string, string> GetTelemetryUnits() => new Dictionary<string, string>
         {
-            ["power"] = "kW",
-            ["energy_import"] = "kWh",
-            ["current"] = "A",
-            ["voltage"] = "V",
-            ["active_user"] = "",
-            ["power_limit"] = "A",
-            ["charging_phases"] = ""
+            ["power"] = Units.Kilowatt,
+            ["energy_import"] = Units.KilowattHour,
+            ["current"] = Units.Ampere,
+            ["voltage"] = Units.Volt,
+            ["active_user"] = Units.None,
+            // power_limit is a percentage of the total power capacity (16A x 3 phases),
+            // consistent with the generic EMS power_limit key.
+            ["power_limit"] = Units.Percent,
+            ["charging_phases"] = Units.None
         };
 
         public TelemetryValues Read(ConnectionConfig connection, DeviceConfig device)
@@ -70,7 +72,7 @@ namespace Pulswerk.Drivers.Ocpp
                     "current" => "Charging Current",
                     "voltage" => "Grid Voltage",
                     "active_user" => "Active User RFID",
-                    "power_limit" => "Max Charge Current Limit",
+                    "power_limit" => "Charge Limit",
                     "charging_phases" => "Charging Phases",
                     _ => key.Replace("_", " ")
                 };
@@ -115,22 +117,35 @@ namespace Pulswerk.Drivers.Ocpp
         // IDeviceWriter methods
         public void Write(ConnectionConfig connection, DeviceConfig device, string key, double value)
         {
+            var manager = OcppManagerService.Instance;
             if (key == "power_limit")
             {
                 int connectorId = 1; // Default to connector 1
-                OcppManagerService.Instance.SetChargingLimitAsync(device.Id, connectorId, value).GetAwaiter().GetResult();
+                // power_limit is a percentage (0-100) of total capacity (16A x 3 phases).
+                // Resolve to a per-phase current AND phase count, dropping phases for low
+                // percentages so a phase never carries less than the 6A minimum.
+                var (amps, phases) = manager.ResolveLimit(device.Id, value);
+                manager.SetChargingLimitAsync(device.Id, connectorId, amps, phases).GetAwaiter().GetResult();
             }
             else if (key == "charging_phases")
             {
                 int connectorId = 1;
-                // Retrieve current limit
-                var telemetry = OcppManagerService.Instance.GetTelemetry(device.Id);
-                double currentLimit = 16.0;
+                int newPhases = Math.Max((int)value, 1);
+                // Retrieve current limit (stored as a percentage of total capacity) and
+                // convert back to a per-phase current using the NEW phase count. Keep the
+                // per-phase current at or above the 6A minimum while charging.
+                var telemetry = manager.GetTelemetry(device.Id);
+                double currentPercent = 100.0;
                 if (telemetry.TryGetValue("power_limit", out var limObj) && limObj is double lim)
                 {
-                    currentLimit = lim;
+                    currentPercent = lim;
                 }
-                OcppManagerService.Instance.SetChargingLimitAsync(device.Id, connectorId, currentLimit, (int)value).GetAwaiter().GetResult();
+                double currentLimitAmps = manager.PercentToAmps(device.Id, currentPercent, newPhases);
+                if (currentLimitAmps > 0 && currentLimitAmps < OcppManagerService.MinCurrentAmps)
+                {
+                    currentLimitAmps = OcppManagerService.MinCurrentAmps;
+                }
+                manager.SetChargingLimitAsync(device.Id, connectorId, currentLimitAmps, newPhases).GetAwaiter().GetResult();
             }
             else
             {
