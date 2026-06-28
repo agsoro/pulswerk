@@ -240,6 +240,38 @@ namespace Pulswerk.Drivers.BACnet
 
         private static readonly ConcurrentDictionary<string, BacnetAckContext> _ackRegistry = new();
 
+        // Upper bound on the alarm-acknowledge registry. The key is deterministic per object
+        // ({conn}:{objType}:{instance}) so re-alarms overwrite rather than accumulate, but on
+        // a large site with many distinct alarming objects the registry — which pins a
+        // BacnetClient per entry — would only ever grow. When the cap is exceeded we evict the
+        // oldest entries by event time. 0 disables the cap.
+        private const int MaxAckRegistryEntries = 2048;
+
+        /// <summary>
+        /// Inserts/updates an alarm-acknowledge context, evicting the oldest entries when the
+        /// registry exceeds <see cref="MaxAckRegistryEntries"/> so it cannot grow without bound
+        /// (each entry pins a <see cref="BacnetClient"/>).
+        /// </summary>
+        private static void StoreAckContext(string ackKey, BacnetAckContext ctx)
+        {
+            _ackRegistry[ackKey] = ctx;
+
+            if (MaxAckRegistryEntries <= 0 || _ackRegistry.Count <= MaxAckRegistryEntries)
+                return;
+
+            int target = (int)(MaxAckRegistryEntries * 0.9);
+            var oldest = _ackRegistry
+                .OrderBy(kv => kv.Value.EventTime)
+                .Select(kv => kv.Key)
+                .Take(Math.Max(0, _ackRegistry.Count - target))
+                .ToArray();
+            foreach (var k in oldest)
+            {
+                if (!string.Equals(k, ackKey, StringComparison.Ordinal)) // never evict the one we just stored
+                    _ackRegistry.TryRemove(k, out _);
+            }
+        }
+
         /// <summary>Tracks devices that have already logged their hierarchy conversion stats (avoids log spam on every poll).</summary>
         private static readonly HashSet<string> _hierarchyLogged = new();
 
@@ -1679,7 +1711,7 @@ namespace Pulswerk.Drivers.BACnet
                     var bacnetEventState = (isFault || hasReliabilityFault)
                         ? BacnetEventStates.EVENT_STATE_FAULT
                         : BacnetEventStates.EVENT_STATE_OFFNORMAL;
-                    _ackRegistry[ackKey] = new BacnetAckContext(client, address, obj.ObjectId, bacnetEventState, DateTime.UtcNow);
+                    StoreAckContext(ackKey, new BacnetAckContext(client, address, obj.ObjectId, bacnetEventState, DateTime.UtcNow));
                 }
 
                 var details = new Dictionary<string, object>

@@ -26,7 +26,7 @@ namespace Pulswerk.Dashboard
     ///   WriteBackService.cs  – WriteValueAsync, WriteComplexValueAsync
     ///   PropertiesService.cs – GetPropertiesAsync, GetUpdatesPerMinute
     /// </summary>
-    public partial class DashboardDataService
+    public partial class DashboardDataService : IDisposable
     {
         // ── Public state ─────────────────────────────────────────────────────
         public LogBuffer LogBuffer { get; }
@@ -118,6 +118,21 @@ namespace Pulswerk.Dashboard
 
             // Start unified health sampling (every 5 min, first sample after 10 s)
             _healthTimer = new System.Threading.Timer(_ => SampleHealthSnapshot(), null, 10_000, 5 * 60_000);
+        }
+
+        private bool _disposed;
+
+        /// <summary>
+        /// Disposes the health-sampling timer. The timer holds a rooted callback delegate
+        /// closing over this service, so without disposal the whole service graph (stores,
+        /// config, queues) is kept alive and the timer keeps firing.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            try { _healthTimer?.Dispose(); } catch { }
+            _healthTimer = null;
         }
 
         // ── Config helpers ───────────────────────────────────────────────────

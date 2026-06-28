@@ -81,14 +81,25 @@ namespace Pulswerk.Drivers.Knx
 
         private readonly ConcurrentDictionary<ushort, CachedValue> _rawCache = new();
 
+        // Upper bound on how many distinct group addresses we cache. A busy KNX bus carries
+        // traffic for many addresses we never read; without a cap the cache would grow for
+        // the whole process lifetime. When the cap is exceeded we evict the oldest-seen
+        // entries. Configured points are always kept (they live in _knownAddresses and are
+        // exempt from eviction). 0 disables the cap.
+        private const int DefaultMaxCachedAddresses = 4096;
+        private readonly int _maxCachedAddresses = DefaultMaxCachedAddresses;
+
         // Maximum age for which a cached value is considered "live". Older values are not
         // returned by GetCachedValue (when staleness checking is enabled). 0 disables the
         // check. Configured from ConnectionConfig.KnxStaleSeconds.
         private const int DefaultStaleSeconds = 180; // 3× the 60s read-sweep interval
         private readonly TimeSpan _staleWindow;
 
-        // All group addresses we know about (configured points + anything seen on the bus).
-        // Used to drive the throttled read sweep so the cache fills with current state.
+        // Group addresses we actively poll in the read sweep. This set is populated ONLY by
+        // configured points (via RegisterAddress/RegisterAddresses) — NOT by traffic seen on
+        // the bus. Bus-pushed addresses keep themselves fresh and must never be added here,
+        // otherwise an arbitrary, unbounded set of addresses would be polled forever (both a
+        // memory leak and ever-growing bus load).
         private readonly ConcurrentDictionary<ushort, byte> _knownAddresses = new();
         private Task? _readSweepTask;
 
@@ -592,16 +603,24 @@ namespace Pulswerk.Drivers.Knx
                 // is byte-for-byte identical to the previous one (a re-seen, unchanged value),
                 // so we keep an accurate notion of when the value actually last changed.
                 var now = DateTime.UtcNow;
+                bool added = false;
                 _rawCache.AddOrUpdate(
                     destAddr,
-                    _ => new CachedValue(payload, now, now),
+                    _ => { added = true; return new CachedValue(payload, now, now); },
                     (_, prev) =>
                     {
                         bool same = prev.Payload.Length == payload.Length
                                     && prev.Payload.AsSpan().SequenceEqual(payload);
                         return new CachedValue(payload, now, same ? prev.ChangedUtc : now);
                     });
-                RegisterAddress(destAddr);
+
+                // Note: we deliberately do NOT register bus-seen addresses in _knownAddresses.
+                // The bus keeps them fresh on its own; polling them would be unnecessary and
+                // would let an arbitrary set of addresses accumulate and be polled forever.
+                // Only configured points (via RegisterAddress from the driver) are polled.
+
+                // Bound the cache: a busy bus can surface far more addresses than we ever read.
+                if (added) EnforceCacheBound();
 
                 // command 2 = GroupValueWrite  -> a device spontaneously pushing a new value
                 // command 1 = GroupValueResponse -> an answer to one of our own GroupValueRead
@@ -633,6 +652,30 @@ namespace Pulswerk.Drivers.Knx
         {
             if (groupAddress != 0)
                 _knownAddresses.TryAdd(groupAddress, 0);
+        }
+
+        /// <summary>
+        /// Keeps <see cref="_rawCache"/> from growing without bound on a busy bus by evicting
+        /// the oldest-seen entries once the cap is exceeded. Configured (polled) addresses in
+        /// <see cref="_knownAddresses"/> are never evicted. No-op when the cap is disabled (0)
+        /// or not yet exceeded.
+        /// </summary>
+        private void EnforceCacheBound()
+        {
+            if (_maxCachedAddresses <= 0) return;
+            if (_rawCache.Count <= _maxCachedAddresses) return;
+
+            // Evict down to ~90% of the cap so we don't run this on every single add once full.
+            int target = (int)(_maxCachedAddresses * 0.9);
+            var evictable = _rawCache
+                .Where(kv => !_knownAddresses.ContainsKey(kv.Key)) // never evict configured points
+                .OrderBy(kv => kv.Value.SeenUtc)                   // oldest first
+                .Select(kv => kv.Key)
+                .Take(Math.Max(0, _rawCache.Count - target))
+                .ToArray();
+
+            foreach (var ga in evictable)
+                _rawCache.TryRemove(ga, out _);
         }
 
         /// <summary>Register multiple group addresses (e.g. all configured points of a device).</summary>
@@ -839,6 +882,12 @@ namespace Pulswerk.Drivers.Knx
                     _session = null;
                 }
             }
+
+            // Drain any frames left over from the connection that just dropped. They belong
+            // to the old session and must not be mistaken for responses on the next tunnel
+            // (e.g. a stale frame being picked up while we wait for the new CONNECT_RESPONSE).
+            // Without this the queue can also accumulate undelivered frames across reconnects.
+            while (_rxQueue.TryTake(out _)) { }
         }
 
         public static ushort ParseGroupAddress(string addressStr)
@@ -907,6 +956,12 @@ namespace Pulswerk.Drivers.Knx
             _cts?.Dispose();
 
             try { _sendGate.Dispose(); } catch { }
+
+            // The RX queue lives for the whole lifetime of the connection (shared across
+            // reconnects). Complete and dispose it so its internal synchronisation
+            // primitives (a SemaphoreSlim) are released.
+            try { _rxQueue.CompleteAdding(); } catch { }
+            try { _rxQueue.Dispose(); } catch { }
         }
     }
 }

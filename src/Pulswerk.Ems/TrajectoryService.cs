@@ -45,6 +45,16 @@ namespace Pulswerk.Ems
 
         public void Start()
         {
+            // Guard against a double-start: cancel and dispose any previous source so we
+            // don't orphan an old CancellationTokenSource (leaking its WaitHandle) and leave
+            // a second LoopAsync running in parallel.
+            var previous = _cts;
+            if (previous != null)
+            {
+                try { previous.Cancel(); } catch { }
+                try { previous.Dispose(); } catch { }
+            }
+
             _cts = new CancellationTokenSource();
             Task.Run(() => LoopAsync(_cts.Token));
             Log.Info("[Trajectory] TrajectoryService background loop started.");
@@ -52,7 +62,13 @@ namespace Pulswerk.Ems
 
         public void Stop()
         {
-            _cts?.Cancel();
+            var cts = _cts;
+            _cts = null;
+            if (cts != null)
+            {
+                try { cts.Cancel(); } catch { }
+                try { cts.Dispose(); } catch { }
+            }
             Log.Info("[Trajectory] TrajectoryService background loop stopped.");
         }
 

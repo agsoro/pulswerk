@@ -695,6 +695,13 @@ namespace Pulswerk.Host
             _alarmStore.Dispose();
             _billingStore.Dispose();
             _dashboardServer?.Dispose();
+
+            // Dispose the per-connection serialisation semaphores (each allocates a WaitHandle).
+            foreach (var sem in _connLocks.Values)
+            {
+                try { sem.Dispose(); } catch { }
+            }
+            _connLocks.Clear();
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

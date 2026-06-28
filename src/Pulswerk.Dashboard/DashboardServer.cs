@@ -355,6 +355,17 @@ namespace Pulswerk.Dashboard
         public void Dispose()
         {
             _data.Uptime?.Stop();
+
+            // The WebApplication owns Kestrel, the DI container (and every disposable
+            // singleton/scoped service in it), the data-protection key ring, sockets and
+            // thread-pool resources. It must be disposed or all of that leaks. RunAsync is
+            // driven by the host's cancellation token, so by the time we get here the server
+            // is (being) stopped; DisposeAsync also stops it if still running.
+            try { _app.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+            catch (Exception ex) { Log.Debug($"[Server] Error disposing web application: {ex.Message}"); }
+
+            // The health timer keeps a rooted callback over the data service; release it too.
+            _data.Dispose();
         }
 
         // ── CIDR range matching helper ──────────────────────────────────────

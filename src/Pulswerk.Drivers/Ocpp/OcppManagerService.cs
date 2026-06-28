@@ -82,6 +82,9 @@ namespace Pulswerk.Drivers.Ocpp
             if (_activeSockets.TryRemove(chargePointId, out var oldSocket))
             {
                 try { await oldSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Replaced", CancellationToken.None); } catch { }
+                // The replaced socket is no longer referenced anywhere — dispose it instead of
+                // leaving it for the finalizer (it holds an unmanaged socket handle + buffers).
+                try { oldSocket.Dispose(); } catch { }
             }
 
             _activeSockets[chargePointId] = socket;
@@ -116,6 +119,17 @@ namespace Pulswerk.Drivers.Ocpp
             {
                 _activeSockets.TryRemove(chargePointId, out _);
                 UpdateTelemetryValue(chargePointId, "status", "Offline");
+
+                // Purge any transactions still open for this charge point. A charger that
+                // disconnects mid-charge (crash, network loss) may never send StopTransaction,
+                // and transaction ids are monotonically increasing, so without this the
+                // _activeTransactions dictionary would accumulate orphaned entries forever.
+                foreach (var kvp in _activeTransactions)
+                {
+                    if (string.Equals(kvp.Value.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase))
+                        _activeTransactions.TryRemove(kvp.Key, out _);
+                }
+
                 Log.Info($"[OCPP] Charger '{chargePointId}' disconnected.");
             }
         }
