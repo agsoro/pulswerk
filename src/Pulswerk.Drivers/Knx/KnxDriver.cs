@@ -377,7 +377,11 @@ namespace Pulswerk.Drivers.Knx
                 var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var xmlPt in xmlPoints.Values)
                 {
-                    string baseKey = SanitizeKey(xmlPt.Name ?? xmlPt.Address);
+                    // Derive the telemetry key from technical data (the KNX group address),
+                    // not the human-readable name. The group address is a stable, unique
+                    // identifier, whereas the name may change or be non-unique. The
+                    // descriptive name is still surfaced separately via Name.
+                    string baseKey = SanitizeKey(xmlPt.Address);
                     string key = baseKey;
                     int counter = 1;
                     while (!keys.Add(key))
