@@ -158,6 +158,20 @@ namespace Pulswerk.Dashboard.Controllers
                     return;
                 }
             }
+
+            // 12. Gate config-edit endpoints (network scan, connection/device type metadata).
+            // These expose and mutate the live configuration, so they require config-edit rights
+            // rather than just module access.
+            if (path.Contains("/api/scan-network", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/connection-types", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/device-types", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server))
+                {
+                    context.Result = StatusCode(403, "Configuration edit access is required.");
+                    return;
+                }
+            }
         }
 
         [NonAction]
@@ -1122,6 +1136,73 @@ namespace Pulswerk.Dashboard.Controllers
                 connections = connectionsList,
                 canEditConfig = DashboardAuth.CanEditConfig(HttpContext, _data.Config.Server)
             });
+        }
+
+        // ── Network scan & connection metadata ───────────────────────────────
+
+        /// <summary>
+        /// Returns the metadata describing every supported connection type and
+        /// the per-type fields the UI should render. The UI uses this to show
+        /// only the relevant inputs for the selected protocol.
+        /// </summary>
+        [HttpGet("connection-types")]
+        public IActionResult GetConnectionTypes()
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            return Ok(ConnectionTypeMetadata.All);
+        }
+
+        /// <summary>
+        /// Returns the metadata describing every supported device type and the
+        /// per-type fields the UI should render (including which connection
+        /// types each device type is compatible with).
+        /// </summary>
+        [HttpGet("device-types")]
+        public IActionResult GetDeviceTypes()
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            return Ok(DeviceTypeMetadata.All);
+        }
+
+        /// <summary>
+        /// Scans an IP range for hosts that accept TCP connections on known
+        /// industrial-protocol ports (Modbus 502, BACnet 47808, KNX 3671, OCPP 9000).
+        /// Returns the list of discovered hosts together with the protocols each
+        /// responded to.
+        /// </summary>
+        [HttpPost("scan-network")]
+        public async Task<IActionResult> ScanNetwork([FromBody] JsonElement body)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            string? range = null;
+            if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("range", out var r))
+                range = r.ValueKind == JsonValueKind.String ? r.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(range))
+                return BadRequest("Missing 'range' in request body.");
+
+            try
+            {
+                var result = await Services.NetworkScanService.ScanAsync(range!);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return Problem("Network scan failed: " + ex.Message);
+            }
         }
 
         // ── OCPP Wallbox Endpoints ──────────────────────────────────────────

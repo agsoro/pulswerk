@@ -1,0 +1,92 @@
+{
+  "influxdb": {
+    "url": "http://localhost:8086",
+    "token": "connector-token",
+    "org": "pulswerk",
+    "bucket": "telemetries"
+  },
+  "database": {
+    "retentionDays": 730,
+    "compactionAfterDays": 700,
+    "alarmRetentionDays": 30
+  },
+  "polling": {
+    "intervalSeconds": 30
+  },
+  "server": {
+    "port": 5000,
+    "logBufferSize": 5000,
+    "auth": {
+      "enabled": true,
+      "defaultUser": "admin",
+      "defaultGroups": ["admins"],
+      "trustedProxies": ["127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12"]
+    },
+    "rights": {
+      "enabled": true,
+      "allowAssetValueEdit": ["admins"],
+      "allowAlarmAck": ["admins"],
+      "allowDashboardEdit": ["admins"],
+      "allowFavoriteEdit": ["admins"],
+      "allowConfigEdit": ["admins"],
+      "allowEms": ["admins"],
+      "allowBilling": ["admins"],
+      "allowWallbox": ["admins"],
+      "allowHistoricalData": ["admins"],
+      "allowAlarms": ["admins"],
+      "allowLogs": ["admins"],
+      "allowHeartbeat": ["admins"],
+      "allowDashboards": ["admins"],
+      "allowAssets": ["admins"],
+      "allowTelemetry": ["admins"],
+      "allowConnections": ["admins"]
+    }
+  },
+  "connections": [
+    {
+      "id": "dummy-modbus",
+      "type": "modbus-tcp",
+      "address": "127.0.0.1",
+      "port": 502
+    },
+    {
+      "id": "knx-test",
+      "type": "knx-ip",
+      "address": "127.0.0.1",
+      "port": 3671,
+      "knxSecureEnabled": false,
+      "knxStaleSeconds": 180,
+      "name": "KNX Test Gateway"
+    }
+  ],
+  "devices": [
+    {
+      "id": "virtual-1",
+      "name": "Virtual Device",
+      "deviceType": "virtual",
+      "telemetries": []
+    },
+    {
+      "id": "knx-living-room",
+      "name": "Living Room KNX",
+      "deviceType": "knx",
+      "connectionId": "knx-test",
+      "path": ["Building A", "Living Room"],
+      "assetType": "KNX Controller",
+      "knxGroupAddressXml": "ets_export.xml"
+    }
+  ],
+  "modules": {
+    "ems": true,
+    "billing": true,
+    "wallbox": true,
+    "historicalData": true,
+    "alarms": true,
+    "logs": true,
+    "heartbeat": true,
+    "dashboards": true,
+    "assets": true,
+    "telemetry": true,
+    "connections": true
+  }
+}

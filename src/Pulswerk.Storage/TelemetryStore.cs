@@ -351,7 +351,149 @@ namespace Pulswerk.Storage
                 }
             }
             catch (Exception ex) { Log.Error($"[InfluxDB] Query error: {ex.Message}"); }
+
+            // Enum / boolean telemetry (e.g. KNX DPT 1.xxx state labels, or any other textual
+            // state) is stored in the "value_str" field and is therefore excluded by the
+            // numeric "value" filter above, leaving those series with no chartable points.
+            // Pull those string points separately and categorically encode each distinct label
+            // to a numeric ordinal so they render as a step series. The original label is kept
+            // in ValueStr so the frontend can label the Y axis and tooltip.
+            await MergeStringPointsAsync(keys, startTs, endTs, result);
+
             return result;
+        }
+
+        /// <summary>
+        /// Queries the "value_str" field for the given keys and, for any series that did not
+        /// already yield numeric points, categorically encodes the distinct string states into
+        /// numeric ordinals so they can be charted. Recognized boolean states keep a stable
+        /// 0/1 polarity (e.g. "off" → 0, "on" → 1); arbitrary enum labels are assigned ordinals
+        /// in sorted order for determinism. Each returned <see cref="TsPoint"/> carries both the
+        /// numeric ordinal (<c>Value</c>) and the original label (<c>ValueStr</c>).
+        /// </summary>
+        private async Task MergeStringPointsAsync(
+            List<string> keys, long startTs, long endTs, Dictionary<string, List<TsPoint>> result)
+        {
+            // Only consider keys that produced no numeric points; numeric series take priority.
+            var stringKeys = keys
+                .Where(k => result.TryGetValue(k, out var pts) && pts.Count == 0)
+                .ToList();
+            if (stringKeys.Count == 0) return;
+
+            var keyFilter = string.Join(" or ",
+                stringKeys.Select(k => $"r.key == \"{EscapeFlux(k)}\""));
+
+            var flux = $"""
+                from(bucket: "{_bucket}")
+                  |> range(start: {ToInfluxTime(startTs)}, stop: {ToInfluxTime(endTs)})
+                  |> filter(fn: (r) => r._measurement == "telemetry" and ({keyFilter}))
+                  |> filter(fn: (r) => r._field == "value_str")
+                  |> sort(columns: ["_time"])
+                """;
+
+            // Collect raw (ts, label) pairs per key first; ordinals are assigned afterwards
+            // once all distinct labels for a key are known.
+            var rawByKey = new Dictionary<string, List<(long Ts, string Label)>>();
+            try
+            {
+                var queryApi = _client.GetQueryApi();
+                var tables = await queryApi.QueryAsync(flux, _org);
+                foreach (var table in tables)
+                {
+                    foreach (var record in table.Records)
+                    {
+                        string? recordKey = record.GetValueByKey("key")?.ToString();
+                        if (recordKey == null || !result.ContainsKey(recordKey)) continue;
+
+                        string? label = record.GetValue()?.ToString();
+                        if (string.IsNullOrEmpty(label)) continue;
+
+                        var time = record.GetTime();
+                        long ts = time.HasValue ? time.Value.ToUnixTimeMilliseconds() : 0;
+
+                        if (!rawByKey.TryGetValue(recordKey, out var list))
+                            rawByKey[recordKey] = list = new List<(long, string)>();
+                        list.Add((ts, label));
+                    }
+                }
+            }
+            catch (Exception ex) { Log.Error($"[InfluxDB] String query error: {ex.Message}"); }
+
+            foreach (var (key, points) in rawByKey)
+            {
+                if (points.Count == 0) continue;
+                var encoding = BuildCategoryEncoding(points.Select(p => p.Label));
+                foreach (var (ts, label) in points)
+                {
+                    if (encoding.TryGetValue(label, out double ordinal))
+                        result[key].Add(new TsPoint(ts, ordinal, label));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Builds a deterministic label → numeric-ordinal map for a set of string states.
+        /// If every distinct label is a recognized boolean state, the canonical 0/1 polarity is
+        /// used (so "on"/"off" always map to 1/0 regardless of which appears first). Otherwise
+        /// the distinct labels are sorted and assigned 0,1,2,… so the encoding is stable across
+        /// queries and time ranges.
+        /// </summary>
+        private static Dictionary<string, double> BuildCategoryEncoding(IEnumerable<string> labels)
+        {
+            var distinct = labels
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .Select(l => l.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // Boolean fast-path: keep stable 0/1 polarity when all labels are boolean-ish.
+            if (distinct.Count <= 2 && distinct.All(l => MapBooleanLabel(l) != null))
+            {
+                var boolMap = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                foreach (var l in distinct)
+                    boolMap[l] = MapBooleanLabel(l)!.Value;
+                return boolMap;
+            }
+
+            // General enum encoding: sorted distinct labels → 0,1,2,…
+            var map = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            int idx = 0;
+            foreach (var l in distinct.OrderBy(l => l, StringComparer.OrdinalIgnoreCase))
+                map[l] = idx++;
+            return map;
+        }
+
+        // Recognized KNX DPT 1.xxx state labels (stored lower-cased) plus generic spellings.
+        // "One" labels map to 1, "Zero" labels map to 0. Kept here (rather than referencing the
+        // KNX driver) so the storage layer stays dependency-free.
+        // Each complementary pair must map to *opposite* numbers so the step chart can
+        // distinguish the two states; the exact polarity is cosmetic. Note "open"/"close" is
+        // intentionally absent because its polarity is DPT-dependent (1.009 vs 1.019) and the
+        // storage layer has no DPT context — those still chart via the "closed" label below.
+        private static readonly HashSet<string> _boolTrueLabels = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "1", "true", "on", "yes", "high", "active", "down", "enable",
+            "alarm", "start", "increase", "ramp", "inverted", "calculated", "reset",
+            "acknowledge", "occupied", "and", "scene b", "night", "heating", "open"
+        };
+        private static readonly HashSet<string> _boolFalseLabels = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "0", "false", "off", "no", "low", "inactive", "closed", "close", "up", "stop", "disable",
+            "no alarm", "no action", "decrease", "no ramp", "not inverted", "fixed",
+            "not occupied", "or", "scene a", "day", "cooling"
+        };
+
+        /// <summary>
+        /// Maps a stored string state label to a numeric 0/1, or null when the label is not a
+        /// recognized boolean state and therefore cannot be charted numerically.
+        /// </summary>
+        private static double? MapBooleanLabel(string? label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return null;
+            string s = label.Trim();
+            if (_boolTrueLabels.Contains(s)) return 1.0;
+            if (_boolFalseLabels.Contains(s)) return 0.0;
+            return null;
         }
 
         /// <summary>

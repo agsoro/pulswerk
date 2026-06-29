@@ -13,18 +13,26 @@ test.describe('KNX Real E2E Tests (Non-Mocked)', () => {
         // Wait for connection list to render and check that KNX Test Gateway is visible
         const connCard = page.locator('text=KNX Test Gateway');
         await expect(connCard).toBeVisible({ timeout: 15000 });
+
+        // Read the actual address from the API so the test works in both
+        // Docker (knx-sim) and local (127.0.0.1) environments.
+        const apiRes = await page.request.get(`${ADMIN_PROXY_URL}/plswk/api/connections`);
+        const apiData = await apiRes.json();
+        const knxConn = apiData.connections.find((c: any) => c.id === 'knx-test');
+        const expectedAddr = knxConn?.address || 'knx-sim';
+        const expectedPort = knxConn?.port || 3671;
         
         // Click the connection card
         await connCard.click();
 
         // Check connection detail header (scoped to detail panel)
         const detailPanel = page.locator('[data-testid="conn-detail"]');
-        await expect(detailPanel.locator('text=knx-sim : 3671')).toBeVisible();
+        await expect(detailPanel.locator(`text=${expectedAddr} : ${expectedPort}`)).toBeVisible();
 
         // Check device status and Address in detail table
         const deviceName = page.locator('text=Living Room KNX');
         await expect(deviceName).toBeVisible();
-        await expect(page.locator('text=knx-sim').first()).toBeVisible();
+        await expect(page.locator(`text=${expectedAddr}`).first()).toBeVisible();
         
         // Status should be online
         const statusText = page.locator('text=online');
@@ -36,21 +44,39 @@ test.describe('KNX Real E2E Tests (Non-Mocked)', () => {
         await page.goto(`${ADMIN_PROXY_URL}/plswk/Assets`);
 
         // Check Building A and expand it
-        const folderA = page.locator('.tree-row').filter({ hasText: /^Building A$/ });
+        const folderA = page.locator('.tree-row').filter({ hasText: /^Building A$/ }).first();
         await expect(folderA).toBeVisible({ timeout: 15000 });
         await folderA.locator('.tree-toggle').click();
         await page.waitForTimeout(300);
 
         // Check Living Room and expand it
-        const folderRoom = page.locator('.tree-row').filter({ hasText: /^Living Room$/ });
+        const folderRoom = page.locator('.tree-row').filter({ hasText: /^Living Room$/ }).first();
         await expect(folderRoom).toBeVisible();
         await folderRoom.locator('.tree-toggle').click();
         await page.waitForTimeout(300);
 
-        // Select the KNX controller node
-        const deviceNode = page.locator('.tree-row').filter({ hasText: 'Living Room KNX' });
+        // Select the KNX controller node — expand it first to reveal nested folders
+        const deviceNode = page.locator('.tree-row').filter({ hasText: 'Living Room KNX' }).first();
         await expect(deviceNode).toBeVisible();
+        // Expand the device node to show its nested ETS hierarchy children
+        const deviceToggle = deviceNode.locator('.tree-toggle');
+        if (await deviceToggle.isVisible()) {
+            await deviceToggle.click();
+            await page.waitForTimeout(300);
+        }
         await deviceNode.click();
+        await page.waitForTimeout(500);
+
+        // The KNX device nests its telemetry points under the ETS hierarchy
+        // (Building A → Living Room). Expand those subfolders to reveal the points.
+        // Use last() to target the deepest nested occurrence.
+        const nestedBuildingA = page.locator('.tree-row').filter({ hasText: /^Building A$/ }).last();
+        await nestedBuildingA.locator('.tree-toggle').click();
+        await page.waitForTimeout(300);
+        const nestedLivingRoom = page.locator('.tree-row').filter({ hasText: /^Living Room$/ }).last();
+        await nestedLivingRoom.locator('.tree-toggle').click();
+        await page.waitForTimeout(300);
+        await nestedLivingRoom.click();
         await page.waitForTimeout(500);
 
         // Verify the telemetry points are listed

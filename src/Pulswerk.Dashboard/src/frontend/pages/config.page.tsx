@@ -27,6 +27,13 @@ interface DeviceConfig {
     connectionId?: string;
     telemetries?: TelemetryConfig[];
     path?: string[];
+    // Extended fields surfaced by the per-type editor
+    deviceId?: number;
+    address?: string;
+    assetType?: string;
+    pollIntervalSeconds?: number;
+    writeback?: boolean;
+    knxGroupAddressXml?: string;
 }
 
 interface ConnectionConfig {
@@ -36,7 +43,12 @@ interface ConnectionConfig {
     port?: number;
     localAddress?: string;
     localPort?: number;
+    localDeviceId?: number;
     name?: string;
+    knxSecureEnabled?: boolean;
+    knxCommissioningPassword?: string;
+    knxMaxConcurrentConnects?: number;
+    knxStaleSeconds?: number;
 }
 
 interface ModulesConfig {
@@ -72,6 +84,67 @@ interface EditorModalProps {
     onClose: () => void;
     onSave: () => void;
     children: ComponentChildren;
+}
+
+// ── Backend metadata types (mirror ConnectionTypeMetadata.cs) ────────────────
+
+interface ConnectionField {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'password' | 'select' | 'checkbox';
+    required: boolean;
+    placeholder?: string;
+    help?: string;
+    default?: string;
+    options?: string[];
+}
+
+interface ConnectionTypeMeta {
+    type: string;
+    label: string;
+    icon: string;
+    defaultPort: number;
+    fields: ConnectionField[];
+}
+
+interface DeviceField {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'password' | 'select' | 'checkbox';
+    required: boolean;
+    placeholder?: string;
+    help?: string;
+    default?: string;
+    options?: string[];
+}
+
+interface DeviceTypeMeta {
+    type: string;
+    label: string;
+    icon: string;
+    compatibleConnections: string[];
+    fields: DeviceField[];
+}
+
+// ── Network scan result types ───────────────────────────────────────────────
+
+interface ScanResultProtocol {
+    type: string;
+    label: string;
+    port: number;
+}
+
+interface ScanResultHost {
+    ip: string;
+    protocols: ScanResultProtocol[];
+}
+
+interface NetworkScanResult {
+    range: string;
+    hostsScanned: number;
+    hostsFound: number;
+    hosts: ScanResultHost[];
+    durationMs: number;
 }
 
 // ── Module metadata ──────────────────────────────────────────────────────────
@@ -186,6 +259,215 @@ interface FormulaEditorProps {
     availableKeys: TelemetryKey[];
     onChange: (val: string) => void;
 }
+
+// ── Generic field renderer (connection & device editors) ────────────────────
+
+interface FieldRendererProps {
+    field: ConnectionField | DeviceField;
+    value: any;
+    onChange: (val: any) => void;
+    accent: 'amber' | 'sky';
+    options?: string[]; // for select fields that depend on external data (e.g. connections)
+}
+
+const FieldRenderer = ({ field, value, onChange, accent, options }: FieldRendererProps) => {
+    const accentClass = accent === 'amber' ? 'focus:border-amber-500' : 'focus:border-sky-500';
+    const baseInput = `bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm ${accentClass} focus:outline-none`;
+
+    return (
+        <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">
+                {field.label}
+                {field.required && <span class="text-red-400 ml-0.5">*</span>}
+            </label>
+            {field.type === 'checkbox' ? (
+                <label class="flex items-center gap-2 cursor-pointer select-none py-1">
+                    <input type="checkbox" checked={!!value}
+                        onChange={(e) => onChange((e.target as HTMLInputElement).checked)}
+                        class="w-4 h-4 rounded accent-amber-500" />
+                    <span class="text-sm text-slate-300">Enabled</span>
+                </label>
+            ) : field.type === 'select' ? (
+                <select class={`${baseInput} appearance-none`}
+                    value={value || ''}
+                    onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>
+                    <option value="">— Select —</option>
+                    {(options || field.options || []).map(o => <option value={o}>{o}</option>)}
+                </select>
+            ) : (
+                <input
+                    type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+                    class={baseInput}
+                    value={value ?? ''}
+                    placeholder={field.placeholder}
+                    onInput={(e) => {
+                        const v = (e.target as HTMLInputElement).value;
+                        onChange(field.type === 'number' ? (v === '' ? undefined : Number(v)) : v);
+                    }} />
+            )}
+            {field.help && <span class="text-[11px] text-slate-500 leading-relaxed">{field.help}</span>}
+        </div>
+    );
+};
+
+// ── Network scan modal ──────────────────────────────────────────────────────
+
+interface ScanModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onAddConnections: (hosts: ScanResultHost[]) => void;
+}
+
+const ScanModal = ({ isOpen, onClose, onAddConnections }: ScanModalProps) => {
+    const [range, setRange] = useState('192.168.1.0/24');
+    const [scanning, setScanning] = useState(false);
+    const [result, setResult] = useState<NetworkScanResult | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+
+    const runScan = async () => {
+        if (!range.trim()) return;
+        setScanning(true);
+        setError(null);
+        setResult(null);
+        setSelected(new Set());
+        try {
+            const res = await fetch('/plswk/api/scan-network', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ range })
+            });
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error(txt || `Scan failed (${res.status})`);
+            }
+            const data: NetworkScanResult = await res.json();
+            setResult(data);
+            // Pre-select all found hosts
+            setSelected(new Set(data.hosts.map(h => h.ip)));
+        } catch (e: any) {
+            setError(e.message || 'Scan failed');
+        } finally {
+            setScanning(false);
+        }
+    };
+
+    const toggleHost = (ip: string) => {
+        setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(ip)) next.delete(ip); else next.add(ip);
+            return next;
+        });
+    };
+
+    const handleAdd = () => {
+        const chosen = (result?.hosts || []).filter(h => selected.has(h.ip));
+        if (chosen.length === 0) return;
+        onAddConnections(chosen);
+        onClose();
+        setResult(null);
+        setSelected(new Set());
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
+            <div class="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl">
+                <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-black/20 rounded-t-xl">
+                    <h2 class="text-lg font-bold text-slate-100">
+                        <i class="fas fa-satellite-dish mr-2 text-cyan-400"></i>Discover Devices on Network
+                    </h2>
+                    <button class="text-slate-400 hover:text-white" onClick={onClose}><i class="fas fa-times"></i></button>
+                </div>
+
+                <div class="p-6 overflow-y-auto flex-1 custom-scrollbar flex flex-col gap-5">
+                    {/* Range input */}
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">IP Range / CIDR</label>
+                        <div class="flex gap-2">
+                            <input type="text" class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm font-mono focus:border-cyan-500 focus:outline-none"
+                                value={range} onInput={(e) => setRange((e.target as HTMLInputElement).value)}
+                                placeholder="192.168.1.0/24 or 192.168.1.1-254" />
+                            <button class="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-white rounded-lg font-bold shadow-lg shadow-cyan-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                onClick={runScan} disabled={scanning || !range.trim()}>
+                                {scanning ? <><i class="fas fa-spinner fa-spin"></i> Scanning…</> : <><i class="fas fa-radar"></i> Scan</>}
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-slate-500">
+                            Accepted: CIDR (<code>192.168.1.0/24</code>), last-octet range (<code>192.168.1.1-254</code>),
+                            explicit range (<code>10.0.0.1-10.0.0.20</code>), or a single host.
+                            Probes ports: Modbus 502 · BACnet 47808 · KNX 3671 · OCPP 9000.
+                        </p>
+                    </div>
+
+                    {error && (
+                        <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                            <i class="fas fa-exclamation-triangle mr-2"></i>{error}
+                        </div>
+                    )}
+
+                    {result && (
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between text-xs text-slate-400">
+                                <span>
+                                    Scanned <strong class="text-slate-200">{result.hostsScanned}</strong> addresses in {result.durationMs} ms
+                                </span>
+                                <span class={result.hostsFound > 0 ? 'text-emerald-400' : 'text-slate-500'}>
+                                    <i class="fas fa-circle-check mr-1"></i>{result.hostsFound} host{result.hostsFound !== 1 ? 's' : ''} found
+                                </span>
+                            </div>
+
+                            {result.hosts.length === 0 ? (
+                                <div class="p-6 border border-slate-700 border-dashed rounded-lg text-center text-slate-500 text-sm">
+                                    <i class="fas fa-magnifying-glass text-2xl block mb-2 opacity-50"></i>
+                                    No devices responded on known protocol ports in this range.
+                                </div>
+                            ) : (
+                                <div class="flex flex-col gap-2">
+                                    {result.hosts.map(h => {
+                                        const isSel = selected.has(h.ip);
+                                        return (
+                                            <label class={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer transition-colors ${
+                                                isSel ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-slate-900/40 border-slate-700 hover:border-slate-500'
+                                            }`}>
+                                                <input type="checkbox" checked={isSel} onChange={() => toggleHost(h.ip)}
+                                                    class="w-4 h-4 accent-cyan-500" />
+                                                <div class="flex-1">
+                                                    <div class="font-mono text-sm text-slate-100">{h.ip}</div>
+                                                    <div class="flex flex-wrap gap-1.5 mt-1">
+                                                        {h.protocols.map(p => (
+                                                            <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 border border-slate-600 uppercase tracking-wider">
+                                                                {p.label} :{p.port}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div class="px-6 py-4 border-t border-slate-700 flex justify-between items-center bg-black/20 rounded-b-xl">
+                    <span class="text-xs text-slate-500">
+                        {selected.size > 0 ? `${selected.size} host${selected.size !== 1 ? 's' : ''} selected` : ''}
+                    </span>
+                    <div class="flex gap-3">
+                        <button class="px-4 py-2 rounded-lg text-slate-300 hover:bg-white/5 transition-colors" onClick={onClose}>Cancel</button>
+                        <button class="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-white rounded-lg font-medium shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            onClick={handleAdd} disabled={selected.size === 0}>
+                            <i class="fas fa-plus"></i> Add {selected.size > 0 ? `(${selected.size})` : ''}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const FormulaEditor = ({ value, deviceId, availableKeys, onChange }: FormulaEditorProps) => {
     const [liveResult, setLiveResult] = useState<{result?: string, error?: string, success: boolean} | null>(null);
@@ -356,6 +638,9 @@ const ConfigPage = () => {
     // Editor State
     const [editingDevice, setEditingDevice] = useState<DeviceConfig | null>(null);
     const [editingConnection, setEditingConnection] = useState<ConnectionConfig | null>(null);
+    const [scanOpen, setScanOpen] = useState(false);
+    const [connectionTypes, setConnectionTypes] = useState<ConnectionTypeMeta[]>([]);
+    const [deviceTypes, setDeviceTypes] = useState<DeviceTypeMeta[]>([]);
 
     const loadConfig = async () => {
         setLoading(true);
@@ -380,6 +665,14 @@ const ConfigPage = () => {
                 const parsedKeys = z.array(TelemetryKeySchema).parse(rawData);
                 setAvailableKeys(parsedKeys);
             }
+
+            // Load connection & device type metadata (drives the per-type editors)
+            const [ctRes, dtRes] = await Promise.all([
+                fetch('/plswk/api/connection-types'),
+                fetch('/plswk/api/device-types')
+            ]);
+            if (ctRes.ok) setConnectionTypes(await ctRes.json());
+            if (dtRes.ok) setDeviceTypes(await dtRes.json());
         } catch(e) {
             console.error("Failed to load config or invalid API shape:", e);
         } finally {
@@ -485,6 +778,43 @@ const ConfigPage = () => {
         });
     };
 
+    // Bulk-add connections discovered by the network scan. Each selected host
+    // becomes a new connection of the first detected protocol type, pre-filled
+    // with the host IP and the protocol's default port. The user can then refine
+    // the parameters in the connection editor.
+    const handleAddScannedHosts = (hosts: ScanResultHost[]) => {
+        setConfig(prev => {
+            if (!prev) return prev;
+            const newOverride = { ...prev.override, connections: [...(prev.override.connections || [])] };
+            const existingIds = new Set(newOverride.connections.map(c => c.id));
+            const baseIds = new Set((prev.base.connections || []).map(c => c.id));
+
+            for (const host of hosts) {
+                const proto = host.protocols[0];
+                if (!proto) continue;
+                // Derive a unique connection id from the IP
+                let baseId = `scan-${proto.type}-${host.ip.replace(/\./g, '-')}`;
+                let id = baseId, n = 2;
+                while (existingIds.has(id) || baseIds.has(id)) { id = `${baseId}-${n++}`; }
+                existingIds.add(id);
+
+                const meta = connectionTypes.find(t => t.type === proto.type);
+                const conn: ConnectionConfig = { id, type: proto.type, name: `${meta?.label || proto.type} ${host.ip}` };
+                // Populate the right address/port fields per protocol
+                if (proto.type === 'bacnet-ip' || proto.type === 'ocpp') {
+                    conn.localAddress = '0.0.0.0';
+                    conn.localPort = proto.port;
+                } else {
+                    conn.address = host.ip;
+                    conn.port = proto.port;
+                }
+                newOverride.connections.push(conn);
+            }
+            return { ...prev, override: newOverride };
+        });
+        window.pwToast(`Added ${hosts.length} connection${hosts.length !== 1 ? 's' : ''} from scan. Review and save.`);
+    };
+
     if (loading) return <div class="p-8 text-slate-400">Loading configuration...</div>;
     if (!config) return <div class="p-8 text-red-400">Failed to load configuration.</div>;
 
@@ -537,11 +867,18 @@ const ConfigPage = () => {
                 <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm">
                     <div class="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
                         <h2 class="text-xl font-bold text-slate-100"><i class="fas fa-network-wired mr-2 text-amber-400"></i>Connections</h2>
-                        <button class="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg text-sm font-bold transition-colors"
-                            onClick={() => setEditingConnection({ id: '', type: 'modbus-tcp', address: '' })}
-                        >
-                            <i class="fas fa-plus mr-1"></i> Add Connection
-                        </button>
+                        <div class="flex gap-2">
+                            <button class="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 rounded-lg text-sm font-bold transition-colors"
+                                onClick={() => setScanOpen(true)}
+                            >
+                                <i class="fas fa-satellite-dish mr-1"></i> Discover Devices
+                            </button>
+                            <button class="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg text-sm font-bold transition-colors"
+                                onClick={() => setEditingConnection({ id: '', type: 'modbus-tcp', address: '' })}
+                            >
+                                <i class="fas fa-plus mr-1"></i> Add
+                            </button>
+                        </div>
                     </div>
                     
                     <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest mt-4">Configured (Editable)</h3>
@@ -570,54 +907,72 @@ const ConfigPage = () => {
                 </div>
             </div>
 
+            <ScanModal isOpen={scanOpen} onClose={() => setScanOpen(false)} onAddConnections={handleAddScannedHosts} />
+
             <EditorModal 
                 title={editingConnection?.id ? `Edit Connection: ${editingConnection.id}` : "New Connection"} 
                 isOpen={!!editingConnection} 
                 onClose={() => setEditingConnection(null)}
                 onSave={handleSaveConnection}
             >
-                {editingConnection && (
-                    <div class="flex flex-col gap-5">
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Connection ID</label>
-                                <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none" 
-                                    value={editingConnection!.id} onInput={(e) => setEditingConnection({...editingConnection!, id: (e.target as HTMLInputElement).value})} />
+                {editingConnection && (() => {
+                    const meta = connectionTypes.find(t => t.type === editingConnection.type);
+                    const fields = meta?.fields || [];
+                    // Split fields: id & type always first (rendered manually), rest from metadata
+                    const dynamicFields = fields.filter(f => f.key !== 'id' && f.key !== 'type');
+                    return (
+                        <div class="flex flex-col gap-5">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="flex flex-col gap-1.5">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Connection ID <span class="text-red-400">*</span></label>
+                                    <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none" 
+                                        value={editingConnection.id} onInput={(e) => setEditingConnection({...editingConnection, id: (e.target as HTMLInputElement).value})} />
+                                </div>
+                                <div class="flex flex-col gap-1.5">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Protocol Type <span class="text-red-400">*</span></label>
+                                    <select class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none appearance-none"
+                                        value={editingConnection.type} onChange={(e) => {
+                                            const newType = (e.target as HTMLSelectElement).value;
+                                            const newMeta = connectionTypes.find(t => t.type === newType);
+                                            // Reset type-specific fields and apply default port
+                                            const updated: ConnectionConfig = { id: editingConnection.id, type: newType, name: editingConnection.name };
+                                            if (newMeta) {
+                                                if (newType === 'bacnet-ip' || newType === 'ocpp') {
+                                                    updated.localAddress = '0.0.0.0';
+                                                    updated.localPort = newMeta.defaultPort;
+                                                } else {
+                                                    updated.port = newMeta.defaultPort;
+                                                }
+                                            }
+                                            setEditingConnection(updated);
+                                        }}>
+                                        {connectionTypes.map(t => <option value={t.type}>{t.label}</option>)}
+                                        {connectionTypes.length === 0 && <>
+                                            <option value="modbus-tcp">Modbus TCP</option>
+                                            <option value="bacnet-ip">BACnet/IP</option>
+                                            <option value="knx-ip">KNXnet/IP</option>
+                                            <option value="ocpp">OCPP</option>
+                                        </>}
+                                    </select>
+                                </div>
                             </div>
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Protocol Type</label>
-                                <select class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none appearance-none"
-                                    value={editingConnection!.type} onChange={(e) => setEditingConnection({...editingConnection!, type: (e.target as HTMLSelectElement).value})}>
-                                    <option value="modbus-tcp">Modbus TCP</option>
-                                    <option value="bacnet-ip">BACnet/IP</option>
-                                </select>
-                            </div>
-                        </div>
 
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Host / Address</label>
-                                <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none" 
-                                    value={editingConnection!.address || editingConnection!.localAddress || ''} 
-                                    onInput={(e) => {
-                                        const v = (e.target as HTMLInputElement).value;
-                                        if (editingConnection!.type === 'bacnet-ip') setEditingConnection({...editingConnection!, localAddress: v});
-                                        else setEditingConnection({...editingConnection!, address: v});
-                                    }} />
-                            </div>
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Port</label>
-                                <input type="number" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-amber-500 focus:outline-none" 
-                                    value={editingConnection!.port || editingConnection!.localPort || ''} 
-                                    onInput={(e) => {
-                                        const v = parseInt((e.target as HTMLInputElement).value);
-                                        if (editingConnection!.type === 'bacnet-ip') setEditingConnection({...editingConnection!, localPort: v});
-                                        else setEditingConnection({...editingConnection!, port: v});
-                                    }} />
-                            </div>
+                            {dynamicFields.length > 0 && (
+                                <div class="grid grid-cols-2 gap-4">
+                                    {dynamicFields.map(field => (
+                                        <FieldRenderer
+                                            key={field.key}
+                                            field={field}
+                                            accent="amber"
+                                            value={(editingConnection as any)[field.key]}
+                                            onChange={(val) => setEditingConnection({...editingConnection, [field.key]: val})}
+                                        />
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
             </EditorModal>
 
             <EditorModal 
@@ -626,59 +981,89 @@ const ConfigPage = () => {
                 onClose={() => setEditingDevice(null)}
                 onSave={handleSaveDevice}
             >
-                {editingDevice && (
-                    <div class="flex flex-col gap-5">
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Device ID</label>
-                                <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none" 
-                                    value={editingDevice.id} onInput={(e) => setEditingDevice({...editingDevice, id: (e.target as HTMLInputElement).value})} />
-                            </div>
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Display Name</label>
-                                <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none" 
-                                    value={editingDevice.name} onInput={(e) => setEditingDevice({...editingDevice, name: (e.target as HTMLInputElement).value})} />
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Device Type</label>
-                                <select class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none appearance-none"
-                                    value={editingDevice.deviceType} onChange={(e) => setEditingDevice({...editingDevice, deviceType: (e.target as HTMLSelectElement).value})}>
-                                    <option value="virtual">Virtual / Analytics</option>
-                                    <option value="janitza">Janitza</option>
-                                    <option value="deziko">Deziko BACnet</option>
-                                    <option value="modbus-tcp">Modbus TCP Generic</option>
-                                </select>
-                            </div>
-                            <div class="flex flex-col gap-1.5">
-                                <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Connection ID</label>
-                                <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none" 
-                                    value={editingDevice.connectionId || ''} placeholder="Optional" onInput={(e) => setEditingDevice({...editingDevice, connectionId: (e.target as HTMLInputElement).value})} />
-                            </div>
-                        </div>
-
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Device Path <span class="opacity-50">(optional)</span></label>
-                            <input list="available-paths" type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none" 
-                                value={editingDevice.path ? editingDevice.path.join('/') : ''} placeholder="e.g. Building/Floor" onInput={(e) => {
-                                    const val = (e.target as HTMLInputElement).value;
-                                    setEditingDevice({...editingDevice, path: val ? val.split('/').map(s => s.trim()).filter(Boolean) : undefined});
-                                }} />
-                        </div>
-
-                        {editingDevice.deviceType === 'virtual' && (
-                            <div class="mt-4 border-t border-slate-700 pt-5 flex flex-col gap-4">
-                                <div class="flex justify-between items-center">
-                                    <h3 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Virtual Telemetries</h3>
-                                    <button class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs transition-colors"
-                                        onClick={() => {
-                                            const t = [...(editingDevice.telemetries || []), { id: `point_${Date.now().toString().slice(-4)}`, name: 'New Point', formula: '', units: '' }];
-                                            setEditingDevice({...editingDevice, telemetries: t});
-                                        }}
-                                    ><i class="fas fa-plus mr-1"></i> Add Point</button>
+                {editingDevice && (() => {
+                    const meta = deviceTypes.find(t => t.type === editingDevice.deviceType);
+                    const fields = meta?.fields || [];
+                    const dynamicFields = fields.filter(f => f.key !== 'id' && f.key !== 'name' && f.key !== 'deviceType');
+                    // Build connection options from compatible connection types
+                    const allConns = [...(config?.base.connections || []), ...(config?.override.connections || [])];
+                    const connOptions = allConns
+                        .filter(c => !meta || meta.compatibleConnections.length === 0 || meta.compatibleConnections.includes(c.type))
+                        .map(c => c.id);
+                    return (
+                        <div class="flex flex-col gap-5">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="flex flex-col gap-1.5">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Device ID <span class="text-red-400">*</span></label>
+                                    <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none" 
+                                        value={editingDevice.id} onInput={(e) => setEditingDevice({...editingDevice, id: (e.target as HTMLInputElement).value})} />
                                 </div>
+                                <div class="flex flex-col gap-1.5">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Display Name <span class="text-red-400">*</span></label>
+                                    <input type="text" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none" 
+                                        value={editingDevice.name} onInput={(e) => setEditingDevice({...editingDevice, name: (e.target as HTMLInputElement).value})} />
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="flex flex-col gap-1.5">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wide">Device Type <span class="text-red-400">*</span></label>
+                                    <select class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-sm focus:border-sky-500 focus:outline-none appearance-none"
+                                        value={editingDevice.deviceType} onChange={(e) => {
+                                            const newType = (e.target as HTMLSelectElement).value;
+                                            // Clear type-specific fields when switching types
+                                            setEditingDevice({ id: editingDevice.id, name: editingDevice.name, deviceType: newType, telemetries: newType === 'virtual' ? (editingDevice.telemetries || []) : undefined });
+                                        }}>
+                                        {deviceTypes.map(t => <option value={t.type}>{t.label}</option>)}
+                                        {deviceTypes.length === 0 && <>
+                                            <option value="virtual">Virtual / Analytics</option>
+                                            <option value="janitza">Janitza</option>
+                                            <option value="deziko">Deziko BACnet</option>
+                                        </>}
+                                    </select>
+                                </div>
+                                {dynamicFields.find(f => f.key === 'connectionId') && (
+                                    <FieldRenderer
+                                        field={dynamicFields.find(f => f.key === 'connectionId')!}
+                                        accent="sky"
+                                        value={editingDevice.connectionId}
+                                        options={connOptions}
+                                        onChange={(val) => setEditingDevice({...editingDevice, connectionId: val})}
+                                    />
+                                )}
+                            </div>
+
+                            {dynamicFields.filter(f => f.key !== 'connectionId').length > 0 && (
+                                <div class="grid grid-cols-2 gap-4">
+                                    {dynamicFields.filter(f => f.key !== 'connectionId').map(field => (
+                                        <FieldRenderer
+                                            key={field.key}
+                                            field={field}
+                                            accent="sky"
+                                            value={(editingDevice as any)[field.key]}
+                                            onChange={(val) => {
+                                                if (field.key === 'path') {
+                                                    setEditingDevice({...editingDevice, path: val ? String(val).split('/').map((s: string) => s.trim()).filter(Boolean) : undefined});
+                                                } else {
+                                                    setEditingDevice({...editingDevice, [field.key]: val});
+                                                }
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+
+                            {editingDevice.deviceType === 'virtual' && (
+                                <div class="mt-4 border-t border-slate-700 pt-5 flex flex-col gap-4">
+                                    <div class="flex justify-between items-center">
+                                        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Virtual Telemetries</h3>
+                                        <button class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs transition-colors"
+                                            onClick={() => {
+                                                const t = [...(editingDevice.telemetries || []), { id: `point_${Date.now().toString().slice(-4)}`, name: 'New Point', formula: '', units: '' }];
+                                                setEditingDevice({...editingDevice, telemetries: t});
+                                            }}
+                                        ><i class="fas fa-plus mr-1"></i> Add Point</button>
+                                    </div>
                                 
                                 {(!editingDevice.telemetries || editingDevice.telemetries.length === 0) && (
                                     <div class="p-4 border border-slate-700 border-dashed rounded-lg text-center text-slate-500 text-sm">No virtual telemetries defined.</div>
@@ -753,7 +1138,8 @@ const ConfigPage = () => {
                             </div>
                         )}
                     </div>
-                )}
+                    );
+                })()}
             </EditorModal>
         </div>
     );

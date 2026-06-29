@@ -797,7 +797,7 @@ export function TelemetryCrudPage({ initialKey }: { initialKey?: string | null }
                                         <td class="text-slate-500">#{idx + 1}</td>
                                         <td class="font-semibold">{formatDate(pt.ts)}</td>
                                         <td class="text-cyan-400 font-mono font-black">
-                                            {pt.value !== null ? pt.value : pt.valueStr}
+                                            {pt.value != null ? pt.value : pt.valueStr}
                                         </td>
                                         <td class="text-right">
                                             <button 

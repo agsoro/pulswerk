@@ -550,18 +550,37 @@ async function reloadHistory(): Promise<void> {
     }
 }
 
-function renderChart(data: any[]): void {
-    // Destroy previous chart instance if it exists to avoid memory leaks and hover flickering
-    if (historyChart) {
-        try {
-            historyChart.destroy();
-        } catch (e) {
-            console.error("Failed to destroy previous chart:", e);
-        }
-        historyChart = null;
+/**
+ * Builds an ordinal → label map from history points that carry a categorical `valueStr`.
+ * Returns an empty map for plain numeric series (no string labels present), in which case
+ * the chart is rendered as a normal numeric line.
+ */
+function buildOrdinalLabelMap(data: any[]): Map<number, string> {
+    const map = new Map<number, string>();
+    for (const d of data) {
+        if (d == null) continue;
+        const label = d.valueStr;
+        const ordinal = d.value;
+        if (label == null || ordinal == null) continue;
+        const rounded = Math.round(ordinal);
+        if (!map.has(rounded)) map.set(rounded, String(label));
     }
+    return map;
+}
 
-    const options = {
+/**
+ * Builds the ApexCharts options for a history dataset. Detects categorical (enum/boolean)
+ * series — where the backend encodes each distinct string state to a numeric ordinal in
+ * `value` while keeping the original label in `valueStr` — and renders them as a discrete
+ * step chart with the original state names on the Y axis / tooltip. Plain numeric series
+ * fall back to a smooth numeric line. Shared by initial render and live refresh so both
+ * paths stay consistent.
+ */
+function buildChartOptions(data: any[]): any {
+    const ordinalToLabel = buildOrdinalLabelMap(data);
+    const isCategoricalSeries = ordinalToLabel.size > 0;
+
+    return {
         series: [{
             name: document.getElementById('telTitle')?.textContent || 'Telemetry Details',
             data: data.map(d => ({ x: new Date(d.ts).getTime(), y: d.value }))
@@ -585,7 +604,7 @@ function renderChart(data: any[]): void {
                 stops: [20, 100]
             }
         },
-        stroke: { curve: 'straight', width: 2 },
+        stroke: { curve: isCategoricalSeries ? 'stepline' : 'straight', width: 2 },
         dataLabels: { enabled: false },
         xaxis: {
             type: 'datetime',
@@ -593,21 +612,50 @@ function renderChart(data: any[]): void {
             axisBorder: { show: false },
             axisTicks: { show: false }
         },
-        yaxis: {
-            labels: {
-                formatter: (val: any) => formatNumber(val, 2)
+        yaxis: isCategoricalSeries
+            ? {
+                min: 0,
+                max: ordinalToLabel.size - 1,
+                tickAmount: Math.max(1, ordinalToLabel.size - 1),
+                labels: {
+                    formatter: (val: any) => ordinalToLabel.get(Math.round(val)) ?? ''
+                }
             }
-        },
+            : {
+                labels: {
+                    formatter: (val: any) => formatNumber(val, 2)
+                }
+            },
         tooltip: {
             theme: 'dark',
-            x: { format: 'dd MMM HH:mm:ss' }
+            x: { format: 'dd MMM HH:mm:ss' },
+            ...(isCategoricalSeries
+                ? {
+                    y: {
+                        formatter: (val: any) => ordinalToLabel.get(Math.round(val)) ?? String(val)
+                    }
+                }
+                : {})
         },
         grid: {
             borderColor: 'rgba(255,255,255,0.05)',
             strokeDashArray: 4
         }
     };
+}
 
+function renderChart(data: any[]): void {
+    // Destroy previous chart instance if it exists to avoid memory leaks and hover flickering
+    if (historyChart) {
+        try {
+            historyChart.destroy();
+        } catch (e) {
+            console.error("Failed to destroy previous chart:", e);
+        }
+        historyChart = null;
+    }
+
+    const options = buildChartOptions(data);
     const container = document.getElementById('historyChart')!;
     container.innerHTML = '';
     historyChart = new ApexCharts(container, options);
@@ -654,10 +702,23 @@ async function refreshHistoryData(): Promise<void> {
             if (lvEl) lvEl.textContent = typeof PulswerkValue !== 'undefined' ? PulswerkValue.formatDisplay(raw, meta.type) : String(raw);
         }
 
-        // Update chart series without full redraw
+        // Update chart without a full redraw. Recompute the categorical-aware options so
+        // enum/boolean series stay correct on live refresh — e.g. when a brand-new state
+        // appears the Y-axis range, tick count and label/tooltip formatters expand to include
+        // it, and the step-vs-line curve adapts if the series type changes. updateOptions
+        // animates smoothly (no flicker) and we pass the fresh series in the same call.
         if (historyChart) {
-            const points = data.map((d: any) => ({ x: new Date(d.ts).getTime(), y: d.value }));
-            historyChart.updateSeries([{ data: points }]);
+            const opts = buildChartOptions(data);
+            historyChart.updateOptions(
+                {
+                    series: opts.series,
+                    stroke: opts.stroke,
+                    yaxis: opts.yaxis,
+                    tooltip: opts.tooltip
+                },
+                false, // redrawPaths
+                false  // animate
+            );
         }
     } catch (e) {
         console.error('History refresh failed:', e);
