@@ -350,21 +350,24 @@ namespace Pulswerk.Drivers.BACnet
 
             var cfg = device;  // BACnet config is flat on DeviceConfig
             var result = new BacnetReadResult();
+            var state = GetOrCreateState(device.Name);
 
             var client = OpenClient(conn);
             try
             {
-
                 // ── Resolve BacnetAddress ─────────────────────────────────────────
                 // Use device-specific host if provided; otherwise fallback to connection host 
                 // (though in the new model, connection host is the local bind IP).
-                var address = ResolveAddress(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
+                // Cached: re-runs the Who-Is broadcast only on first resolve, on
+                // cache expiry, or after a prior read failure (isRecovery) — not
+                // on every single poll. See ResolveAddressCached for rationale.
+                var address = ResolveAddressCached(client, device.Address ?? conn.Address ?? "", conn.Port ?? 47808,
                                              device.DeviceId.Value,
-                                             cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000);
+                                             cfg.WhoIsTimeoutMs > 0 ? cfg.WhoIsTimeoutMs : 2000,
+                                             state, forceRefresh: isRecovery);
                 // ResolveAddress always returns a non-null address (direct IP fallback)
 
                 // ── Discovery (lazy + periodic) ───────────────────────────────────
-                var state = GetOrCreateState(device.Name);
                 var disc = cfg.Discovery ?? BacnetDiscoveryConfig.Default;
                 bool needsDiscovery = disc.OnStartup && !state.DiscoveryDone
                                    || (disc.RefreshIntervalMinutes > 0
@@ -520,10 +523,13 @@ namespace Pulswerk.Drivers.BACnet
             catch (Exception ex) when (IsTransportError(ex))
             {
                 // UDP socket died (network hiccup, interface restart, etc.).
-                // Purge the cached client so the next poll creates a fresh one.
+                // Purge the cached client so the next poll creates a fresh one,
+                // and drop the cached address so it's re-confirmed via Who-Is
+                // rather than blindly reused against a possibly-stale IP.
                 Pulswerk.Core.Log.Error(
                     $"[BACnet] Transport error on {device.Name}: {ex.GetType().Name} – {ex.Message}. Resetting client.");
                 InvalidateClient(conn);
+                state.CachedAddress = null;
                 throw;  // re-throw so PollAndPublishAsync tracks the failure count
             }
             finally
@@ -1493,6 +1499,39 @@ namespace Pulswerk.Drivers.BACnet
             return iamAddress ?? directAddress;
         }
 
+        /// <summary>How long a resolved address is trusted before re-confirming via Who-Is.</summary>
+        private static readonly TimeSpan AddressCacheTtl = TimeSpan.FromMinutes(30);
+
+        /// <summary>
+        /// Cached wrapper around <see cref="ResolveAddress"/> for the polling path.
+        ///
+        /// Rationale: when host/port are configured (the normal case), Who-Is is only
+        /// a liveness confirmation — the address itself is deterministic from config.
+        /// Re-running the broadcast Who-Is/I-Am round-trip on EVERY poll turns any
+        /// single dropped UDP packet (routine on a busy production LAN) into a
+        /// recurring "Who-Is timeout" warning even though the device is healthy.
+        /// Instead we resolve once, cache the result on <see cref="DiscoveryState"/>,
+        /// and only re-confirm via Who-Is when the cache is empty, stale
+        /// (&gt; <see cref="AddressCacheTtl"/>), or the caller explicitly forces it
+        /// (e.g. after a read failure, to detect a genuine device IP change).
+        /// </summary>
+        protected static BacnetAddress ResolveAddressCached(
+            BacnetClient client, string host, int port, uint deviceId, int timeoutMs,
+            DiscoveryState state, bool forceRefresh = false)
+        {
+            if (!forceRefresh
+                && state.CachedAddress != null
+                && DateTime.UtcNow - state.LastAddressResolved < AddressCacheTtl)
+            {
+                return state.CachedAddress;
+            }
+
+            var address = ResolveAddress(client, host, port, deviceId, timeoutMs);
+            state.CachedAddress = address;
+            state.LastAddressResolved = DateTime.UtcNow;
+            return address;
+        }
+
         // =====================================================================
         //  Helpers
         // =====================================================================
@@ -1907,6 +1946,17 @@ namespace Pulswerk.Drivers.BACnet
             public bool HierarchyReady { get; set; }
             public DateTime LastDiscovery { get; set; } = DateTime.MinValue;
             public List<BacnetObjectInfo> CachedObjects { get; set; } = new();
+
+            // ── Resolved address cache (polling mode) ───────────────────────
+            // Who-Is/I-Am is a broadcast round-trip that can legitimately be
+            // missed on a busy production LAN even when the device is fine.
+            // Re-running it on EVERY poll (as opposed to once per device
+            // lifetime, refreshed occasionally) turns a single dropped UDP
+            // packet into a recurring "Who-Is timeout" warning. Cache the
+            // resolved address here and only re-resolve when the cache is
+            // empty or stale (see AddressCacheTtl in ResolveAddressCached).
+            public BacnetAddress? CachedAddress { get; set; }
+            public DateTime LastAddressResolved { get; set; } = DateTime.MinValue;
             /// <summary>Populated after discovery when hierarchy extraction is enabled.</summary>
             public DezikoTree? Tree { get; set; }
 
