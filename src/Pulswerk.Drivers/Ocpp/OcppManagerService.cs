@@ -90,6 +90,7 @@ namespace Pulswerk.Drivers.Ocpp
             // Disconnect old socket if exists
             if (_activeSockets.TryRemove(chargePointId, out var oldSocket))
             {
+                Log.Info($"[OCPP] Charger '{chargePointId}' replacing existing active WebSocket connection.");
                 try { await oldSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Replaced", CancellationToken.None); } catch { }
                 // The replaced socket is no longer referenced anywhere — dispose it instead of
                 // leaving it for the finalizer (it holds an unmanaged socket handle + buffers).
@@ -100,6 +101,7 @@ namespace Pulswerk.Drivers.Ocpp
             
             // Set initial telemetry as connected
             UpdateTelemetryValue(chargePointId, "status", "Connected");
+            Log.Info($"[OCPP] Charger '{chargePointId}' connected successfully.");
 
             var buffer = new byte[8192];
             try
@@ -204,6 +206,10 @@ namespace Pulswerk.Drivers.Ocpp
             switch (action)
             {
                 case "BootNotification":
+                    string vendor = payload.TryGetProperty("chargePointVendor", out var v) ? v.GetString() ?? "" : "";
+                    string model = payload.TryGetProperty("chargePointModel", out var m) ? m.GetString() ?? "" : "";
+                    string fw = payload.TryGetProperty("firmwareVersion", out var f) ? f.GetString() ?? "" : "";
+                    Log.Info($"[OCPP] [{chargePointId}] BootNotification: Vendor='{vendor}', Model='{model}', Firmware='{fw}'");
                     UpdateTelemetryValue(chargePointId, "status", "Available");
                     responsePayload = new
                     {
@@ -229,6 +235,7 @@ namespace Pulswerk.Drivers.Ocpp
                 case "Authorize":
                     string idTag = payload.GetProperty("idTag").GetString() ?? "";
                     bool isAuthorized = _billingStore == null || _billingStore.IsRfidValid(idTag);
+                    Log.Info($"[OCPP] [{chargePointId}] Authorize tag '{idTag}': {(isAuthorized ? "Accepted" : "Blocked")}");
                     responsePayload = new
                     {
                         idTagInfo = new
@@ -247,6 +254,7 @@ namespace Pulswerk.Drivers.Ocpp
                     int transId = Interlocked.Increment(ref _transactionIdCounter);
                     _activeTransactions[transId] = new ActiveTransactionInfo(chargePointId, connectorId, startIdTag, startMeter, DateTime.UtcNow);
 
+                    Log.Info($"[OCPP] [{chargePointId}] StartTransaction {transId} on connector {connectorId} by '{startIdTag}' (meterStart: {startMeter} Wh)");
                     UpdateTelemetryValue(chargePointId, "status", "Charging");
                     UpdateTelemetryValue(chargePointId, "active_user", startIdTag);
                     PublishServerTelemetry();

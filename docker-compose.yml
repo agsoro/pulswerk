@@ -64,6 +64,7 @@ services:
     volumes:
       - ./pulswerk.json:/app/pulswerk.json:ro    # production config (must exist)
       - ./ets_export.xml:/app/ets_export.xml:ro  # KNX ETS group-address export referenced by pulswerk.json
+      - ./knx_export.xml:/app/knx_export.xml:ro  # KNX group-address export
       - influx-data:/var/lib/influxdb2:ro
       - pulswerk-data:/app/data
 
