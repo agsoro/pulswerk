@@ -801,7 +801,7 @@ const ConfigPage = () => {
                 const meta = connectionTypes.find(t => t.type === proto.type);
                 const conn: ConnectionConfig = { id, type: proto.type, name: `${meta?.label || proto.type} ${host.ip}` };
                 // Populate the right address/port fields per protocol
-                if (proto.type === 'bacnet-ip' || proto.type === 'ocpp') {
+                if (proto.type === 'bacnet-ip' || proto.type === 'ocpp-ws') {
                     conn.localAddress = '0.0.0.0';
                     conn.localPort = proto.port;
                 } else {
@@ -937,7 +937,7 @@ const ConfigPage = () => {
                                             // Reset type-specific fields and apply default port
                                             const updated: ConnectionConfig = { id: editingConnection.id, type: newType, name: editingConnection.name };
                                             if (newMeta) {
-                                                if (newType === 'bacnet-ip' || newType === 'ocpp') {
+                                                if (newType === 'bacnet-ip' || newType === 'ocpp-ws') {
                                                     updated.localAddress = '0.0.0.0';
                                                     updated.localPort = newMeta.defaultPort;
                                                 } else {
@@ -951,7 +951,7 @@ const ConfigPage = () => {
                                             <option value="modbus-tcp">Modbus TCP</option>
                                             <option value="bacnet-ip">BACnet/IP</option>
                                             <option value="knx-ip">KNXnet/IP</option>
-                                            <option value="ocpp">OCPP</option>
+                                            <option value="ocpp-ws">OCPP (WS)</option>
                                         </>}
                                     </select>
                                 </div>

@@ -332,6 +332,22 @@ namespace Pulswerk.Host
                         dataService.UpdateTelemetries(update);
                     }
                 };
+
+                OcppManagerService.Instance.OnServerTelemetryUpdated += (key, value) =>
+                {
+                    var serverDevices = dataService.Config.Devices.Where(d =>
+                        d.DeviceType.Equals("ocpp-master", StringComparison.OrdinalIgnoreCase)
+                    );
+
+                    foreach (var sDev in serverDevices)
+                    {
+                        var update = new Dictionary<string, object>
+                        {
+                            [$"{sDev.Id}_{key}"] = value
+                        };
+                        dataService.UpdateTelemetries(update);
+                    }
+                };
             }
 
             if (modules.Ems)

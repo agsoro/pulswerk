@@ -98,7 +98,7 @@ namespace Pulswerk.Dashboard.Tests
             Assert.Contains("modbus-tcp", types);
             Assert.Contains("bacnet-ip", types);
             Assert.Contains("knx-ip", types);
-            Assert.Contains("ocpp", types);
+            Assert.Contains("ocpp-ws", types);
         }
 
         [Fact]

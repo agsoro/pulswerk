@@ -45,6 +45,13 @@ namespace Pulswerk.Drivers
                         var probe = (IDeviceDriver)Activator.CreateInstance(type)!;
                         string key = probe.DriverName.ToLowerInvariant();
                         _driverTypes[key] = type;
+                        string unhyphenated = key.Replace("-", "");
+                        _driverTypes[unhyphenated] = type;
+
+                        if (probe is Pulswerk.Drivers.Modbus.SolisDriver)
+                        {
+                            _driverTypes["soliss6"] = type;
+                        }
                     }
                     catch
                     {
@@ -59,7 +66,8 @@ namespace Pulswerk.Drivers
         /// </summary>
         public static IDeviceDriver Create(string deviceType)
         {
-            if (_driverTypes.TryGetValue(deviceType, out var type))
+            if (_driverTypes.TryGetValue(deviceType, out var type) ||
+                _driverTypes.TryGetValue(deviceType.Replace("-", ""), out type))
                 return (IDeviceDriver)Activator.CreateInstance(type)!;
 
             throw new NotSupportedException(

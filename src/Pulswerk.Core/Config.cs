@@ -128,7 +128,16 @@ namespace Pulswerk.Core
         /// checking (cached values are always returned). Defaults to 180 seconds
         /// (3× the 60s read-sweep interval) when not set.
         /// </summary>
-        [property: JsonPropertyName("knxStaleSeconds")] int? KnxStaleSeconds = null
+        [property: JsonPropertyName("knxStaleSeconds")] int? KnxStaleSeconds = null,
+
+        /// <summary>Username for HTTP / Digest authentication (e.g. for Smart Meter Gateways).</summary>
+        [property: JsonPropertyName("username")] string? Username = null,
+
+        /// <summary>Password for HTTP / Digest authentication (e.g. for Smart Meter Gateways).</summary>
+        [property: JsonPropertyName("password")] string? Password = null,
+
+        /// <summary>Whether to bypass SSL/TLS certificate validation (e.g. for self-signed SMGW certificates).</summary>
+        [property: JsonPropertyName("ignoreSslErrors")] bool IgnoreSslErrors = true
     )
     {
         /// <summary>Effective device name — explicit or derived from Id.</summary>
@@ -199,7 +208,18 @@ namespace Pulswerk.Core
         /// <summary>
         /// KNX group address datapoints mapped to telemetry keys.
         /// </summary>
-        [property: JsonPropertyName("knxPoints")] List<KnxPointConfig>? KnxPoints = null
+        [property: JsonPropertyName("knxPoints")] List<KnxPointConfig>? KnxPoints = null,
+
+        /// <summary>
+        /// Meter identification string (e.g. "1 EFR 24 75081296" for German Smart Meter Gateway).
+        /// </summary>
+        [property: JsonPropertyName("meterId")] string? MeterId = null,
+
+        /// <summary>
+        /// Optional explicit list of telemetry keys to poll/expose for this device (e.g. ["energy_export"]).
+        /// When omitted, the driver dynamically determines/exposes available points.
+        /// </summary>
+        [property: JsonPropertyName("telemetryKeys")] List<string>? TelemetryKeys = null
     )
     {
         private static readonly string[] _bacnetTypes = { "bacnet", "deziko" };

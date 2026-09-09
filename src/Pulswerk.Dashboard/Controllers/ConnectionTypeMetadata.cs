@@ -92,7 +92,7 @@ namespace Pulswerk.Dashboard.Controllers
                 }
             ),
             new ConnectionTypeMeta(
-                Type: "ocpp",
+                Type: "ocpp-ws",
                 Label: "OCPP Central System",
                 Icon: "fa-charging-station",
                 DefaultPort: 9000,
@@ -104,6 +104,23 @@ namespace Pulswerk.Dashboard.Controllers
                         "Local NIC the WebSocket server binds to."),
                     new("localPort", "Listen Port", "number", true, Default: "9000",
                         Help: "TCP port the OCPP central system listens on for charge point connections."),
+                }
+            ),
+            new ConnectionTypeMeta(
+                Type: "smgw-http",
+                Label: "Smart Meter Gateway (HTTP/S)",
+                Icon: "fa-tachometer-alt",
+                DefaultPort: 443,
+                Fields: new()
+                {
+                    new("id", "Connection ID", "text", true, "e.g. smgw"),
+                    new("name", "Display Name", "text", false, "Smart Meter Gateway"),
+                    new("address", "Gateway IP / Host", "text", true, "192.168.1.100"),
+                    new("port", "Port", "number", false, Default: "443"),
+                    new("username", "Username", "text", true, "e.g. 123456789012_ECPR0001000000"),
+                    new("password", "Password", "password", true),
+                    new("ignoreSslErrors", "Ignore SSL Certificate Errors", "checkbox", false, Default: "true",
+                        Help: "Allow self-signed / private CA certificates on the SMGW local HAN interface."),
                 }
             ),
         };
@@ -311,13 +328,43 @@ namespace Pulswerk.Dashboard.Controllers
                 Type: "ocpp",
                 Label: "OCPP Wallbox",
                 Icon: "fa-charging-station",
-                CompatibleConnections: new() { "ocpp" },
+                CompatibleConnections: new() { "ocpp-ws" },
                 Fields: new()
                 {
                     new("id", "Charge Point ID", "text", true, "e.g. CP-001"),
                     new("name", "Display Name", "text", true),
                     new("connectionId", "Connection", "select", true),
                     new("path", "Path", "text", false, "Building/Floor"),
+                }
+            ),
+            new DeviceTypeMeta(
+                Type: "ocpp-master",
+                Label: "OCPP Master",
+                Icon: "fa-charging-station",
+                CompatibleConnections: new() { "ocpp-ws" },
+                Fields: new()
+                {
+                    new("id", "Device ID", "text", true, "e.g. ocpp-master"),
+                    new("name", "Display Name", "text", true, "Master"),
+                    new("connectionId", "Connection", "select", true),
+                    new("path", "Path", "text", false, "Wallbox"),
+                }
+            ),
+            new DeviceTypeMeta(
+                Type: "smgw",
+                Label: "Smart Meter Gateway",
+                Icon: "fa-tachometer-alt",
+                CompatibleConnections: new() { "smgw-http" },
+                Fields: new()
+                {
+                    new("id", "Device ID", "text", true, "e.g. efr-grid-meter"),
+                    new("name", "Display Name", "text", true, "EFR Abrechnungszähler (TAF-7)"),
+                    new("connectionId", "Connection", "select", true),
+                    new("meterId", "Meter ID", "text", false, "e.g. 1 EFR 24 75081296",
+                        Help: "Optional meter number to match against if the gateway connects multiple meters."),
+                    new("pollIntervalSeconds", "Poll Interval (s)", "number", false, Default: "120",
+                        Help: "Recommended: 120s to conserve gateway resources."),
+                    new("path", "Path", "text", false, "Abrechnung/Einspeisung"),
                 }
             ),
         };

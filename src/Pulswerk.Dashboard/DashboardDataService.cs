@@ -227,6 +227,18 @@ namespace Pulswerk.Dashboard
         {
             foreach (var device in Config.Devices)
             {
+                if (device.TelemetryKeys != null && device.TelemetryKeys.Count > 0)
+                {
+                    var units = Drivers.TryGetValue(device.Name, out var d) ? d.GetTelemetryUnits() : new Dictionary<string, string>();
+                    foreach (var k in device.TelemetryKeys)
+                    {
+                        string pointKey = $"{device.Id}_{k}";
+                        if (units.TryGetValue(k, out var u) || (TelemetryKeys.GetFriendlyUnit(k) is { } fu && !string.IsNullOrEmpty(fu)))
+                            _calc.RegisterKey(pointKey, u ?? TelemetryKeys.GetFriendlyUnit(k));
+                    }
+                    continue;
+                }
+
                 if (Drivers.TryGetValue(device.Name, out var driver))
                 {
                     var keys = driver.GetTelemetryKeys();

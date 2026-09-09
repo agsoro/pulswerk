@@ -49,7 +49,7 @@
     },
     {
       "id": "ocpp-central",
-      "type": "ocpp",
+      "type": "ocpp-ws",
       "localPort": 5000,
       "localAddress": "/plswk/ocpp/",
       "name": "OCPP Central System"
@@ -64,9 +64,35 @@
       "knxCommissioningPassword": "ABCDE-ABCDE-ABCDE-ABCDE-ABCDE-ABCDE",
       "knxStaleSeconds": 180,
       "name": "KNX Test Gateway"
+    },
+    {
+      "id": "smgw-han",
+      "type": "smgw-http",
+      "address": "192.168.1.100",
+      "port": 443,
+      "username": "123456789012_ECPR0001000000",
+      "password": "your-han-password",
+      "ignoreSslErrors": true,
+      "name": "Smart Meter Gateway"
     }
   ],
   "devices": [
+    {
+      "id": "smgw-billing-meter",
+      "name": "SMGW Grid Meter (TAF-7)",
+      "deviceType": "smgw",
+      "connectionId": "smgw-han",
+      "meterId": "1 EFR 00 00000000",
+      "pollIntervalSeconds": 120,
+      "telemetryKeys": [
+        "energy_export"
+      ],
+      "path": [
+        "Grid",
+        "Billing"
+      ],
+      "assetType": "Meter"
+    },
     {
       "id": "meter-main-a",
       "name": "Main Meter Building A",
@@ -266,6 +292,17 @@
         "Wallbox 1"
       ],
       "assetType": "Wallbox"
+    },
+    {
+      "id": "ocpp-central",
+      "name": "OCPP Central Server",
+      "deviceType": "ocpp-master",
+      "connectionId": "ocpp-central",
+      "path": [
+        "Building A",
+        "Garage"
+      ],
+      "assetType": "OCPP Server"
     },
     {
       "id": "knx-living-room",

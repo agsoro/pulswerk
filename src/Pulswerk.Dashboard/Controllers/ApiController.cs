@@ -1069,7 +1069,8 @@ namespace Pulswerk.Dashboard.Controllers
                 {
                     "bacnet-ip" => "BACnet Gateway",
                     "modbus-tcp" => "Modbus Gateway",
-                    "ocpp" => "OCPP Central System",
+                    "ocpp-ws" => "OCPP Central System",
+                    "smgw-http" => "Smart Meter Gateway",
                     _ => conn.Type
                 };
 
@@ -1119,8 +1120,8 @@ namespace Pulswerk.Dashboard.Controllers
                     id = conn.Id,
                     name = conn.EffectiveName,
                     type = tbType,
-                    address = (conn.Type == "bacnet-ip" ? conn.LocalAddress : conn.Address) ?? "",
-                    port = (conn.Type == "bacnet-ip" ? conn.LocalPort : conn.Port) ?? 0,
+                    address = (conn.Type == "bacnet-ip" || conn.Type == "ocpp-ws" ? conn.LocalAddress : conn.Address) ?? "",
+                    port = (conn.Type == "bacnet-ip" || conn.Type == "ocpp-ws" ? conn.LocalPort : conn.Port) ?? 0,
                     status = connStatus,
                     lastSeen = lastPolled == default
                                     ? "Never"

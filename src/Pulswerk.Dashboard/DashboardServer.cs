@@ -46,7 +46,7 @@ namespace Pulswerk.Dashboard
                 {
                     foreach (var c in _data.Config.Connections)
                     {
-                        if (c.Type.Equals("ocpp", StringComparison.OrdinalIgnoreCase) && c.LocalPort.HasValue)
+                        if (c.Type.Equals("ocpp-ws", StringComparison.OrdinalIgnoreCase) && c.LocalPort.HasValue)
                         {
                             ports.Add(c.LocalPort.Value);
                         }
@@ -125,7 +125,7 @@ namespace Pulswerk.Dashboard
                 if (path != null)
                 {
                     var ocppConn = _data.Config.Connections?.FirstOrDefault(c =>
-                        c.Type.Equals("ocpp", StringComparison.OrdinalIgnoreCase) &&
+                        c.Type.Equals("ocpp-ws", StringComparison.OrdinalIgnoreCase) &&
                         !string.IsNullOrEmpty(c.LocalAddress) &&
                         path.StartsWith(c.LocalAddress, StringComparison.OrdinalIgnoreCase) &&
                         (c.LocalPort == null || c.LocalPort == ctx.Connection.LocalPort)

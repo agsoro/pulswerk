@@ -16,6 +16,9 @@ namespace Pulswerk.Core
         // Battery / Hybrid Power Control & Setpoints
         public const string ForcePowerKw = "force_power";
 
+        // Aggregate Server & Wallbox pool telemetries
+        public const string ActiveSessions = "active_sessions";
+
         private static readonly System.Collections.Generic.Dictionary<string, (string Name, string Unit)> _metadata = new()
         {
             [PowerKw] = ("Leistung", Units.Kilowatt),
@@ -26,7 +29,8 @@ namespace Pulswerk.Core
 
             [BatterySocPct] = ("Batterie Ladezustand", Units.Percent),
 
-            [ForcePowerKw] = ("Batterie Zwangssollwert", Units.Kilowatt)
+            [ForcePowerKw] = ("Zwangssollwert", Units.Kilowatt),
+            [ActiveSessions] = ("Aktive Ladesitzungen", Units.None)
         };
 
         public static string GetFriendlyName(string key) => _metadata.TryGetValue(key, out var m) ? m.Name : key;

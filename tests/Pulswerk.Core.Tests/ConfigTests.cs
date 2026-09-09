@@ -375,7 +375,121 @@ namespace Connector.Tests
                 {
                     new ConnectionConfig(
                         Id: "ocpp1",
+                        Type: "ocpp-ws",
+                        LocalPort: 5000,
+                        LocalAddress: "/plswk/ocpp/"
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "ocpp1-server",
+                        Name: "OCPP Server",
+                        DeviceType: "ocpp-master",
+                        ConnectionId: "ocpp1"
+                    ),
+                    new DeviceConfig(
+                        Id: "wallbox-sim-01",
+                        Name: "Garage Wallbox 1",
+                        DeviceType: "ocpp",
+                        ConnectionId: "ocpp1"
+                    )
+                },
+                Server: null
+            );
+
+            // Should compile and pass validation without exception
+            ConfigValidator.Validate(cfg);
+        }
+
+        [Fact]
+        public void ConfigValidator_OcppConnection_OldTypeOcpp_Throws()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "ocpp1",
                         Type: "ocpp",
+                        LocalPort: 5000,
+                        LocalAddress: "/plswk/ocpp/"
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "ocpp1-server",
+                        Name: "OCPP Server",
+                        DeviceType: "ocpp-master",
+                        ConnectionId: "ocpp1"
+                    ),
+                    new DeviceConfig(
+                        Id: "wallbox-sim-01",
+                        Name: "Garage Wallbox 1",
+                        DeviceType: "ocpp",
+                        ConnectionId: "ocpp1"
+                    )
+                },
+                Server: null
+            );
+
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains("unsupported type 'ocpp'", ex.Message);
+        }
+
+        [Fact]
+        public void ConfigValidator_OcppConnection_OldDeviceTypeOcppServer_Throws()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "ocpp1",
+                        Type: "ocpp-ws",
+                        LocalPort: 5000,
+                        LocalAddress: "/plswk/ocpp/"
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "ocpp1-server",
+                        Name: "OCPP Server",
+                        DeviceType: "ocpp-server",
+                        ConnectionId: "ocpp1"
+                    ),
+                    new DeviceConfig(
+                        Id: "wallbox-sim-01",
+                        Name: "Garage Wallbox 1",
+                        DeviceType: "ocpp",
+                        ConnectionId: "ocpp1"
+                    )
+                },
+                Server: null
+            );
+
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains("missing a required 'ocpp-master' device", ex.Message);
+        }
+
+        [Fact]
+        public void ConfigValidator_OcppConnection_MissingOcppServerDevice_Throws()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "ocpp1",
+                        Type: "ocpp-ws",
                         LocalPort: 5000,
                         LocalAddress: "/plswk/ocpp/"
                     )
@@ -392,8 +506,8 @@ namespace Connector.Tests
                 Server: null
             );
 
-            // Should compile and pass validation without exception
-            ConfigValidator.Validate(cfg);
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains("missing a required 'ocpp-master' device", ex.Message);
         }
 
         [Fact]
@@ -407,13 +521,19 @@ namespace Connector.Tests
                 {
                     new ConnectionConfig(
                         Id: "ocpp1",
-                        Type: "ocpp",
+                        Type: "ocpp-ws",
                         LocalPort: null, // Invalid: missing localPort
                         LocalAddress: "/plswk/ocpp/"
                     )
                 },
                 Devices: new List<DeviceConfig>
                 {
+                    new DeviceConfig(
+                        Id: "ocpp1-server",
+                        Name: "OCPP Server",
+                        DeviceType: "ocpp-master",
+                        ConnectionId: "ocpp1"
+                    ),
                     new DeviceConfig(
                         Id: "wallbox-sim-01",
                         Name: "Garage Wallbox 1",
@@ -439,13 +559,19 @@ namespace Connector.Tests
                 {
                     new ConnectionConfig(
                         Id: "ocpp1",
-                        Type: "ocpp",
+                        Type: "ocpp-ws",
                         LocalPort: 5000,
                         LocalAddress: "plswk/ocpp" // Invalid: must start and end with /
                     )
                 },
                 Devices: new List<DeviceConfig>
                 {
+                    new DeviceConfig(
+                        Id: "ocpp1-server",
+                        Name: "OCPP Server",
+                        DeviceType: "ocpp-master",
+                        ConnectionId: "ocpp1"
+                    ),
                     new DeviceConfig(
                         Id: "wallbox-sim-01",
                         Name: "Garage Wallbox 1",
@@ -458,6 +584,139 @@ namespace Connector.Tests
 
             var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
             Assert.Contains("must start and end with a '/'", ex.Message);
+        }
+
+        [Fact]
+        public void ConfigValidator_SmgwHttpConnection_Valid_Passes()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "smgw",
+                        Type: "smgw-http",
+                        Address: "192.168.1.200",
+                        Port: 443,
+                        Username: "test-user",
+                        Password: "test-password",
+                        IgnoreSslErrors: true
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "efr-meter",
+                        Name: "EFR Abrechnungszähler",
+                        DeviceType: "smgw",
+                        ConnectionId: "smgw",
+                        MeterId: "1 EFR 00 00000000",
+                        PollIntervalSeconds: 120
+                    )
+                },
+                Server: null
+            );
+
+            ConfigValidator.Validate(cfg);
+        }
+
+        [Fact]
+        public void ConfigValidator_SmgwHttpConnection_MissingCredentials_Throws()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "smgw",
+                        Type: "smgw-http",
+                        Address: "192.168.1.200",
+                        Username: null,
+                        Password: null
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "efr-meter",
+                        Name: "EFR Abrechnungszähler",
+                        DeviceType: "smgw",
+                        ConnectionId: "smgw"
+                    )
+                },
+                Server: null
+            );
+
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains("missing 'username'", ex.Message);
+            Assert.Contains("missing 'password'", ex.Message);
+        }
+
+        [Theory]
+        [InlineData("ppc-smgw")]
+        [InlineData("smgw-han")]
+        public void ConfigValidator_OldSmgwConnectionTypes_ThrowsUnsupportedType(string oldType)
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "old-conn",
+                        Type: oldType,
+                        Address: "192.168.1.200",
+                        Username: "user",
+                        Password: "pw"
+                    )
+                },
+                Devices: new List<DeviceConfig>(),
+                Server: null
+            );
+
+            var ex = Assert.Throws<Exception>(() => ConfigValidator.Validate(cfg));
+            Assert.Contains($"unsupported type '{oldType}'", ex.Message);
+        }
+
+        [Fact]
+        public void ConfigValidator_SmgwHttpConnection_ValidatesSuccessfully()
+        {
+            var cfg = new AppConfig(
+                InfluxDb: null,
+                Database: null,
+                Polling: null,
+                Connections: new List<ConnectionConfig>
+                {
+                    new ConnectionConfig(
+                        Id: "smgw-main",
+                        Type: "smgw-http",
+                        Address: "192.168.1.200",
+                        Port: 443,
+                        Username: "test-user",
+                        Password: "test-password",
+                        IgnoreSslErrors: true
+                    )
+                },
+                Devices: new List<DeviceConfig>
+                {
+                    new DeviceConfig(
+                        Id: "efr-meter",
+                        Name: "EFR Abrechnungszähler",
+                        DeviceType: "smgw",
+                        ConnectionId: "smgw-main",
+                        MeterId: "1 EFR 00 00000000",
+                        PollIntervalSeconds: 120
+                    )
+                },
+                Server: null
+            );
+
+            ConfigValidator.Validate(cfg);
         }
     }
 }

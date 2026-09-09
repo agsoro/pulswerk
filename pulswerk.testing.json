@@ -105,7 +105,7 @@
     },
     {
       "id": "ocpp-central",
-      "type": "ocpp",
+      "type": "ocpp-ws",
       "localPort": 5000,
       "localAddress": "/plswk/ocpp/",
       "name": "OCPP Central System"
@@ -259,6 +259,17 @@
         "Wallbox 1"
       ],
       "assetType": "Wallbox"
+    },
+    {
+      "id": "ocpp-central",
+      "name": "OCPP Central Server",
+      "deviceType": "ocpp-master",
+      "connectionId": "ocpp-central",
+      "path": [
+        "Building A",
+        "Garage"
+      ],
+      "assetType": "OCPP Server"
     },
     {
       "id": "knx-living-room",

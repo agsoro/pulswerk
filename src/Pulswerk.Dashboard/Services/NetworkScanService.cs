@@ -61,7 +61,7 @@ namespace Pulswerk.Dashboard.Services
             new ProtocolProbe("modbus-tcp", "Modbus TCP",  502),
             new ProtocolProbe("bacnet-ip",  "BACnet/IP",   47808),
             new ProtocolProbe("knx-ip",     "KNXnet/IP",    3671),
-            new ProtocolProbe("ocpp",       "OCPP (WS)",   9000),
+            new ProtocolProbe("ocpp-ws",   "OCPP (WS)",   9000),
         };
 
         // Per-port connect timeout. Kept short so a full /24 sweep stays snappy

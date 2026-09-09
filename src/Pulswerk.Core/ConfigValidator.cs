@@ -31,8 +31,8 @@ namespace Pulswerk.Core
                     else if (!connIds.Add(conn.Id))
                         errors.Add($"Duplicate connection ID found: '{conn.Id}'.");
 
-                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp" && conn.Type != "knx-ip")
-                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp', 'knx-ip'.");
+                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp-ws" && conn.Type != "knx-ip" && conn.Type != "smgw-http")
+                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp-ws', 'knx-ip', 'smgw-http'.");
 
                     if (conn.Type == "bacnet-ip")
                     {
@@ -41,10 +41,10 @@ namespace Pulswerk.Core
                     }
                     else if (conn.Type == "modbus-tcp")
                     {
-                        if (string.IsNullOrWhiteSpace(conn.Address) && !cfg.Devices.Any(d => d.ConnectionId == conn.Id && !string.IsNullOrWhiteSpace(d.Address)))
+                        if (string.IsNullOrWhiteSpace(conn.Address) && !(cfg.Devices?.Any(d => d.ConnectionId == conn.Id && !string.IsNullOrWhiteSpace(d.Address)) ?? false))
                             errors.Add($"Modbus connection '{conn.Id}' has no address and no devices provide one.");
                     }
-                    else if (conn.Type == "ocpp")
+                    else if (conn.Type == "ocpp-ws")
                     {
                         if (conn.LocalPort == null)
                             errors.Add($"OCPP connection '{conn.Id}' is missing 'localPort'.");
@@ -52,6 +52,9 @@ namespace Pulswerk.Core
                             errors.Add($"OCPP connection '{conn.Id}' is missing 'localAddress' (path).");
                         else if (!conn.LocalAddress.StartsWith('/') || !conn.LocalAddress.EndsWith('/'))
                             errors.Add($"OCPP connection '{conn.Id}' has invalid 'localAddress' '{conn.LocalAddress}'. It must start and end with a '/' (e.g., '/plswk/ocpp/').");
+
+                        if (cfg.Devices == null || !cfg.Devices.Any(d => d.DeviceType.Equals("ocpp-master", StringComparison.OrdinalIgnoreCase) && d.ConnectionId == conn.Id))
+                            errors.Add($"OCPP connection '{conn.Id}' is missing a required 'ocpp-master' device (a device with deviceType 'ocpp-master' and connectionId '{conn.Id}').");
                     }
                     else if (conn.Type == "knx-ip")
                     {
@@ -61,6 +64,17 @@ namespace Pulswerk.Core
 
                         if (conn.KnxSecureEnabled && string.IsNullOrWhiteSpace(conn.KnxCommissioningPassword))
                             errors.Add($"KNX connection '{conn.Id}' has secure enabled but is missing 'knxCommissioningPassword' (the code printed on the IP bridge).");
+                    }
+                    else if (conn.Type == "smgw-http")
+                    {
+                        if (string.IsNullOrWhiteSpace(conn.Address))
+                            errors.Add($"SMGW connection '{conn.Id}' is missing 'address' (IP of the Smart Meter Gateway).");
+
+                        if (string.IsNullOrWhiteSpace(conn.Username))
+                            errors.Add($"SMGW connection '{conn.Id}' is missing 'username'.");
+
+                        if (string.IsNullOrWhiteSpace(conn.Password))
+                            errors.Add($"SMGW connection '{conn.Id}' is missing 'password'.");
                     }
                 }
             }
@@ -85,7 +99,7 @@ namespace Pulswerk.Core
                     if (string.IsNullOrWhiteSpace(dev.Name))
                         errors.Add($"Device '{dev.Id}' is missing a name.");
 
-                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ocpp" && dev.DeviceType != "knx")
+                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ocpp" && dev.DeviceType != "ocpp-master" && dev.DeviceType != "knx" && dev.DeviceType != "smgw")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
@@ -95,7 +109,7 @@ namespace Pulswerk.Core
                         if (dev.DeviceId == null)
                             errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
                     }
-                    else if (dev.DeviceType == "ocpp" || dev.DeviceType == "knx")
+                    else if (dev.DeviceType == "ocpp" || dev.DeviceType == "ocpp-master" || dev.DeviceType == "knx" || dev.DeviceType == "smgw")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
@@ -190,6 +204,15 @@ namespace Pulswerk.Core
                                 errors.Add($"{context}: Missing 'formula'.");
                             else
                                 ValidateFormula(dp.Formula, cfg, dev, context, errors);
+                        }
+                    }
+
+                    if (dev.TelemetryKeys != null)
+                    {
+                        for (int i = 0; i < dev.TelemetryKeys.Count; i++)
+                        {
+                            if (string.IsNullOrWhiteSpace(dev.TelemetryKeys[i]))
+                                errors.Add($"Device '{dev.Id}' telemetryKeys[{i}]: Key cannot be empty.");
                         }
                     }
                 }
