@@ -45,6 +45,9 @@
 //    Block 8 (43074, 1 reg):
 //      43074         uint16   grid_export_limit            Backflow / Feed-in Limitation (100W)
 //
+//    Block 9 (43195, 1 reg):
+//      43195         int16    power_setpoint               Power Setpoint (-1000..+1000 W)
+//
 //  Safety Watchdog / Heartbeat:
 //    Solis hybrid inverters implement a deadman safety timer: if register 43135 or remote control
 //    commands are not refreshed within ~1-5 minutes, the inverter reverts to automatic self-consumption.
@@ -67,6 +70,8 @@ namespace Pulswerk.Drivers.Modbus
 
         // Holding Register Addresses
         public const ushort REG_BACKFLOW_POWER = 43074;             // 100W scale
+        public const ushort REG_POWER_SETPOINT = 43195;             // 1W scale (S16, range -1000..+1000W)
+        public const ushort REG_EXPORT_CALIBRATION = REG_POWER_SETPOINT; // Legacy alias
         public const ushort REG_RC_INVERTER_ACTIVE_POWER = 43128;   // 10W scale (S16)
         public const ushort REG_RC_FORCE_DISCHARGE_POWER = 43129;   // 10W scale (U16)
         public const ushort REG_BATT_CHARGE_LIMIT_POWER = 43130;    // 10W scale (U16)
@@ -108,7 +113,8 @@ namespace Pulswerk.Drivers.Modbus
 
             // Writable Power Control & Holding Parameters
             TelemetryKeys.ForcePowerKw,
-            TelemetryKeys.PowerLimitPct
+            TelemetryKeys.PowerLimitPct,
+            TelemetryKeys.PowerSetpointW
         };
 
         public override IReadOnlyDictionary<string, string> GetTelemetryUnits() => new Dictionary<string, string>
@@ -119,7 +125,8 @@ namespace Pulswerk.Drivers.Modbus
             [TelemetryKeys.EnergyExportKwh] = Units.KilowattHour,
 
             [TelemetryKeys.ForcePowerKw] = Units.Kilowatt,
-            [TelemetryKeys.PowerLimitPct] = Units.Percent
+            [TelemetryKeys.PowerLimitPct] = Units.Percent,
+            [TelemetryKeys.PowerSetpointW] = Units.Watt
         };
 
         public class SolisRawData
@@ -135,6 +142,7 @@ namespace Pulswerk.Drivers.Modbus
             public double? EnergyImportKwh { get; set; }
             public double? EnergyExportKwh { get; set; }
             public double ForcePowerKw { get; set; }
+            public double? PowerSetpointW { get; set; }
         }
 
         private static readonly ConcurrentDictionary<string, (DateTime CachedAt, SolisRawData Data)> _rawCache = new();
@@ -192,6 +200,7 @@ namespace Pulswerk.Drivers.Modbus
             if (raw.BatterySocPct.HasValue) result[TelemetryKeys.BatterySocPct] = raw.BatterySocPct.Value;
             if (raw.EnergyImportKwh.HasValue) result[TelemetryKeys.EnergyImportKwh] = raw.EnergyImportKwh.Value;
             if (raw.EnergyExportKwh.HasValue) result[TelemetryKeys.EnergyExportKwh] = raw.EnergyExportKwh.Value;
+            if (raw.PowerSetpointW.HasValue) result[TelemetryKeys.PowerSetpointW] = raw.PowerSetpointW.Value;
             result[TelemetryKeys.ForcePowerKw] = raw.ForcePowerKw;
             return result;
         }
@@ -343,6 +352,17 @@ namespace Pulswerk.Drivers.Modbus
                 Log.Debug($"[Solis] Block 7 (Holding Control Registers 43128..43137) read failed: {ex.Message}");
             }
 
+            // Block 8: Power Setpoint (43195)
+            try
+            {
+                var b8 = master.ReadHoldingRegisters(slaveId, REG_POWER_SETPOINT, 1);
+                raw.PowerSetpointW = (double)unchecked((short)b8[0]);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"[Solis] Block 8 (Power Setpoint 43195) read failed: {ex.Message}");
+            }
+
 
             // Heartbeat keepalive for active remote control modes
             if (!string.IsNullOrEmpty(deviceKey))
@@ -361,6 +381,7 @@ namespace Pulswerk.Drivers.Modbus
         {
             TelemetryKeys.ForcePowerKw => true,
             TelemetryKeys.PowerLimitPct => true,
+            TelemetryKeys.PowerSetpointW => true,
             "force_charge_mode" => true,
             "force_charge_power" => true,
             "force_discharge_power" => true,
@@ -497,6 +518,15 @@ namespace Pulswerk.Drivers.Modbus
                     short regVal = (short)Math.Clamp(Math.Round(value * 100.0), -32768, 32767);
                     master.WriteSingleRegister(slaveId, REG_RC_INVERTER_ACTIVE_POWER, unchecked((ushort)regVal));
                     Log.Info($"[Solis] Set AC Active Power limit on '{deviceKey}' to {value} kW (Reg {REG_RC_INVERTER_ACTIVE_POWER} = {regVal})");
+                    break;
+                }
+
+                case TelemetryKeys.PowerSetpointW:
+                {
+                    // S16, 1W units, range -1000 to +1000 W
+                    short regVal = (short)Math.Clamp(Math.Round(value), -1000, 1000);
+                    master.WriteSingleRegister(slaveId, REG_POWER_SETPOINT, unchecked((ushort)regVal));
+                    Log.Info($"[Solis] Set Power Setpoint on '{deviceKey}' to {regVal} W (Reg {REG_POWER_SETPOINT} = {unchecked((ushort)regVal)})");
                     break;
                 }
 
@@ -754,7 +784,8 @@ namespace Pulswerk.Drivers.Modbus
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyImportKwh,
             TelemetryKeys.EnergyExportKwh,
-            TelemetryKeys.PowerLimitPct
+            TelemetryKeys.PowerLimitPct,
+            TelemetryKeys.PowerSetpointW
         };
 
         public override IReadOnlyDictionary<string, string> GetTelemetryUnits() => new Dictionary<string, string>
@@ -762,7 +793,8 @@ namespace Pulswerk.Drivers.Modbus
             [TelemetryKeys.PowerKw] = Units.Kilowatt,
             [TelemetryKeys.EnergyImportKwh] = Units.KilowattHour,
             [TelemetryKeys.EnergyExportKwh] = Units.KilowattHour,
-            [TelemetryKeys.PowerLimitPct] = Units.Percent
+            [TelemetryKeys.PowerLimitPct] = Units.Percent,
+            [TelemetryKeys.PowerSetpointW] = Units.Watt
         };
 
         public override TelemetryValues Read(ConnectionConfig conn, DeviceConfig device)
@@ -800,12 +832,17 @@ namespace Pulswerk.Drivers.Modbus
             {
                 result[TelemetryKeys.EnergyExportKwh] = raw.EnergyExportKwh.Value;
             }
+            if (raw.PowerSetpointW.HasValue)
+            {
+                result[TelemetryKeys.PowerSetpointW] = raw.PowerSetpointW.Value;
+            }
             return result;
         }
 
         public bool IsWritable(string key) => key switch
         {
             TelemetryKeys.PowerLimitPct => true,
+            TelemetryKeys.PowerSetpointW => true,
             _ => false
         };
 

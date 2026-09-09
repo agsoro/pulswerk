@@ -47,6 +47,7 @@ namespace Pulswerk.Drivers.Tests
             // Writable control keys
             Assert.Contains(TelemetryKeys.ForcePowerKw, keys);
             Assert.Contains(TelemetryKeys.PowerLimitPct, keys);
+            Assert.Contains(TelemetryKeys.PowerSetpointW, keys);
         }
 
         [Fact]
@@ -57,11 +58,24 @@ namespace Pulswerk.Drivers.Tests
             Assert.True(driver.IsWritable(TelemetryKeys.ForcePowerKw));
             Assert.True(driver.IsWritable("force_power"));
             Assert.True(driver.IsWritable(TelemetryKeys.PowerLimitPct));
+            Assert.True(driver.IsWritable(TelemetryKeys.PowerSetpointW));
+            Assert.True(driver.IsWritable("power_setpoint"));
 
             // Read-only points should return false
             Assert.False(driver.IsWritable(TelemetryKeys.PowerKw));
             Assert.False(driver.IsWritable(TelemetryKeys.BatterySocPct));
             Assert.False(driver.IsWritable(TelemetryKeys.EnergyExportKwh));
+        }
+
+        [Fact]
+        public void SolisGridDriver_ExposesPowerSetpoint_And_IsWritable()
+        {
+            var driver = new SolisGridDriver();
+            var keys = new HashSet<string>(driver.GetTelemetryKeys());
+
+            Assert.Contains(TelemetryKeys.PowerSetpointW, keys);
+            Assert.True(driver.IsWritable(TelemetryKeys.PowerSetpointW));
+            Assert.True(driver.IsWritable("power_setpoint"));
         }
 
         [Fact]
@@ -83,6 +97,44 @@ namespace Pulswerk.Drivers.Tests
             // 3. ForcePowerKw = 0 -> Mode 0 (Off / Normal)
             driver.WriteToMaster(fakeMaster, 1, "test-s6", TelemetryKeys.ForcePowerKw, 0);
             Assert.Equal((ushort)0, fakeMaster.WrittenRegisters[SolisDriver.REG_RC_FORCE_CHARGE_MODE]);
+        }
+
+        [Fact]
+        public void SolisDriver_WriteToMaster_WritesPowerSetpointCorrectly()
+        {
+            var driver = new SolisDriver();
+            var fakeMaster = new FakeSolisModbusMaster();
+
+            // 1. Positive power setpoint: +50 W (bias export)
+            driver.WriteToMaster(fakeMaster, 1, "test-s6", TelemetryKeys.PowerSetpointW, 50);
+            Assert.Equal((ushort)50, fakeMaster.WrittenRegisters[SolisDriver.REG_POWER_SETPOINT]);
+
+            // 2. Negative power setpoint: -30 W (bias import)
+            driver.WriteToMaster(fakeMaster, 1, "test-s6", TelemetryKeys.PowerSetpointW, -30);
+            Assert.Equal(unchecked((ushort)(short)-30), fakeMaster.WrittenRegisters[SolisDriver.REG_POWER_SETPOINT]);
+
+            // 3. Clamping to [-1000, 1000]
+            driver.WriteToMaster(fakeMaster, 1, "test-s6", "power_setpoint", 1500);
+            Assert.Equal((ushort)1000, fakeMaster.WrittenRegisters[SolisDriver.REG_POWER_SETPOINT]);
+
+            driver.WriteToMaster(fakeMaster, 1, "test-s6", "power_setpoint", -2000);
+            Assert.Equal(unchecked((ushort)(short)-1000), fakeMaster.WrittenRegisters[SolisDriver.REG_POWER_SETPOINT]);
+        }
+
+        [Fact]
+        public void SolisDriver_ReadRawFromMaster_ReadsPowerSetpoint()
+        {
+            var fakeMaster = new FakeSolisModbusMaster();
+            fakeMaster.RegisterHoldingBlock(SolisDriver.REG_POWER_SETPOINT, new ushort[] { unchecked((ushort)(short)-75) });
+
+            var raw = SolisDriver.ReadRawFromMaster(fakeMaster, 1, "test-s6");
+            Assert.Equal(-75.0, raw.PowerSetpointW);
+
+            var telemetry = SolisDriver.MapRawToTelemetry(raw);
+            Assert.Equal(-75.0, telemetry[TelemetryKeys.PowerSetpointW]);
+
+            var gridTelemetry = SolisGridDriver.MapRawToTelemetry(raw);
+            Assert.Equal(-75.0, gridTelemetry[TelemetryKeys.PowerSetpointW]);
         }
 
         [Fact]

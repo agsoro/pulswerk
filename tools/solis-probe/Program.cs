@@ -36,12 +36,14 @@ namespace SolisProbe
 
                 Console.WriteLine("\n---------------- Solis S6 Power Control Setpoints --------");
                 PrintTelemetry(telemetries, TelemetryKeys.ForcePowerKw, "Force Power (+disch, -charge) (60s)");
+                PrintTelemetry(telemetries, TelemetryKeys.PowerSetpointW, "Power Setpoint (Offset)");
 
                 if (driver is IDeviceWriter writer)
                 {
                     Console.WriteLine("\n[WRITER TEST] Solis driver implements IDeviceWriter.");
                     Console.WriteLine($"  IsWritable(force_power):           {writer.IsWritable(TelemetryKeys.ForcePowerKw)}");
                     Console.WriteLine($"  IsWritable(power_limit):           {writer.IsWritable(TelemetryKeys.PowerLimitPct)}");
+                    Console.WriteLine($"  IsWritable(power_setpoint):        {writer.IsWritable(TelemetryKeys.PowerSetpointW)}");
 
                     // Test safe write: setting ForcePowerKw = 0 (Normal / Self-Use)
                     Console.WriteLine("  Sending safe write: force_power = 0 (Normal)...");

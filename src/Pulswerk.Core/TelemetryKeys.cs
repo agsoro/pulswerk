@@ -15,6 +15,7 @@ namespace Pulswerk.Core
 
         // Battery / Hybrid Power Control & Setpoints
         public const string ForcePowerKw = "force_power";
+        public const string PowerSetpointW = "power_setpoint";
 
         // Aggregate Server & Wallbox pool telemetries
         public const string ActiveSessions = "active_sessions";
@@ -30,6 +31,7 @@ namespace Pulswerk.Core
             [BatterySocPct] = ("Batterie Ladezustand", Units.Percent),
 
             [ForcePowerKw] = ("Zwangssollwert", Units.Kilowatt),
+            [PowerSetpointW] = ("Leistungssollwert", Units.Watt),
             [ActiveSessions] = ("Aktive Ladesitzungen", Units.None)
         };
 
