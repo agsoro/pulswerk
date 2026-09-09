@@ -81,15 +81,8 @@ namespace Pulswerk.Dashboard
                     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")));
 
                 // Robust discovery of the dashboard's static assets (wwwroot)
-                // This handles both published (Docker) and source (Dev) environments.
-                string[] possibleWwwRoots = {
-                    Path.Combine(AppContext.BaseDirectory, "wwwroot", "_content", "Pulswerk.Dashboard"),
-                    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Pulswerk.Dashboard", "wwwroot")),
-                    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Pulswerk.Dashboard", "wwwroot")),
-                    Path.Combine(AppContext.BaseDirectory, "wwwroot")
-                };
-
-                string? finalWwwRoot = possibleWwwRoots.FirstOrDefault(Directory.Exists);
+                // This handles published (Docker), source (Dev), and multi-level bin directory layouts.
+                string? finalWwwRoot = FindDashboardWwwRoot();
                 if (finalWwwRoot != null)
                 {
                     builder.Environment.WebRootPath = finalWwwRoot;
@@ -397,6 +390,41 @@ namespace Pulswerk.Dashboard
                 return true;
             }
             catch { return false; }
+        }
+
+        private static string? FindDashboardWwwRoot()
+        {
+            // 1. Direct checks relative to AppContext.BaseDirectory
+            string[] directCandidates = {
+                Path.Combine(AppContext.BaseDirectory, "wwwroot", "_content", "Pulswerk.Dashboard"),
+                Path.Combine(AppContext.BaseDirectory, "wwwroot")
+            };
+            foreach (var c in directCandidates)
+            {
+                if (Directory.Exists(c) && (File.Exists(Path.Combine(c, "dashboard.html")) || Directory.Exists(Path.Combine(c, "css"))))
+                    return Path.GetFullPath(c);
+            }
+
+            // 2. Walk up directory tree from AppContext.BaseDirectory
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null)
+            {
+                var directWww = Path.Combine(dir.FullName, "wwwroot");
+                if (Directory.Exists(directWww) && (File.Exists(Path.Combine(directWww, "dashboard.html")) || Directory.Exists(Path.Combine(directWww, "css"))))
+                    return Path.GetFullPath(directWww);
+
+                var srcDashWww = Path.Combine(dir.FullName, "src", "Pulswerk.Dashboard", "wwwroot");
+                if (Directory.Exists(srcDashWww))
+                    return Path.GetFullPath(srcDashWww);
+
+                var dashWww = Path.Combine(dir.FullName, "Pulswerk.Dashboard", "wwwroot");
+                if (Directory.Exists(dashWww))
+                    return Path.GetFullPath(dashWww);
+
+                dir = dir.Parent;
+            }
+
+            return null;
         }
     }
 }

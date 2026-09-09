@@ -27,6 +27,20 @@
       "port": 502
     },
     {
+      "id": "modbus-solis",
+      "type": "modbus-tcp",
+      "address": "10.10.1.21",
+      "port": 502,
+      "name": "Solis S6 Modbus"
+    },
+    {
+      "id": "modbus-fronius",
+      "type": "modbus-tcp",
+      "address": "10.10.1.22",
+      "port": 502,
+      "name": "Fronius Modbus"
+    },
+    {
       "id": "bacnet-deziko",
       "type": "bacnet-ip",
       "localAddress": "0.0.0.0",
@@ -73,6 +87,66 @@
       "deviceType": "janitza",
       "connectionId": "modbus-building-b",
       "deviceId": 2
+    },
+    {
+      "id": "solis-pv",
+      "name": "Solis S6 Solar PV",
+      "deviceType": "solis-pv",
+      "connectionId": "modbus-solis",
+      "deviceId": 1,
+      "path": [
+        "Energy",
+        "Solis PV"
+      ],
+      "assetType": "Inverter"
+    },
+    {
+      "id": "solis-battery",
+      "name": "Solis S6 Battery Storage",
+      "deviceType": "solis-battery",
+      "connectionId": "modbus-solis",
+      "deviceId": 1,
+      "path": [
+        "Energy",
+        "Solis Battery"
+      ],
+      "assetType": "Battery"
+    },
+    {
+      "id": "solis-grid",
+      "name": "Solis S6 Grid Meter",
+      "deviceType": "solis-grid",
+      "connectionId": "modbus-solis",
+      "deviceId": 1,
+      "path": [
+        "Energy",
+        "Solis Grid"
+      ],
+      "assetType": "Meter"
+    },
+    {
+      "id": "fronius-inv-1",
+      "name": "Fronius Inverter 1",
+      "deviceType": "fronius",
+      "connectionId": "modbus-fronius",
+      "deviceId": 1,
+      "path": [
+        "Energy",
+        "Fronius Inverter 1"
+      ],
+      "assetType": "Inverter"
+    },
+    {
+      "id": "fronius-inv-2",
+      "name": "Fronius Inverter 2",
+      "deviceType": "fronius",
+      "connectionId": "modbus-fronius",
+      "deviceId": 2,
+      "path": [
+        "Energy",
+        "Fronius Inverter 2"
+      ],
+      "assetType": "Inverter"
     },
     {
       "id": "meter-main",
@@ -207,7 +281,7 @@
     }
   ],
   "server": {
-    "port": 5000,
+    "port": 80,
     "logBufferSize": 5000,
     "auth": {
       "enabled": true,
@@ -245,17 +319,46 @@
         "users",
         "admins"
       ],
-      "allowEms": ["admins", "operators"],
-      "allowBilling": ["admins"],
-      "allowWallbox": ["users", "admins"],
-      "allowHistoricalData": ["admins"],
-      "allowAlarms": ["users", "admins"],
-      "allowLogs": ["admins"],
-      "allowHeartbeat": ["users", "admins"],
-      "allowDashboards": ["users", "admins"],
-      "allowAssets": ["users", "admins"],
-      "allowTelemetry": ["users", "admins"],
-      "allowConnections": ["admins"]
+      "allowEms": [
+        "admins",
+        "operators"
+      ],
+      "allowBilling": [
+        "admins"
+      ],
+      "allowWallbox": [
+        "users",
+        "admins"
+      ],
+      "allowHistoricalData": [
+        "admins"
+      ],
+      "allowAlarms": [
+        "users",
+        "admins"
+      ],
+      "allowLogs": [
+        "admins"
+      ],
+      "allowHeartbeat": [
+        "users",
+        "admins"
+      ],
+      "allowDashboards": [
+        "users",
+        "admins"
+      ],
+      "allowAssets": [
+        "users",
+        "admins"
+      ],
+      "allowTelemetry": [
+        "users",
+        "admins"
+      ],
+      "allowConnections": [
+        "admins"
+      ]
     }
   },
   "modules": {

@@ -16,7 +16,7 @@ namespace Pulswerk.Drivers.Modbus
 {
     using TelemetryValues = Dictionary<string, object>;
 
-    class SunSpecDriver : BaseModbusDriver
+    public class SunSpecDriver : BaseModbusDriver
     {
         public override string DriverName => "SunSpec";
         // public bool IsBusy => false;

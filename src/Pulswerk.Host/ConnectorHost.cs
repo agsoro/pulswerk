@@ -88,6 +88,13 @@ namespace Pulswerk.Host
 
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+            IDisposable? sigtermReg = null;
+            if (!OperatingSystem.IsWindows())
+            {
+                sigtermReg = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                    System.Runtime.InteropServices.PosixSignal.SIGTERM,
+                    ctx => { ctx.Cancel = true; cts.Cancel(); });
+            }
 
             StartMonitoringDashboard(cts.Token);
             StartBacnetClients();
@@ -100,11 +107,12 @@ namespace Pulswerk.Host
             _ = Task.Run(() => StartCovSubscriptions(cts.Token), cts.Token);
             StartHierarchyJobs(cts.Token);
 
-            // Block until Ctrl+C
+            // Block until Ctrl+C or SIGTERM
             try { await Task.Delay(-1, cts.Token); }
             catch (TaskCanceledException) { }
 
             Shutdown();
+            sigtermReg?.Dispose();
         }
 
         // ── Config loading ───────────────────────────────────────────────────
