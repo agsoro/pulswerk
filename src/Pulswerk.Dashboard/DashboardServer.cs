@@ -124,86 +124,142 @@ namespace Pulswerk.Dashboard
                 var path = ctx.Request.Path.Value;
                 if (path != null)
                 {
-                    var ocppConn = _data.Config.Connections?.FirstOrDefault(c =>
-                        c.Type.Equals("ocpp-ws", StringComparison.OrdinalIgnoreCase) &&
-                        !string.IsNullOrEmpty(c.LocalAddress) &&
-                        (path.StartsWith(c.LocalAddress.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase) ||
-                         path.Equals(c.LocalAddress.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)) &&
-                        (c.LocalPort == null || c.LocalPort == ctx.Connection.LocalPort)
-                    );
+                    ConnectionConfig? ocppConn = null;
+                    string matchedPrefix = "";
+
+                    if (_data.Config.Connections != null)
+                    {
+                        foreach (var c in _data.Config.Connections)
+                        {
+                            if (!c.Type.Equals("ocpp-ws", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(c.LocalAddress))
+                                continue;
+
+                            if (c.LocalPort != null && c.LocalPort != ctx.Connection.LocalPort)
+                                continue;
+
+                            var prefixes = new List<string> { c.LocalAddress.TrimEnd('/') };
+                            if (c.LocalAddress.StartsWith("/plswk/", StringComparison.OrdinalIgnoreCase))
+                            {
+                                prefixes.Add(c.LocalAddress.Substring(6).TrimEnd('/')); // e.g. "/ocpp"
+                            }
+                            else
+                            {
+                                prefixes.Add("/plswk" + (c.LocalAddress.StartsWith('/') ? c.LocalAddress.TrimEnd('/') : "/" + c.LocalAddress.TrimEnd('/'))); // e.g. "/plswk/ocpp"
+                            }
+
+                            foreach (var p in prefixes)
+                            {
+                                if (path.StartsWith(p + "/", StringComparison.OrdinalIgnoreCase) || path.Equals(p, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    ocppConn = c;
+                                    matchedPrefix = p;
+                                    break;
+                                }
+                            }
+
+                            if (ocppConn != null) break;
+                        }
+                    }
 
                     if (ocppConn != null)
                     {
                         var remoteIp = ctx.Connection.RemoteIpAddress != null && ctx.Connection.RemoteIpAddress.IsIPv4MappedToIPv6
                             ? ctx.Connection.RemoteIpAddress.MapToIPv4().ToString()
                             : (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+                        string fullPath = path + (ctx.Request.QueryString.HasValue ? ctx.Request.QueryString.Value : "");
+
+                        Log.Info($"[OCPP] Incoming request from {remoteIp} on full path '{fullPath}' (isWebSocket: {ctx.WebSockets.IsWebSocketRequest}).");
 
                         var modules = _data.Config.Modules ?? new Pulswerk.Core.ModulesConfig();
                         if (!modules.Wallbox)
                         {
-                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} on '{path}' rejected: Wallbox module is disabled.");
+                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} on full path '{fullPath}' rejected: Wallbox module is disabled.");
                             ctx.Response.StatusCode = StatusCodes.Status404NotFound;
                             await ctx.Response.WriteAsync("OCPP Wallbox module is disabled.");
                             return;
                         }
 
-                        // ChargePointId is the remainder of the path after LocalAddress
-                        string prefix = ocppConn.LocalAddress!.TrimEnd('/');
-                        string chargePointId = path.Length > prefix.Length
-                            ? path.Substring(prefix.Length).Trim('/')
+                        // Extract subpath after the matched prefix (e.g. "/ocpp/LP1/AT2DMEY0F39100107" -> "LP1/AT2DMEY0F39100107")
+                        string rawSubpath = path.Length > matchedPrefix.Length
+                            ? path.Substring(matchedPrefix.Length).Trim('/')
                             : "";
 
-                        if (string.IsNullOrWhiteSpace(chargePointId))
+                        if (string.IsNullOrWhiteSpace(rawSubpath))
                         {
-                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} on '{path}' rejected: ChargePointId is missing from path.");
+                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} on full path '{fullPath}' rejected: ChargePointId is missing from path.");
                             ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
                             await ctx.Response.WriteAsync("ChargePointId is missing from path.");
                             return;
                         }
 
-                        // Verify that a device exists with this ID and matches this connection
-                        var device = _data.Config.Devices?.FirstOrDefault(d =>
-                            d.DeviceType.Equals("ocpp", StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(d.Id, chargePointId, StringComparison.OrdinalIgnoreCase)
-                        );
+                        // Split subpath into segments (e.g. ["LP1", "AT2DMEY0F39100107"])
+                        var segments = rawSubpath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-                        if (device == null || device.ConnectionId != ocppConn.Id)
+                        // Find configured OCPP device on this connection:
+                        // 1. Direct match with raw subpath
+                        // 2. Match first segment (e.g. "LP1" when wallbox appends its serial number to configured endpoint)
+                        // 3. Match last segment (e.g. "AT2DMEY0F39100107" if serial is configured as device ID)
+                        // 4. Fallback: if only 1 OCPP device is configured on this connection, match it
+                        var ocppDevices = _data.Config.Devices?.Where(d =>
+                            d.DeviceType.Equals("ocpp", StringComparison.OrdinalIgnoreCase) &&
+                            d.ConnectionId == ocppConn.Id
+                        ).ToList() ?? new List<DeviceConfig>();
+
+                        DeviceConfig? device = ocppDevices.FirstOrDefault(d => string.Equals(d.Id, rawSubpath, StringComparison.OrdinalIgnoreCase));
+
+                        if (device == null && segments.Length > 1)
                         {
-                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} for charger '{chargePointId}' rejected: Charger is not configured on OCPP connection '{ocppConn.Id}'.");
+                            // Match first segment (e.g. "LP1" in "/ocpp/LP1/AT2DMEY0F39100107")
+                            device = ocppDevices.FirstOrDefault(d => string.Equals(d.Id, segments[0], StringComparison.OrdinalIgnoreCase));
+
+                            // Match last segment (e.g. "AT2DMEY0F39100107")
+                            device ??= ocppDevices.FirstOrDefault(d => string.Equals(d.Id, segments[^1], StringComparison.OrdinalIgnoreCase));
+
+                            // Match any other segment if present
+                            if (device == null)
+                            {
+                                device = ocppDevices.FirstOrDefault(d => segments.Any(s => string.Equals(d.Id, s, StringComparison.OrdinalIgnoreCase)));
+                            }
+                        }
+
+                        if (device == null && ocppDevices.Count == 1)
+                        {
+                            device = ocppDevices[0];
+                            Log.Info($"[OCPP] Single configured charger '{device.Id}' matched for incoming subpath '{rawSubpath}' from {remoteIp} on full path '{fullPath}'.");
+                        }
+
+                        if (device == null)
+                        {
+                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} on full path '{fullPath}' (subpath: '{rawSubpath}') rejected: No matching charger configured on OCPP connection '{ocppConn.Id}'.");
                             ctx.Response.StatusCode = StatusCodes.Status404NotFound;
-                            await ctx.Response.WriteAsync($"Charger '{chargePointId}' is not configured on OCPP connection '{ocppConn.Id}'.");
+                            await ctx.Response.WriteAsync($"No charger matching '{rawSubpath}' is configured on OCPP connection '{ocppConn.Id}'.");
                             return;
                         }
 
+                        string chargePointId = device.Id;
+
                         if (ctx.WebSockets.IsWebSocketRequest)
                         {
-                            Log.Info($"[OCPP] Accepting WebSocket connection for charger '{chargePointId}' from {remoteIp}.");
+                            Log.Info($"[OCPP] Accepting WebSocket connection for charger '{chargePointId}' on full path '{fullPath}' from {remoteIp}.");
                             using var webSocket = await ctx.WebSockets.AcceptWebSocketAsync();
                             await Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.HandleConnectionAsync(chargePointId, webSocket, ctx.RequestAborted);
                             return;
                         }
                         else
                         {
-                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} for charger '{chargePointId}' rejected: Expected WebSocket request but received HTTP {ctx.Request.Method}.");
+                            Log.Warning($"[OCPP] Connection attempt from {remoteIp} on full path '{fullPath}' for charger '{chargePointId}' rejected: Expected WebSocket request but received HTTP {ctx.Request.Method}.");
                             ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
                             await ctx.Response.WriteAsync("Only WebSocket connections are accepted on this endpoint.");
                             return;
                         }
                     }
-                    else
+                    else if (ctx.WebSockets.IsWebSocketRequest)
                     {
-                        // Check if request arrived on a dedicated OCPP port with an unmatched path
-                        var dedicatedPortConn = _data.Config.Connections?.FirstOrDefault(c =>
-                            c.Type.Equals("ocpp-ws", StringComparison.OrdinalIgnoreCase) &&
-                            c.LocalPort.HasValue && c.LocalPort == ctx.Connection.LocalPort
-                        );
-                        if (dedicatedPortConn != null)
-                        {
-                            var remoteIp = ctx.Connection.RemoteIpAddress != null && ctx.Connection.RemoteIpAddress.IsIPv4MappedToIPv6
-                                ? ctx.Connection.RemoteIpAddress.MapToIPv4().ToString()
-                                : (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-                            Log.Warning($"[OCPP] Connection attempt on dedicated port {ctx.Connection.LocalPort} from {remoteIp} rejected: Path '{path}' does not match configured prefix '{dedicatedPortConn.LocalAddress}'.");
-                        }
+                        var remoteIp = ctx.Connection.RemoteIpAddress != null && ctx.Connection.RemoteIpAddress.IsIPv4MappedToIPv6
+                            ? ctx.Connection.RemoteIpAddress.MapToIPv4().ToString()
+                            : (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+                        string fullPath = path + (ctx.Request.QueryString.HasValue ? ctx.Request.QueryString.Value : "");
+                        Log.Warning($"[OCPP] Incoming WebSocket request from {remoteIp} on full path '{fullPath}' did not match any configured OCPP connection prefix.");
                     }
                 }
                 await next();
