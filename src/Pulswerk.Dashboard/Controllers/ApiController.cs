@@ -1215,6 +1215,14 @@ namespace Pulswerk.Dashboard.Controllers
                 .Where(d => d.DeviceType.Equals("ocpp", StringComparison.OrdinalIgnoreCase))
                 .Select(d => {
                     var telemetry = Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.GetTelemetry(d.Id);
+                    int phases = 3;
+                    if (telemetry.TryGetValue("charging_phases", out var phVal))
+                    {
+                        if (phVal is double dVal && dVal > 0) phases = (int)dVal;
+                        else if (phVal is int iVal && iVal > 0) phases = iVal;
+                        else if (phVal is long lVal && lVal > 0) phases = (int)lVal;
+                        else if (int.TryParse(phVal?.ToString(), out var parsed) && parsed > 0) phases = parsed;
+                    }
                     return new {
                         id = d.Id,
                         name = d.Name,
@@ -1224,6 +1232,7 @@ namespace Pulswerk.Dashboard.Controllers
                         energyImport = telemetry.GetValueOrDefault("energy_import", 0.0),
                         current = telemetry.GetValueOrDefault("current", 0.0),
                         voltage = telemetry.GetValueOrDefault("voltage", 0.0),
+                        phases = phases,
                         activeUser = telemetry.GetValueOrDefault("active_user", "None")
                     };
                 }).ToList();

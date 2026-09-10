@@ -10,6 +10,7 @@ interface Wallbox {
     energyImport: number;
     current: number;
     voltage: number;
+    phases?: number;
     activeUser: string;
 }
 
@@ -226,7 +227,7 @@ export function WallboxesPage() {
                                 <div class="flex flex-col gap-1 col-span-2 border-t border-slate-700/40 pt-3 mt-1 grid grid-cols-2 gap-4">
                                     <div>
                                         <span class="text-[0.65rem] font-bold text-slate-500 uppercase tracking-wider">{t('wb_curr_volt')}</span>
-                                        <div class="text-xs font-semibold text-slate-300 mt-0.5">{wb.current.toFixed(1)} A &nbsp;·&nbsp; {wb.voltage.toFixed(0)} V</div>
+                                        <div class="text-xs font-semibold text-slate-300 mt-0.5">{wb.current.toFixed(1)} A &nbsp;·&nbsp; {wb.voltage.toFixed(0)} V &nbsp;·&nbsp; {wb.phases || 3}P</div>
                                     </div>
                                     {wb.status === 'Charging' && (
                                         <div class="flex flex-col gap-1">

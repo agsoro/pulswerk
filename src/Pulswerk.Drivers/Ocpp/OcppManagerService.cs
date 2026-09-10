@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -69,7 +70,13 @@ namespace Pulswerk.Drivers.Ocpp
         {
             if (_liveTelemetry.TryGetValue(chargePointId, out var dict))
             {
-                lock (dict) return new Dictionary<string, object>(dict);
+                lock (dict)
+                {
+                    var res = new Dictionary<string, object>(dict);
+                    if (!res.ContainsKey("charging_phases"))
+                        res["charging_phases"] = (double)MaxPhases;
+                    return res;
+                }
             }
             return new Dictionary<string, object>
             {
@@ -78,7 +85,8 @@ namespace Pulswerk.Drivers.Ocpp
                 ["energy_import"] = 0.0,
                 ["current"] = 0.0,
                 ["voltage"] = 0.0,
-                ["active_user"] = "None"
+                ["active_user"] = "None",
+                ["charging_phases"] = (double)MaxPhases
             };
         }
 
@@ -108,7 +116,25 @@ namespace Pulswerk.Drivers.Ocpp
             {
                 while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
                 {
-                    var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                    using var ms = new MemoryStream();
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                        if (result.MessageType == WebSocketMessageType.Close)
+                            break;
+
+                        ms.Write(buffer, 0, result.Count);
+
+                        // Prevent unbounded memory allocation (max 2MB per message)
+                        if (ms.Length > 2 * 1024 * 1024)
+                        {
+                            Log.Warning($"[OCPP] [{chargePointId}] Message exceeded 2MB limit. Closing connection.");
+                            await socket.CloseAsync(WebSocketCloseStatus.MessageTooBig, "Message too big", CancellationToken.None);
+                            return;
+                        }
+                    } while (!result.EndOfMessage);
+
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
                         await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
@@ -117,7 +143,7 @@ namespace Pulswerk.Drivers.Ocpp
 
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
-                        string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        string message = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
                         await ProcessOcppMessageAsync(chargePointId, message, socket);
                     }
                 }
@@ -335,6 +361,10 @@ namespace Pulswerk.Drivers.Ocpp
             try
             {
                 var values = payload.GetProperty("meterValue");
+                double? maxCurrent = null;
+                double? maxVoltage = null;
+                int activeCurrentPhases = 0;
+
                 foreach (var value in values.EnumerateArray())
                 {
                     var sampledValue = value.GetProperty("sampledValue");
@@ -365,13 +395,36 @@ namespace Pulswerk.Drivers.Ocpp
                         }
                         else if (measurand == "Current.Import")
                         {
-                            UpdateTelemetryValue(chargePointId, "current", Math.Round(val, 2));
+                            maxCurrent = maxCurrent.HasValue ? Math.Max(maxCurrent.Value, val) : val;
+                            if (val > 0.2 && sample.TryGetProperty("phase", out var pProp))
+                            {
+                                string? ph = pProp.GetString();
+                                if (ph != null && (ph.StartsWith("L", StringComparison.OrdinalIgnoreCase) || ph.Contains("1") || ph.Contains("2") || ph.Contains("3")))
+                                {
+                                    activeCurrentPhases++;
+                                }
+                            }
                         }
                         else if (measurand == "Voltage")
                         {
-                            UpdateTelemetryValue(chargePointId, "voltage", Math.Round(val, 1));
+                            maxVoltage = maxVoltage.HasValue ? Math.Max(maxVoltage.Value, val) : val;
                         }
                     }
+                }
+
+                if (maxCurrent.HasValue)
+                {
+                    UpdateTelemetryValue(chargePointId, "current", Math.Round(maxCurrent.Value, 2));
+                }
+
+                if (maxVoltage.HasValue)
+                {
+                    UpdateTelemetryValue(chargePointId, "voltage", Math.Round(maxVoltage.Value, 1));
+                }
+
+                if (activeCurrentPhases > 0)
+                {
+                    UpdateTelemetryValue(chargePointId, "charging_phases", (double)Math.Min(activeCurrentPhases, MaxPhases));
                 }
 
                 PublishServerTelemetry();
