@@ -71,12 +71,14 @@ export function App() {
     });
     const [user, setUser] = useState<UserIdentity | null>(null);
     const [popoverOpen, setPopoverOpen] = useState(false);
+    const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
 
     // Client-side navigation helper
     const navigate = (url: string) => {
         window.history.pushState(null, '', url);
         setPath(url.split('?')[0]);
+        setMobileDrawerOpen(false);
     };
 
     // Global click listener to intercept relative anchors
@@ -100,6 +102,7 @@ export function App() {
     useEffect(() => {
         const handlePopState = () => {
             setPath(window.location.pathname);
+            setMobileDrawerOpen(false);
         };
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
@@ -270,7 +273,7 @@ export function App() {
         <div class="w-full flex min-h-screen">
             {/* Sidebar element */}
             <aside 
-                class="w-[72px] bg-slate-800 border-r border-slate-700 py-6 px-3 flex flex-col items-center fixed h-screen z-50 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap"
+                class="hidden md:flex w-[72px] bg-slate-800 border-r border-slate-700 py-6 px-3 flex-col items-center fixed h-screen z-50 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap"
                 data-testid="sidebar"
             >
                 <a href="/plswk/" class="flex items-center mb-10 no-underline w-full pl-2 overflow-hidden" data-testid="sidebar-brand">
@@ -405,8 +408,50 @@ export function App() {
             </aside>
 
             {/* Main content viewport */}
-            <main class="flex-1 ml-[72px] px-6 py-4 w-[calc(100%-72px)] transition-[margin-left] duration-300">
-                <header id="pageHeader" class="flex justify-between items-center mb-4 border-b border-white/5 pb-2.5" data-testid="page-header">
+            <main class="flex-1 w-full ml-0 px-3 py-3 pb-24 md:ml-[72px] md:w-[calc(100%-72px)] md:px-6 md:py-4 md:pb-6 transition-[margin-left] duration-300">
+                {/* Mobile Top Header */}
+                <header class="md:hidden flex items-center justify-between px-3 py-2.5 bg-slate-800/80 backdrop-blur-md border border-white/5 rounded-xl mb-4 sticky top-1 z-30" data-testid="mobile-header">
+                    <a href="/plswk/" class="flex items-center no-underline">
+                        <img src="/plswk/img/pulswerk_logo_sm.png" alt="Pulswerk" class="h-6 brightness-0 invert" />
+                    </a>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-bold text-slate-200 truncate max-w-[130px]" data-testid="mobile-page-title">
+                            {pageTitle === 'Home' ? t('nav_home') : 
+                             pageTitle === 'Dashboards' ? t('nav_dashboards') :
+                             pageTitle === 'Assets' ? t('nav_assets') :
+                             pageTitle === 'Data Points' ? t('nav_telemetries') :
+                             pageTitle === 'Connections' ? t('nav_connections') :
+                             pageTitle === 'Active Alarms' ? t('nav_alarms') :
+                             pageTitle === 'System Logs' ? t('nav_logs') :
+                             pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
+                             pageTitle === 'Billing' ? t('nav_billing') :
+                             pageTitle === 'Trajectory' ? t('nav_trajectory') :
+                             pageTitle === 'Historical Data' ? t('nav_historical_data') :
+                             pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle}
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1 text-[0.65rem] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full px-2 py-0.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span class="font-mono">Live</span>
+                        </div>
+                        <button 
+                            type="button"
+                            onClick={() => setMobileDrawerOpen(true)}
+                            class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer"
+                            title="Menu & Profile"
+                            data-testid="mobile-menu-btn"
+                        >
+                            {isUserAuth ? (
+                                <span class="font-bold text-[0.65rem] text-sky-400">{userInitials}</span>
+                            ) : (
+                                <i class="fas fa-bars"></i>
+                            )}
+                        </button>
+                    </div>
+                </header>
+
+                <header id="pageHeader" class="hidden md:flex justify-between items-center mb-4 border-b border-white/5 pb-2.5" data-testid="page-header">
                     <h1 class="text-xl font-extrabold tracking-tight text-white/95" data-testid="page-title">
                         {pageTitle === 'Home' ? t('nav_home') : 
                          pageTitle === 'Dashboards' ? t('nav_dashboards') :
@@ -427,6 +472,118 @@ export function App() {
                     {pageComponent}
                 </div>
             </main>
+
+            {/* Mobile Bottom Navigation Bar */}
+            <nav class="md:hidden fixed bottom-0 inset-x-0 h-16 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-40 flex items-center justify-around px-2 pb-safe" data-testid="bottom-nav">
+                {[
+                    { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home' },
+                    user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false
+                        ? { id: 'wallboxes', path: '/plswk/Wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes' }
+                        : null,
+                    user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false
+                        ? { id: 'dashboards', path: '/plswk/Dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards' }
+                        : null,
+                    user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false
+                        ? { id: 'alarms', path: '/plswk/Alarms', icon: 'fa-bell', labelKey: 'nav_alarms' }
+                        : null
+                ].filter(Boolean).map((item: any) => {
+                    const isActive = activeNavId === item.id;
+                    return (
+                        <a 
+                            key={item.id}
+                            href={item.path}
+                            class={`flex flex-col items-center justify-center flex-1 py-1 no-underline transition-colors ${
+                                isActive ? 'text-sky-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                            data-testid={`bottom-nav-${item.id}`}
+                        >
+                            <i class={`fas ${item.icon} text-lg mb-1`}></i>
+                            <span class="text-[0.62rem] font-medium tracking-tight truncate max-w-[64px]">{t(item.labelKey)}</span>
+                        </a>
+                    );
+                })}
+                <button 
+                    type="button"
+                    onClick={() => setMobileDrawerOpen(prev => !prev)}
+                    class="flex flex-col items-center justify-center flex-1 py-1 bg-transparent border-0 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                    data-testid="bottom-nav-more"
+                >
+                    <i class="fas fa-ellipsis-h text-lg mb-1"></i>
+                    <span class="text-[0.62rem] font-medium tracking-tight">More</span>
+                </button>
+            </nav>
+
+            {/* Mobile "More" Slide-up Drawer */}
+            {mobileDrawerOpen && (
+                <div 
+                    class="md:hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex flex-col justify-end animate-fade-in" 
+                    onClick={() => setMobileDrawerOpen(false)}
+                    data-testid="mobile-drawer-overlay"
+                >
+                    <div 
+                        class="bg-slate-900 border-t border-slate-700/80 rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto flex flex-col gap-4 animate-slide-up-mobile shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                        data-testid="mobile-drawer"
+                    >
+                        {/* Drawer Header */}
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-sm font-bold">
+                                    {isUserAuth ? userInitials : <i class="fas fa-user text-base"></i>}
+                                </div>
+                                <div>
+                                    <div class="text-sm font-bold text-slate-100">{user?.name || user?.user || 'Public'}</div>
+                                    <div class="text-xs text-slate-400">{user?.email || 'Public Access'}</div>
+                                </div>
+                            </div>
+                            <button 
+                                class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+                                onClick={() => setMobileDrawerOpen(false)}
+                                data-testid="close-drawer"
+                            >
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        {/* All Modules Grid */}
+                        <div class="grid grid-cols-2 gap-2.5 pt-1">
+                            {navItems.map(item => {
+                                const isActive = activeNavId === item.id;
+                                return (
+                                    <a 
+                                        key={item.id}
+                                        href={item.path}
+                                        class={`flex items-center gap-3 p-3 rounded-xl border no-underline text-xs font-semibold transition-all ${
+                                            isActive 
+                                                ? 'bg-sky-500/15 border-sky-500/30 text-sky-400 font-bold' 
+                                                : 'bg-slate-800/60 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
+                                        }`}
+                                    >
+                                        <i class={`fas ${item.icon} text-base w-5 text-center text-slate-400`}></i>
+                                        <span class="truncate">{t(item.labelKey)}</span>
+                                    </a>
+                                );
+                            })}
+                        </div>
+
+                        {/* Language & Info */}
+                        <div class="flex items-center justify-between pt-3 mt-1 border-t border-slate-800 text-xs text-slate-400">
+                            <div class="flex items-center gap-2">
+                                <span class="text-slate-500 uppercase tracking-wider text-[0.65rem] font-bold">Lang:</span>
+                                <button 
+                                    onClick={() => handleLanguageChange('en')} 
+                                    class={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${lang === 'en' ? 'bg-sky-500/20 border-sky-500/40 text-sky-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
+                                >EN</button>
+                                <button 
+                                    onClick={() => handleLanguageChange('de')} 
+                                    class={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${lang === 'de' ? 'bg-sky-500/20 border-sky-500/40 text-sky-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
+                                >DE</button>
+                            </div>
+                            <span class="text-[0.65rem] font-mono text-slate-500">{__APP_VERSION__}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

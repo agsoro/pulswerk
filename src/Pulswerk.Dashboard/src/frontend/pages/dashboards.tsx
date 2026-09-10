@@ -115,7 +115,7 @@ export function DashboardsPage({ dashboardId, slug }: DashboardsPageProps) {
 
             {/* ═══════════════════ VIEW / EDIT MODE ═══════════════════ */}
             <div id="dashMode" class="relative min-h-[calc(100vh-120px)]" style={{ display: dashboardId ? '' : 'none' }} data-testid="dash-edit-mode">
-                <div class="flex items-center gap-4 mb-4 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/[0.06]" data-testid="dash-toolbar">
+                <div class="flex flex-wrap items-center gap-3 sm:gap-4 mb-4 px-3 sm:px-4 py-3 rounded-xl bg-slate-800/50 border border-white/[0.06]" data-testid="dash-toolbar">
                     <a href="/plswk/Dashboards" class="text-white no-underline text-xl font-bold tracking-tight transition-colors duration-200 hover:text-sky-400" data-i18n="nav_dashboards">Dashboards</a>
                     <i class="fas fa-chevron-right text-[0.55rem] text-slate-600 animate-fade-in" id="dashBreadcrumbSep" style={{ display: 'none' }}></i>
                     <div class="flex flex-col flex-1 min-w-0 gap-0.5">

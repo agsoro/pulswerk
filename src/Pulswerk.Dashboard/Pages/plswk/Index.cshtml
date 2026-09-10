@@ -7,7 +7,7 @@
 <html lang="en" class="dark">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Pulswerk</title>
     <link rel="stylesheet" href="/plswk/lib/fontawesome.min.css">
     <link rel="stylesheet" href="/plswk/lib/flowbite.min.css">
@@ -30,25 +30,25 @@
     <div id="app" class="w-full flex min-h-screen"></div>
 
     <!-- Telemetry Details Modal -->
-    <div class="modal-overlay" id="telemetryDetailsModal" data-testid="telemetry-details-modal">
-        <div class="modal-content animate-fade-in w-[1200px] max-w-[98vw] h-[90vh] flex flex-col">
+    <div class="modal-overlay p-0 md:p-6" id="telemetryDetailsModal" data-testid="telemetry-details-modal">
+        <div class="modal-content animate-fade-in w-full h-full max-w-full rounded-none md:rounded-2xl md:w-[1200px] md:max-w-[98vw] md:h-[90vh] flex flex-col p-3.5 sm:p-5 md:p-8 overflow-hidden">
             <!-- Modal Loading Overlay -->
-            <div id="telModalLoadingOverlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex flex-col items-center justify-center text-sky-400 gap-3 rounded-2xl hidden">
+            <div id="telModalLoadingOverlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex flex-col items-center justify-center text-sky-400 gap-3 rounded-none md:rounded-2xl hidden">
                 <i class="fas fa-circle-notch fa-spin text-4xl"></i>
                 <span class="text-xs font-semibold tracking-wider uppercase">Loading Details...</span>
             </div>
 
             <!-- Modal Header -->
-            <div class="modal-header shrink-0">
-                <div class="flex-1 min-w-0 pr-8">
-                    <div class="modal-path" id="telPath"></div>
-                    <div class="flex items-center gap-3 flex-wrap">
-                        <h2 id="telTitle" class="truncate leading-snug">Telemetry Details</h2>
-                        <button class="btn-icon star-btn text-slate-400 hover:text-amber-400" id="telFavBtn" title="Favorite">
+            <div class="modal-header shrink-0 relative mb-3 md:mb-6 pr-10 md:pr-12">
+                <div class="flex-1 min-w-0">
+                    <div class="modal-path text-[0.7rem] md:text-xs text-sky-400/80 mb-0.5 truncate" id="telPath"></div>
+                    <div class="flex items-center gap-2">
+                        <h2 id="telTitle" class="text-xl md:text-3xl font-extrabold text-white leading-tight break-words">Telemetry Details</h2>
+                        <button class="btn-icon star-btn text-slate-400 hover:text-amber-400 shrink-0" id="telFavBtn" title="Favorite">
                             <i class="far fa-star"></i>
                         </button>
                     </div>
-                    <div class="text-xs text-slate-400 font-mono truncate mt-1" id="telMeta"></div>
+                    <div class="text-[0.7rem] text-slate-400 font-mono truncate mt-0.5" id="telMeta"></div>
                 </div>
                 <button class="close-modal" onclick="closeTelemetryDetails()">&times;</button>
             </div>
@@ -56,50 +56,50 @@
             <!-- Modal Content (Full Width, Sidebar Removed) -->
             <div class="flex-1 flex flex-col min-h-0">
                 <!-- Tab Header Controls -->
-                <div class="flex gap-2 border-b border-white/5 pb-2 mb-4 shrink-0" id="telTabHeader">
-                    <button id="tabBtn_trend" class="px-4 py-2 text-xs font-semibold rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20" onclick="switchTelemetryTab('trend')">Trend &amp; Control</button>
-                    <button id="tabBtn_properties" class="px-4 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" onclick="switchTelemetryTab('properties')">Extended Properties</button>
-                    <button id="tabBtn_schedule" class="px-4 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" style="display:none" onclick="switchTelemetryTab('schedule')">Switching Schedule</button>
+                <div class="flex gap-2 border-b border-white/10 pb-2 mb-3 shrink-0 overflow-x-auto no-scrollbar" id="telTabHeader">
+                    <button id="tabBtn_trend" class="shrink-0 min-h-[44px] md:min-h-0 px-3.5 py-2 text-xs font-semibold rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20" onclick="switchTelemetryTab('trend')">Trend &amp; Control</button>
+                    <button id="tabBtn_properties" class="shrink-0 min-h-[44px] md:min-h-0 px-3.5 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" onclick="switchTelemetryTab('properties')">Extended Properties</button>
+                    <button id="tabBtn_schedule" class="shrink-0 min-h-[44px] md:min-h-0 px-3.5 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" style="display:none" onclick="switchTelemetryTab('schedule')">Switching Schedule</button>
                 </div>
 
                 <!-- Tab Contents Container -->
-                <div class="flex-1 overflow-y-auto min-h-0 pr-2">
+                <div class="flex-1 overflow-y-auto min-h-0 pr-1 md:pr-2">
                     <!-- TAB 1: Trend & Control -->
-                    <div id="tabContent_trend" class="flex flex-col gap-6 h-full">
+                    <div id="tabContent_trend" class="flex flex-col gap-4 md:gap-6 h-full">
                         <!-- Integrated Value & Inline Edit Controls -->
-                        <div class="glass rounded-xl p-5 border border-white/5 flex flex-col justify-between shrink-0">
-                            <div class="flex flex-col gap-3">
+                        <div class="glass rounded-xl p-3.5 md:p-5 border border-white/5 flex flex-col justify-between shrink-0">
+                            <div class="flex flex-col gap-2.5">
                                 <span class="text-xs text-slate-500 uppercase tracking-wider font-bold block">Telemetry Value</span>
                                 
                                 <!-- View Mode Row -->
-                                <div id="telValueViewMode" class="flex items-center justify-between">
+                                <div id="telValueViewMode" class="flex items-center justify-between flex-wrap gap-3">
                                     <div class="flex items-baseline gap-1.5">
-                                        <span id="telLiveValue" class="text-4xl font-extrabold text-sky-400 tracking-tight tabular-nums">---</span>
+                                        <span id="telLiveValue" class="text-3xl md:text-4xl font-extrabold text-sky-400 tracking-tight tabular-nums">---</span>
                                         <span id="telUnitLabel" class="text-sm font-bold text-slate-400 uppercase tracking-wider"></span>
                                     </div>
-                                    <button type="button" id="telInlineEditStartBtn" class="px-4 py-2 bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-extrabold rounded-lg shadow-md shadow-sky-950/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 auth-write-only flex items-center gap-1.5 uppercase tracking-wider" onclick="startTelemetryEdit()">
+                                    <button type="button" id="telInlineEditStartBtn" class="min-h-[44px] md:min-h-0 px-4 py-2 bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-extrabold rounded-lg shadow-md shadow-sky-950/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 auth-write-only flex items-center gap-1.5 uppercase tracking-wider" onclick="startTelemetryEdit()">
                                         <i class="fas fa-edit text-[10px]"></i> <span>Edit Value</span>
                                     </button>
                                 </div>
 
                                 <!-- Edit Mode Row -->
-                                <div id="telValueEditMode" class="hidden flex items-center justify-between gap-4 flex-wrap bg-slate-900/60 border border-white/[0.06] p-4 rounded-xl shadow-lg shadow-black/30 backdrop-blur-md transition-all duration-300">
-                                    <div class="flex items-center gap-3">
+                                <div id="telValueEditMode" class="hidden flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/80 border border-white/10 p-3 md:p-4 rounded-xl shadow-lg shadow-black/30 backdrop-blur-md transition-all duration-300">
+                                    <div class="flex items-center justify-center sm:justify-start gap-3 flex-wrap">
                                         <!-- Stepper Input Group (for analog) -->
-                                        <div id="inlineStepperGroup" class="flex items-center gap-2.5" style="display:none">
-                                            <button type="button" class="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all shadow-sm" onclick="step(-1)">
-                                                <i class="fas fa-minus text-[10px]"></i>
+                                        <div id="inlineStepperGroup" class="flex items-center gap-2" style="display:none">
+                                            <button type="button" class="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all shadow-sm" onclick="step(-1)">
+                                                <i class="fas fa-minus text-xs"></i>
                                             </button>
-                                            <input type="number" id="editValue" class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 w-28 text-center font-mono font-extrabold text-white text-base focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-inner">
-                                            <button type="button" class="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all shadow-sm" onclick="step(1)">
-                                                <i class="fas fa-plus text-[10px]"></i>
+                                            <input type="number" id="editValue" class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 w-28 h-11 md:h-9 text-center font-mono font-extrabold text-white text-base focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-inner">
+                                            <button type="button" class="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all shadow-sm" onclick="step(1)">
+                                                <i class="fas fa-plus text-xs"></i>
                                             </button>
                                             <span id="telEditUnitLabel" class="text-sm font-bold text-slate-400 ml-1 uppercase tracking-wider"></span>
                                         </div>
 
                                         <!-- Dropdown select Group (for enums) -->
-                                        <div id="inlineEnumGroup" style="display:none">
-                                            <select id="enumSelect" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-md cursor-pointer"></select>
+                                        <div id="inlineEnumGroup" style="display:none" class="w-full sm:w-auto">
+                                            <select id="enumSelect" class="w-full sm:w-auto bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-md cursor-pointer"></select>
                                         </div>
 
                                         <!-- Boolean Switch Group (for binaries) -->
@@ -113,11 +113,11 @@
                                     </div>
 
                                     <!-- Action Buttons (Save/Cancel) -->
-                                    <div class="flex items-center gap-2">
-                                        <button type="button" id="saveBtn" class="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-lg shadow-md shadow-emerald-950/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 flex items-center gap-1.5 uppercase tracking-wider" onclick="submitEdit(event)">
-                                            <i class="fas fa-save text-[10px]"></i> <span>Save Changes</span>
+                                    <div class="flex items-center justify-end gap-2 w-full sm:w-auto">
+                                        <button type="button" id="saveBtn" class="flex-1 sm:flex-none min-h-[44px] md:min-h-0 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-lg shadow-md shadow-emerald-950/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 flex items-center justify-center gap-1.5 uppercase tracking-wider" onclick="submitEdit(event)">
+                                            <i class="fas fa-save text-[10px]"></i> <span>Save</span>
                                         </button>
-                                        <button type="button" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-white/5 text-slate-300 hover:text-white text-xs font-extrabold rounded-lg hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 uppercase tracking-wider" onclick="cancelTelemetryEdit()">
+                                        <button type="button" class="flex-1 sm:flex-none min-h-[44px] md:min-h-0 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-white/5 text-slate-300 hover:text-white text-xs font-extrabold rounded-lg hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 uppercase tracking-wider text-center" onclick="cancelTelemetryEdit()">
                                             <span>Cancel</span>
                                         </button>
                                     </div>
@@ -128,52 +128,52 @@
                             </div>
                         </div>
 
-                            <!-- Trend / History Chart Panel -->
-                            <div class="glass rounded-xl p-5 border border-white/5 flex flex-col gap-4 flex-1 min-h-[300px]">
-                                <div class="flex flex-wrap justify-between items-center gap-4 shrink-0">
-                                    <span class="text-xs text-slate-500 uppercase tracking-wider font-bold">Trend / History</span>
-                                    <div class="flex items-center gap-4">
-                                        <div id="historyTwContainer"></div>
-                                        <div id="chartLoading" class="hidden items-center gap-2 text-sky-400 text-xs">
-                                            <i class="fas fa-spinner fa-spin"></i> <span>Loading...</span>
-                                        </div>
+                        <!-- Trend / History Chart Panel -->
+                        <div class="glass rounded-xl p-3.5 md:p-5 border border-white/5 flex flex-col gap-3 flex-1 min-h-[260px] md:min-h-[300px]">
+                            <div class="flex flex-wrap justify-between items-center gap-2 shrink-0">
+                                <span class="text-xs text-slate-500 uppercase tracking-wider font-bold">Trend / History</span>
+                                <div class="flex items-center gap-3">
+                                    <div id="historyTwContainer"></div>
+                                    <div id="chartLoading" class="hidden items-center gap-2 text-sky-400 text-xs">
+                                        <i class="fas fa-spinner fa-spin"></i> <span>Loading...</span>
                                     </div>
                                 </div>
+                            </div>
 
-                                <div class="chart-container flex-1 min-h-0 bg-black/10 rounded-lg p-2">
-                                    <div id="historyChart" style="height: 100%"></div>
-                                </div>
+                            <div class="chart-container flex-1 min-h-0 bg-black/10 rounded-lg p-1 md:p-2">
+                                <div id="historyChart" style="height: 100%"></div>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- TAB 2: Properties -->
-                        <div id="tabContent_properties" class="h-full" style="display:none">
-                            <div class="glass rounded-xl p-5 border border-white/5 flex flex-col h-full min-h-[300px]">
-                                <span class="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-4">Extended Properties</span>
-                                
-                                <div id="propsLoading" class="flex-1 flex flex-col items-center justify-center text-sky-400 gap-2 p-4">
-                                    <i class="fas fa-spinner fa-spin text-2xl"></i>
-                                    <span class="text-xs">Loading properties...</span>
-                                </div>
+                    <!-- TAB 2: Properties -->
+                    <div id="tabContent_properties" class="h-full" style="display:none">
+                        <div class="glass rounded-xl p-3.5 md:p-5 border border-white/5 flex flex-col h-full min-h-[300px]">
+                            <span class="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-3">Extended Properties</span>
+                            
+                            <div id="propsLoading" class="flex-1 flex flex-col items-center justify-center text-sky-400 gap-2 p-4">
+                                <i class="fas fa-spinner fa-spin text-2xl"></i>
+                                <span class="text-xs">Loading properties...</span>
+                            </div>
 
-                                <div id="propsEmpty" class="hidden flex-1 flex flex-col items-center justify-center text-slate-500 gap-2 p-4">
-                                    <i class="fas fa-info-circle text-2xl opacity-30"></i>
-                                    <span class="text-xs">No extended properties found.</span>
-                                </div>
+                            <div id="propsEmpty" class="hidden flex-1 flex flex-col items-center justify-center text-slate-500 gap-2 p-4">
+                                <i class="fas fa-info-circle text-2xl opacity-30"></i>
+                                <span class="text-xs">No extended properties found.</span>
+                            </div>
 
-                                <div id="propsTable" class="overflow-y-auto hidden flex-1 border border-white/5 rounded-lg">
-                                    <table class="props-table">
-                                        <thead>
-                                            <tr class="text-[0.65rem] uppercase tracking-wider text-slate-500 font-bold bg-black/20">
-                                                <th class="p-2 border-b border-white/5">Property</th>
-                                                <th class="p-2 border-b border-white/5">Value</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="propsBody" class="text-xs"></tbody>
-                                    </table>
-                                </div>
+                            <div id="propsTable" class="overflow-y-auto hidden flex-1 border border-white/5 rounded-lg">
+                                <table class="props-table w-full">
+                                    <thead>
+                                        <tr class="text-[0.65rem] uppercase tracking-wider text-slate-500 font-bold bg-black/20 text-left">
+                                            <th class="p-2 md:p-3 border-b border-white/5 w-1/3 min-w-[100px]">Property</th>
+                                            <th class="p-2 md:p-3 border-b border-white/5">Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="propsBody" class="text-xs"></tbody>
+                                </table>
                             </div>
                         </div>
+                    </div>
 
                         <!-- TAB 3: Weekly Schedule (Conditional) -->
                         <div id="tabContent_schedule" class="h-full" style="display:none">

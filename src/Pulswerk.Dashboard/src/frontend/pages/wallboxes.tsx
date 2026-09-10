@@ -122,62 +122,62 @@ export function WallboxesPage() {
     return (
         <div class="flex flex-col gap-6 w-full page-enter">
             {/* Stats Summary cards */}
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div class="glass p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+                <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
                     <div>
                         <div class="text-2xl font-black text-slate-100">{wallboxes.length}</div>
-                        <div class="text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-1">{t('wb_total_wb')}</div>
+                        <div class="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-0.5 sm:mt-1">{t('wb_total_wb')}</div>
                     </div>
-                    <div class="w-10 h-10 rounded-lg bg-sky-400/10 text-sky-400 flex items-center justify-center text-lg">
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-sky-400/10 text-sky-400 flex items-center justify-center text-sm sm:text-lg shrink-0">
                         <i class="fas fa-charging-station"></i>
                     </div>
                 </div>
 
-                <div class="glass p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
+                <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
                     <div>
                         <div class="text-2xl font-black text-emerald-400">
                             {wallboxes.filter(w => w.connected).length}
                         </div>
-                        <div class="text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-1">{t('wb_online')}</div>
+                        <div class="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-0.5 sm:mt-1">{t('wb_online')}</div>
                     </div>
-                    <div class="w-10 h-10 rounded-lg bg-emerald-400/10 text-emerald-400 flex items-center justify-center text-lg">
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-emerald-400/10 text-emerald-400 flex items-center justify-center text-sm sm:text-lg shrink-0">
                         <i class="fas fa-link"></i>
                     </div>
                 </div>
 
-                <div class="glass p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
+                <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
                     <div>
                         <div class="text-2xl font-black text-amber-400">
                             {wallboxes.filter(w => w.status === 'Charging').length}
                         </div>
-                        <div class="text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-1">{t('wb_active_charging')}</div>
+                        <div class="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-0.5 sm:mt-1">{t('wb_active_charging')}</div>
                     </div>
-                    <div class="w-10 h-10 rounded-lg bg-amber-400/10 text-amber-400 flex items-center justify-center text-lg">
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-amber-400/10 text-amber-400 flex items-center justify-center text-sm sm:text-lg shrink-0">
                         <i class="fas fa-bolt animate-pulse"></i>
                     </div>
                 </div>
 
-                <div class="glass p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
+                <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
                     <div>
                         <div class="text-2xl font-black text-sky-400">
                             {wallboxes.reduce((acc, curr) => acc + curr.power, 0).toFixed(1)} kW
                         </div>
-                        <div class="text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-1">{t('wb_total_power')}</div>
+                        <div class="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-0.5 sm:mt-1">{t('wb_total_power')}</div>
                     </div>
-                    <div class="w-10 h-10 rounded-lg bg-sky-400/10 text-sky-400 flex items-center justify-center text-lg">
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-sky-400/10 text-sky-400 flex items-center justify-center text-sm sm:text-lg shrink-0">
                         <i class="fas fa-plug"></i>
                     </div>
                 </div>
             </div>
 
             {/* Wallbox Grid */}
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 {wallboxes.map(wb => {
                     const isBusy = submitting !== null;
                     return (
                         <div key={wb.id} class="bg-slate-800 border border-slate-700/70 rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform duration-150 hover:scale-[1.01]">
                             {/* Card Header */}
-                            <div class="px-6 py-4 border-b border-slate-700/70 flex justify-between items-center bg-black/10">
+                            <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-700/70 flex justify-between items-center bg-black/10">
                                 <div>
                                     <h3 class="font-bold text-slate-100 text-base">{wb.name}</h3>
                                     <p class="text-xs text-slate-400 font-mono mt-0.5">{wb.id}</p>
@@ -192,7 +192,7 @@ export function WallboxesPage() {
                             </div>
 
                             {/* Card Body */}
-                            <div class="p-6 grid grid-cols-2 gap-4 flex-1">
+                            <div class="p-4 sm:p-6 grid grid-cols-2 gap-3 sm:gap-4 flex-1">
                                 <div class="flex flex-col gap-1">
                                     <span class="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">{t('wb_status')}</span>
                                     <span class={`text-sm font-semibold flex items-center gap-1.5 ${
@@ -247,11 +247,11 @@ export function WallboxesPage() {
                             </div>
 
                             {/* Card Footer Actions */}
-                            <div class="px-6 py-4 border-t border-slate-700/60 bg-black/10 flex items-center justify-end gap-2">
+                            <div class="px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-700/60 bg-black/10 flex items-center justify-end gap-2">
                                 <button
                                     onClick={() => handleCommand(wb.id, 'unlock')}
                                     disabled={isBusy || !wb.connected}
-                                    class="py-1.5 px-3 rounded-lg border border-slate-600 bg-slate-700/40 text-slate-200 text-xs font-semibold hover:bg-slate-700 hover:border-slate-500 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                                    class="py-2 sm:py-1.5 px-3 rounded-lg border border-slate-600 bg-slate-700/40 text-slate-200 text-xs font-semibold hover:bg-slate-700 hover:border-slate-500 disabled:opacity-40 disabled:pointer-events-none transition-colors min-h-[44px] flex items-center justify-center"
                                 >
                                     <i class="fas fa-key mr-1.5"></i>{t('wb_unlock')}
                                 </button>
@@ -259,7 +259,7 @@ export function WallboxesPage() {
                                     <button
                                         onClick={() => handleCommand(wb.id, 'stop')}
                                         disabled={isBusy || !wb.connected}
-                                        class="py-1.5 px-3.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs font-semibold hover:bg-red-500/20 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                                        class="py-2 sm:py-1.5 px-4 sm:px-3.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs font-semibold hover:bg-red-500/20 disabled:opacity-40 disabled:pointer-events-none transition-colors min-h-[44px] flex items-center justify-center"
                                     >
                                         <i class="fas fa-stop mr-1.5"></i>{t('wb_stop_charge')}
                                     </button>
@@ -271,7 +271,7 @@ export function WallboxesPage() {
                                             setShowStartModal(wb.id);
                                         }}
                                         disabled={isBusy || !wb.connected}
-                                        class="py-1.5 px-3.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/20 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                                        class="py-2 sm:py-1.5 px-4 sm:px-3.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/20 disabled:opacity-40 disabled:pointer-events-none transition-colors min-h-[44px] flex items-center justify-center"
                                     >
                                         <i class="fas fa-play mr-1.5"></i>{t('wb_start_charge')}
                                     </button>
@@ -282,14 +282,17 @@ export function WallboxesPage() {
                 })}
             </div>
 
-            {/* Remote Start Modal */}
+            {/* Remote Start Modal / Bottom Sheet */}
             {showStartModal !== null && (
-                <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-                    <div class="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-w-md w-full p-6 text-slate-100 flex flex-col gap-4">
+                <div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-[100] p-0 sm:p-4 animate-fade-in" data-testid="start-charge-modal" onClick={() => setShowStartModal(null)}>
+                    <div 
+                        class="bg-slate-800 border border-slate-700 rounded-t-3xl sm:rounded-xl shadow-2xl max-w-md w-full p-5 sm:p-6 text-slate-100 flex flex-col gap-4 animate-slide-up-mobile sm:animate-fade-in pb-safe"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <div class="flex justify-between items-center border-b border-slate-700 pb-3">
-                            <h3 class="font-bold text-lg text-slate-50">{t('wb_auth_title')}</h3>
-                            <button onClick={() => setShowStartModal(null)} class="text-slate-400 hover:text-slate-200">
-                                <i class="fas fa-times text-lg"></i>
+                            <h3 class="font-bold text-base sm:text-lg text-slate-50">{t('wb_auth_title')}</h3>
+                            <button onClick={() => setShowStartModal(null)} class="w-8 h-8 rounded-lg bg-slate-700/50 text-slate-400 hover:text-slate-200 flex items-center justify-center cursor-pointer">
+                                <i class="fas fa-times text-base"></i>
                             </button>
                         </div>
 
@@ -310,6 +313,25 @@ export function WallboxesPage() {
                                         <option key={r.idTag} value={r.idTag}>{r.userName} ({r.idTag})</option>
                                     ))}
                                 </select>
+
+                                {rfids.length > 0 && (
+                                    <div class="flex flex-wrap gap-1.5 mt-1">
+                                        {rfids.map(r => (
+                                            <button 
+                                                key={r.idTag}
+                                                type="button"
+                                                onClick={() => setSelectedRfid(r.idTag)}
+                                                class={`text-[0.68rem] px-2.5 py-1 rounded-md font-mono border transition-all ${
+                                                    selectedRfid === r.idTag 
+                                                        ? 'bg-sky-500/20 border-sky-400/40 text-sky-300 font-bold' 
+                                                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                                                }`}
+                                            >
+                                                <i class="fas fa-id-badge mr-1 opacity-70"></i>{r.userName}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             {selectedRfid === '' && (
@@ -329,14 +351,14 @@ export function WallboxesPage() {
                         <div class="flex items-center justify-end gap-2 border-t border-slate-700 pt-3 mt-2">
                             <button
                                 onClick={() => setShowStartModal(null)}
-                                class="py-2 px-4 rounded-lg bg-slate-700 text-slate-200 text-xs font-semibold hover:bg-slate-600 transition-colors"
+                                class="py-2.5 px-4 rounded-lg bg-slate-700 text-slate-200 text-xs font-semibold hover:bg-slate-600 transition-colors min-h-[44px] flex items-center justify-center cursor-pointer"
                             >
                                 {t('btn_cancel')}
                             </button>
                             <button
                                 onClick={() => handleCommand(showStartModal, 'start', { rfid: selectedRfid || customRfid })}
                                 disabled={selectedRfid === '' && !customRfid}
-                                class="py-2 px-4 rounded-lg bg-sky-500 text-slate-950 text-xs font-bold hover:bg-sky-400 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                                class="py-2.5 px-5 rounded-lg bg-sky-500 text-slate-950 text-xs font-bold hover:bg-sky-400 disabled:opacity-40 disabled:pointer-events-none transition-colors min-h-[44px] flex items-center justify-center cursor-pointer"
                             >
                                 {t('wb_auth_start')}
                             </button>

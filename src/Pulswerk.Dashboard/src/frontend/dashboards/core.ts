@@ -176,7 +176,14 @@ export async function showDashboard(): Promise<void> {
 
 export function initGrid(): void {
     if (DashboardStore.grid) DashboardStore.grid.destroy(false);
-    DashboardStore.grid = (window as any).GridStack.init({ column: 12, cellHeight: 80, margin: 8, staticGrid: false, float: true }, '#dashGrid2');
+    DashboardStore.grid = (window as any).GridStack.init({
+        column: 12,
+        columnOpts: { breakpoints: [{ w: 768, c: 1 }] },
+        cellHeight: 80,
+        margin: 8,
+        staticGrid: false,
+        float: true
+    }, '#dashGrid2');
     DashboardStore.grid.on('resizestop', function (_event: Event, el: HTMLElement) {
         const id = el.getAttribute('gs-id');
         if (id && DashboardStore.charts[id]) {

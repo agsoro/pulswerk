@@ -4,7 +4,7 @@
 
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>@ViewData["Title"] - Pulswerk</title>
     <link rel="stylesheet" href="/plswk/lib/fontawesome.min.css">
     <link rel="stylesheet" href="/plswk/lib/flowbite.min.css">
@@ -18,7 +18,7 @@
 <body class="bg-slate-900 text-slate-50 flex min-h-screen font-sans antialiased">
 
     <aside
-        class="w-[72px] bg-slate-800 border-r border-slate-700 py-6 px-3 flex flex-col items-center fixed h-screen z-50 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap"
+        class="hidden md:flex w-[72px] bg-slate-800 border-r border-slate-700 py-6 px-3 flex-col items-center fixed h-screen z-50 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap"
         data-testid="sidebar">
         <a href="/plswk/" class="flex items-center mb-10 no-underline w-full pl-2 overflow-hidden"
                data-testid="sidebar-brand">
@@ -151,7 +151,7 @@
             </footer>
         </aside>
 
-        <main class="flex-1 ml-[72px] px-6 py-4 w-[calc(100%-72px)] transition-[margin-left] duration-300">
+        <main class="flex-1 w-full ml-0 px-3 py-3 pb-24 md:ml-[72px] md:w-[calc(100%-72px)] md:px-6 md:py-4 md:pb-6 transition-[margin-left] duration-300">
             <header id="pageHeader" class="flex justify-between items-center mb-4" data-testid="page-header">
                 <h1 class="text-xl font-bold tracking-tight" data-testid="page-title">@ViewData["Title"]</h1>
             </header>

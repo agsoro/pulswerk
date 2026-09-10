@@ -364,7 +364,7 @@ const ConfigPage = () => {
                 const meta = connectionTypes.find(t => t.type === proto.type);
                 const conn = { id, type: proto.type, name: `${meta?.label || proto.type} ${host.ip}` };
                 // Populate the right address/port fields per protocol
-                if (proto.type === 'bacnet-ip' || proto.type === 'ocpp') {
+                if (proto.type === 'bacnet-ip' || proto.type === 'ocpp-ws') {
                     conn.localAddress = '0.0.0.0';
                     conn.localPort = proto.port;
                 }
@@ -394,7 +394,7 @@ const ConfigPage = () => {
                                                     // Reset type-specific fields and apply default port
                                                     const updated = { id: editingConnection.id, type: newType, name: editingConnection.name };
                                                     if (newMeta) {
-                                                        if (newType === 'bacnet-ip' || newType === 'ocpp') {
+                                                        if (newType === 'bacnet-ip' || newType === 'ocpp-ws') {
                                                             updated.localAddress = '0.0.0.0';
                                                             updated.localPort = newMeta.defaultPort;
                                                         }
@@ -403,7 +403,7 @@ const ConfigPage = () => {
                                                         }
                                                     }
                                                     setEditingConnection(updated);
-                                                }, children: [connectionTypes.map(t => _jsx("option", { value: t.type, children: t.label })), connectionTypes.length === 0 && _jsxs(_Fragment, { children: [_jsx("option", { value: "modbus-tcp", children: "Modbus TCP" }), _jsx("option", { value: "bacnet-ip", children: "BACnet/IP" }), _jsx("option", { value: "knx-ip", children: "KNXnet/IP" }), _jsx("option", { value: "ocpp", children: "OCPP" })] })] })] })] }), dynamicFields.length > 0 && (_jsx("div", { class: "grid grid-cols-2 gap-4", children: dynamicFields.map(field => (_jsx(FieldRenderer, { field: field, accent: "amber", value: editingConnection[field.key], onChange: (val) => setEditingConnection({ ...editingConnection, [field.key]: val }) }, field.key))) }))] }));
+                                                }, children: [connectionTypes.map(t => _jsx("option", { value: t.type, children: t.label })), connectionTypes.length === 0 && _jsxs(_Fragment, { children: [_jsx("option", { value: "modbus-tcp", children: "Modbus TCP" }), _jsx("option", { value: "bacnet-ip", children: "BACnet/IP" }), _jsx("option", { value: "knx-ip", children: "KNXnet/IP" }), _jsx("option", { value: "ocpp-ws", children: "OCPP (WS)" })] })] })] })] }), dynamicFields.length > 0 && (_jsx("div", { class: "grid grid-cols-2 gap-4", children: dynamicFields.map(field => (_jsx(FieldRenderer, { field: field, accent: "amber", value: editingConnection[field.key], onChange: (val) => setEditingConnection({ ...editingConnection, [field.key]: val }) }, field.key))) }))] }));
                 })() }), _jsx(EditorModal, { title: editingDevice?.id ? `Edit Device: ${editingDevice.name}` : "New Device", isOpen: !!editingDevice, onClose: () => setEditingDevice(null), onSave: handleSaveDevice, children: editingDevice && (() => {
                     const meta = deviceTypes.find(t => t.type === editingDevice.deviceType);
                     const fields = meta?.fields || [];
