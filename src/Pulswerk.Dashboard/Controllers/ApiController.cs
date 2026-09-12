@@ -1276,6 +1276,53 @@ namespace Pulswerk.Dashboard.Controllers
             return Ok(new { success = ok });
         }
 
+        [HttpGet("wallboxes/force-power")]
+        public IActionResult GetWallboxForcePower()
+        {
+            double fp = Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.GetEffectiveForcePowerKw(DateTime.UtcNow);
+            return Ok(new
+            {
+                forcePower = Math.Round(fp, 2),
+                validitySeconds = Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.ForcePowerValiditySeconds
+            });
+        }
+
+        public class SetForcePowerDto
+        {
+            [JsonPropertyName("forcePower")]
+            [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+            public double ForcePower { get; set; }
+
+            [JsonPropertyName("validitySeconds")]
+            [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+            public double? ValiditySeconds { get; set; }
+        }
+
+        [HttpPost("wallboxes/force-power")]
+        public async Task<IActionResult> SetWallboxForcePower([FromBody] SetForcePowerDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanWriteValue(HttpContext, serverCfg))
+                return StatusCode(403);
+
+            if (req == null || req.ForcePower < 0)
+                return BadRequest("forcePower must be >= 0");
+
+            // Manual setpoint defaults to 10 hours validity (reverts to unrestricted after 10h)
+            double validity = (req.ValiditySeconds.HasValue && req.ValiditySeconds.Value > 0)
+                ? req.ValiditySeconds.Value
+                : (req.ForcePower > 0 ? Pulswerk.Drivers.Ocpp.OcppManagerService.DefaultManualValiditySeconds : 0.0);
+
+            await Pulswerk.Drivers.Ocpp.OcppManagerService.Instance.SetForcePowerAsync(req.ForcePower, validity);
+
+            return Ok(new
+            {
+                success = true,
+                forcePower = Math.Round(req.ForcePower, 2),
+                validitySeconds = validity
+            });
+        }
+
         // ── Billing / Invoice Endpoints ─────────────────────────────────────
 
         [HttpGet("billing/tariffs")]

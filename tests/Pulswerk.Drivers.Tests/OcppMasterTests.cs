@@ -8,6 +8,7 @@ using Pulswerk.Drivers.Ocpp;
 
 namespace Pulswerk.Drivers.Tests
 {
+    [Collection("OcppTests")]
     public class OcppMasterTests : IDisposable
     {
         private readonly OcppManagerService _service = OcppManagerService.Instance;
@@ -189,9 +190,9 @@ namespace Pulswerk.Drivers.Tests
         }
 
         [Fact]
-        public async Task OcppManagerService_ForcePower_WatchdogExpiresAfter60s()
+        public async Task OcppManagerService_ForcePower_WatchdogExpiresWhenValiditySet()
         {
-            await _service.SetForcePowerAsync(8.0);
+            await _service.SetForcePowerAsync(8.0, 60.0);
 
             var now = DateTime.UtcNow;
             Assert.True(_service.IsForcePowerActive(now));
@@ -201,6 +202,55 @@ namespace Pulswerk.Drivers.Tests
             var expiredTime = now.AddSeconds(65);
             Assert.False(_service.IsForcePowerActive(expiredTime));
             Assert.Equal(0.0, _service.GetEffectiveForcePowerKw(expiredTime));
+        }
+
+        [Fact]
+        public async Task OcppManagerService_ForcePower_PermanentWhenValidityZero()
+        {
+            await _service.SetForcePowerAsync(8.0, 0.0);
+
+            var now = DateTime.UtcNow;
+            Assert.True(_service.IsForcePowerActive(now));
+            Assert.Equal(8.0, _service.GetEffectiveForcePowerKw(now));
+
+            // Advance time past 60s - should NOT expire
+            var futureTime = now.AddSeconds(120);
+            Assert.True(_service.IsForcePowerActive(futureTime));
+            Assert.Equal(8.0, _service.GetEffectiveForcePowerKw(futureTime));
+        }
+
+        [Fact]
+        public async Task OcppManagerService_ForcePower_TenHourManualValidity()
+        {
+            await _service.SetForcePowerAsync(5.5, OcppManagerService.DefaultManualValiditySeconds);
+
+            var now = DateTime.UtcNow;
+            Assert.True(_service.IsForcePowerActive(now));
+            Assert.Equal(5.5, _service.GetEffectiveForcePowerKw(now));
+
+            // At 9 hours (32400s), still active
+            var nineHours = now.AddHours(9);
+            Assert.True(_service.IsForcePowerActive(nineHours));
+            Assert.Equal(5.5, _service.GetEffectiveForcePowerKw(nineHours));
+
+            // Past 10 hours (10.1 hours), expired and reverted to 0.0
+            var tenHoursOneMin = now.AddHours(10).AddMinutes(1);
+            Assert.False(_service.IsForcePowerActive(tenHoursOneMin));
+            Assert.Equal(0.0, _service.GetEffectiveForcePowerKw(tenHoursOneMin));
+        }
+
+        [Fact]
+        public void OcppManagerService_ComputeAllocation_11KwSnapsTo16A()
+        {
+            var sessions = new List<ActiveTransactionInfo>
+            {
+                new("cp1", 1, "User1", 0, DateTime.UtcNow)
+            };
+
+            var allocations = OcppManagerService.ComputeAllocation(11.0, sessions);
+            Assert.Single(allocations);
+            Assert.Equal(16.0, allocations[0].Amps);
+            Assert.Equal(3, allocations[0].Phases);
         }
 
         [Fact]

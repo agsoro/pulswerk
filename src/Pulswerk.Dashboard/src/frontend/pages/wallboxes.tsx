@@ -22,6 +22,10 @@ interface RfidMapping {
 export function WallboxesPage() {
     const [wallboxes, setWallboxes] = useState<Wallbox[]>([]);
     const [rfids, setRfids] = useState<RfidMapping[]>([]);
+    const [forcePower, setForcePower] = useState<number>(0);
+    const [isEditingForcePower, setIsEditingForcePower] = useState(false);
+    const [editForcePowerValue, setEditForcePowerValue] = useState<string>('0');
+    const [savingForcePower, setSavingForcePower] = useState(false);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState<string | null>(null);
     const [showStartModal, setShowStartModal] = useState<string | null>(null); // holds chargePointId
@@ -55,16 +59,63 @@ export function WallboxesPage() {
         }
     };
 
+    const fetchForcePower = async () => {
+        try {
+            const res = await fetch('/plswk/api/wallboxes/force-power');
+            if (res.ok) {
+                const data = await res.json();
+                setForcePower(data.forcePower ?? 0);
+            }
+        } catch (e) {
+            console.error("Failed to fetch force_power:", e);
+        }
+    };
+
     useEffect(() => {
         const init = async () => {
-            await Promise.all([fetchWallboxes(), fetchRfids()]);
+            await Promise.all([fetchWallboxes(), fetchRfids(), fetchForcePower()]);
             setLoading(false);
         };
         init();
 
-        const interval = setInterval(fetchWallboxes, 3000);
+        const interval = setInterval(() => {
+            fetchWallboxes();
+            if (!isEditingForcePower) {
+                fetchForcePower();
+            }
+        }, 3000);
         return () => clearInterval(interval);
-    }, []);
+    }, [isEditingForcePower]);
+
+    const handleSaveForcePower = async () => {
+        const cleanStr = (editForcePowerValue || '').toString().trim().replace(',', '.');
+        const val = parseFloat(cleanStr);
+        if (isNaN(val) || val < 0) {
+            alert("Please enter a valid power limit in kW (>= 0).");
+            return;
+        }
+        setSavingForcePower(true);
+        try {
+            const res = await fetch('/plswk/api/wallboxes/force-power', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ forcePower: val })
+            });
+            if (res.ok) {
+                setForcePower(val);
+                setIsEditingForcePower(false);
+                fetchWallboxes();
+            } else {
+                const errText = await res.text().catch(() => '');
+                alert(`Failed to update force_power: ${errText || res.statusText || 'Error'}`);
+            }
+        } catch (e) {
+            console.error("Failed to save force_power:", e);
+            alert("Error communicating with server.");
+        } finally {
+            setSavingForcePower(false);
+        }
+    };
 
     const handleCommand = async (chargepointId: string, command: 'start' | 'stop' | 'unlock', extra?: { rfid?: string }) => {
         setSubmitting(`${chargepointId}-${command}`);
@@ -125,16 +176,6 @@ export function WallboxesPage() {
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
                 <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
                     <div>
-                        <div class="text-2xl font-black text-slate-100">{wallboxes.length}</div>
-                        <div class="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-0.5 sm:mt-1">{t('wb_total_wb')}</div>
-                    </div>
-                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-sky-400/10 text-sky-400 flex items-center justify-center text-sm sm:text-lg shrink-0">
-                        <i class="fas fa-charging-station"></i>
-                    </div>
-                </div>
-
-                <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between">
-                    <div>
                         <div class="text-2xl font-black text-emerald-400">
                             {wallboxes.filter(w => w.connected).length}
                         </div>
@@ -166,6 +207,89 @@ export function WallboxesPage() {
                     </div>
                     <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-sky-400/10 text-sky-400 flex items-center justify-center text-sm sm:text-lg shrink-0">
                         <i class="fas fa-plug"></i>
+                    </div>
+                </div>
+
+                <div class="glass p-3.5 sm:p-5 rounded-xl border border-slate-700/60 flex items-center justify-between group hover:border-cyan-500/40 transition-colors" data-testid="force-power-card">
+                    <div class="flex-1 min-w-0 pr-2">
+                        {isEditingForcePower ? (
+                            <div class="flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
+                                <div class="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        min="0"
+                                        max="100"
+                                        class="w-24 bg-slate-900 border border-cyan-500/70 rounded-lg px-2.5 py-1 text-lg font-black text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                                        value={editForcePowerValue}
+                                        onInput={e => setEditForcePowerValue(e.currentTarget.value)}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') handleSaveForcePower();
+                                            if (e.key === 'Escape') setIsEditingForcePower(false);
+                                        }}
+                                        autoFocus
+                                    />
+                                    <span class="text-xs font-bold text-slate-400">kW</span>
+                                    <button
+                                        onClick={handleSaveForcePower}
+                                        disabled={savingForcePower}
+                                        title={t('save')}
+                                        class="w-8 h-8 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                                    >
+                                        <i class={`fas ${savingForcePower ? 'fa-spinner fa-spin' : 'fa-check'}`}></i>
+                                    </button>
+                                    <button
+                                        onClick={() => setIsEditingForcePower(false)}
+                                        title={t('cancel')}
+                                        class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-xs transition-all"
+                                    >
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div class="text-[0.65rem] text-slate-400 font-medium">{t('wb_force_power_hint')}</div>
+                            </div>
+                        ) : (
+                            <div
+                                class="cursor-pointer select-none"
+                                onClick={() => {
+                                    setEditForcePowerValue(forcePower > 0 ? forcePower.toString() : '0');
+                                    setIsEditingForcePower(true);
+                                }}
+                            >
+                                <div class="flex items-baseline gap-2">
+                                    <span
+                                        class={`text-2xl font-black ${forcePower > 0 ? 'text-amber-400' : 'text-slate-100'}`}
+                                        data-testid="force-power-value"
+                                    >
+                                        {forcePower > 0 ? `${forcePower.toFixed(1)} kW` : t('wb_force_power_unrestricted')}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        class="text-xs text-slate-400 hover:text-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity"
+                                        title={t('edit')}
+                                    >
+                                        <i class="fas fa-pencil-alt"></i>
+                                    </button>
+                                </div>
+                                <div class="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold mt-0.5 sm:mt-1">
+                                    {t('wb_force_power')}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div
+                        onClick={() => {
+                            if (!isEditingForcePower) {
+                                setEditForcePowerValue(forcePower > 0 ? forcePower.toString() : '0');
+                                setIsEditingForcePower(true);
+                            }
+                        }}
+                        class={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center text-sm sm:text-lg shrink-0 cursor-pointer transition-colors ${
+                            forcePower > 0 ? 'bg-amber-400/10 text-amber-400' : 'bg-cyan-400/10 text-cyan-400'
+                        }`}
+                        title={t('edit')}
+                    >
+                        <i class="fas fa-tachometer-alt"></i>
                     </div>
                 </div>
             </div>

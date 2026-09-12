@@ -57,6 +57,26 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
                 ])
             });
         });
+
+        // Mock /api/wallboxes/force-power
+        let mockForcePower = 0.0;
+        await page.route('**/api/wallboxes/force-power', async route => {
+            if (route.request().method() === 'POST') {
+                const body = route.request().postDataJSON();
+                mockForcePower = body?.forcePower ?? 0;
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ success: true, forcePower: mockForcePower, validitySeconds: 0 })
+                });
+            } else {
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ forcePower: mockForcePower, validitySeconds: 0 })
+                });
+            }
+        });
     });
 
     test('Wallboxes Page UI and Commands', async ({ page }) => {
@@ -68,7 +88,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
         await expect(title).toHaveText(/Wallboxes|Ladestationen/);
 
         // Verify summary cards
-        await expect(page.locator('text=Total Wallboxes')).toBeVisible();
+        await expect(page.locator('[data-testid="force-power-card"]')).toBeVisible();
         await expect(page.locator('text=Active Charging')).toBeVisible();
 
         // Verify wallbox card
@@ -103,11 +123,9 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
         await expect(page.locator('[data-testid="page-title"]')).toBeVisible();
 
         // Wait for cards to render
-        await expect(page.locator('text=Total Wallboxes')).toBeVisible();
-
-        // Total Wallboxes = 3
-        const totalCard = page.locator('.glass').filter({ hasText: 'Total Wallboxes' });
-        await expect(totalCard.locator('.text-2xl')).toHaveText('3');
+        const fpCard = page.locator('[data-testid="force-power-card"]');
+        await expect(fpCard).toBeVisible();
+        await expect(page.locator('[data-testid="force-power-value"]')).toHaveText(/Unrestricted|Unbegrenzt/);
 
         // Online = 2 (wallbox-sim-01 and 02 are connected)
         const onlineCard = page.locator('.glass').filter({ hasText: 'Online' });
@@ -120,6 +138,27 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
         // Total Power = 7.4 kW (only wallbox-sim-02 has power)
         const powerCard = page.locator('.glass').filter({ hasText: 'Total Power' });
         await expect(powerCard.locator('.text-2xl')).toContainText('7.4');
+    });
+
+    test('Force power limit can be edited and persisted', async ({ page }) => {
+        await page.goto('/plswk/Wallboxes');
+        const fpCard = page.locator('[data-testid="force-power-card"]');
+        await expect(fpCard).toBeVisible();
+
+        // Click to enter edit mode
+        await fpCard.click();
+
+        // Enter a limit of 11.0 kW
+        const input = fpCard.locator('input[type="number"]');
+        await expect(input).toBeVisible();
+        await input.fill('11');
+
+        // Save
+        const saveBtn = fpCard.locator('button[title*="Save"], button[title*="Speichern"]').first();
+        await saveBtn.click();
+
+        // Confirm new value is displayed
+        await expect(page.locator('[data-testid="force-power-value"]')).toHaveText('11.0 kW');
     });
 
     test('Wallbox cards show correct per-unit data and status indicators', async ({ page }) => {

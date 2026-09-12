@@ -121,6 +121,9 @@ const TRANSLATIONS = {
         'save': 'Save',
         // Wallboxes Page
         'wb_total_wb': 'Total Wallboxes',
+        'wb_force_power': 'Force Power / Limit',
+        'wb_force_power_unrestricted': 'Unrestricted',
+        'wb_force_power_hint': '0 = Unrestricted / Max (16A)',
         'wb_online': 'Online',
         'wb_active_charging': 'Active Charging',
         'wb_total_power': 'Total Power load',
@@ -379,6 +382,9 @@ const TRANSLATIONS = {
         'save': 'Speichern',
         // Wallboxes Page
         'wb_total_wb': 'Ladestationen Gesamt',
+        'wb_force_power': 'Ladeleistungsbegrenzung',
+        'wb_force_power_unrestricted': 'Unbegrenzt',
+        'wb_force_power_hint': '0 = Unbegrenzt / Max (16A)',
         'wb_online': 'Online',
         'wb_active_charging': 'Aktiv ladend',
         'wb_total_power': 'Gesamte Ladeleistung',

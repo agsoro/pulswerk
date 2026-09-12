@@ -8,6 +8,7 @@ namespace Pulswerk.Drivers.Tests
     /// percentage refers to the TOTAL power capacity (16A × 3 phases = 48 "phase-A"),
     /// with a 6A-per-phase minimum and a 10% shut-off threshold.
     /// </summary>
+    [Collection("OcppTests")]
     public class OcppLimitTests
     {
         private const string Cp = "test-cp";
@@ -130,6 +131,18 @@ namespace Pulswerk.Drivers.Tests
             var (amps, phases) = Svc.ResolveLimit(Cp, 10.0);
             double effective = Svc.AmpsToPercent(Cp, amps, phases);
             Assert.Equal(12.5, effective);
+        }
+
+        [Fact]
+        public async Task SetChargingLimitAsync_UpdatesTelemetry()
+        {
+            await Svc.SetChargingLimitAsync("test-cp-limit", 1, 10.0, 3);
+            var telem = Svc.GetTelemetry("test-cp-limit");
+            Assert.True(telem.ContainsKey("power_limit"));
+            Assert.True(telem.ContainsKey("charging_phases"));
+            Assert.Equal(3.0, telem["charging_phases"]);
+            // 10A * 3 phases / 48 = 62.5%
+            Assert.Equal(62.5, telem["power_limit"]);
         }
     }
 }

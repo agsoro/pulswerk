@@ -33,7 +33,7 @@ namespace Pulswerk.Drivers.Ocpp
         // Force power setpoint state (in kW, like Solis battery)
         private double _forcePowerKw = 0.0;
         private DateTime _forcePowerSetAtUtc = DateTime.MinValue;
-        private double _forcePowerValiditySeconds = 60.0;
+        private double _forcePowerValiditySeconds = 0.0;
         private readonly object _forcePowerLock = new();
         private Timer? _watchdogTimer;
 
@@ -110,6 +110,16 @@ namespace Pulswerk.Drivers.Ocpp
             // Set initial telemetry as connected
             UpdateTelemetryValue(chargePointId, "status", "Connected");
             Log.Info($"[OCPP] Charger '{chargePointId}' connected successfully.");
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(500);
+                await ConfigureChargerTelemetryAsync(chargePointId);
+                if (IsForcePowerActive(DateTime.UtcNow))
+                {
+                    await DistributeForcePowerAsync();
+                }
+            });
 
             var buffer = new byte[8192];
             try
@@ -209,12 +219,20 @@ namespace Pulswerk.Drivers.Ocpp
                 {
                     string action = root[2].GetString() ?? "";
                     var payload = root[3];
-                    await HandleOcppCallAsync(chargePointId, messageId, action, payload, socket);
+                    await HandleOcppCallAsync(chargePointId, messageId, action, payload);
                 }
-                // MessageType 3 = CALLRESULT (we don't need to handle responses in detail for this design, but log it)
+                // MessageType 3 = CALLRESULT
                 else if (messageType == 3)
                 {
-                    Log.Debug($"[OCPP] [{chargePointId}] Received CallResult for message {messageId}");
+                    string payloadStr = root.GetArrayLength() > 2 ? root[2].ToString() : "";
+                    Log.Info($"[OCPP] [{chargePointId}] Received CallResult for message {messageId}: {payloadStr}");
+                }
+                // MessageType 4 = CALLERROR
+                else if (messageType == 4)
+                {
+                    string errorCode = root.GetArrayLength() > 2 ? root[2].GetString() ?? "" : "";
+                    string errorDesc = root.GetArrayLength() > 3 ? root[3].GetString() ?? "" : "";
+                    Log.Warning($"[OCPP] [{chargePointId}] Received CallError for message {messageId}: {errorCode} - {errorDesc}");
                 }
             }
             catch (Exception ex)
@@ -223,7 +241,7 @@ namespace Pulswerk.Drivers.Ocpp
             }
         }
 
-        private async Task HandleOcppCallAsync(string chargePointId, string messageId, string action, JsonElement payload, WebSocket socket)
+        public async Task HandleOcppCallAsync(string chargePointId, string messageId, string action, JsonElement payload)
         {
             Log.Info($"[OCPP] [{chargePointId}] Action: {action}");
 
@@ -243,6 +261,15 @@ namespace Pulswerk.Drivers.Ocpp
                         currentTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                         interval = 60
                     };
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(500);
+                        await ConfigureChargerTelemetryAsync(chargePointId);
+                        if (IsForcePowerActive(DateTime.UtcNow))
+                        {
+                            await DistributeForcePowerAsync();
+                        }
+                    });
                     break;
 
                 case "Heartbeat":
@@ -253,8 +280,21 @@ namespace Pulswerk.Drivers.Ocpp
                     break;
 
                 case "StatusNotification":
-                    string status = payload.GetProperty("status").GetString() ?? "Available";
+                    string status = "Available";
+                    if (payload.TryGetProperty("status", out var stProp) || payload.TryGetProperty("Status", out stProp))
+                    {
+                        status = stProp.GetString() ?? "Available";
+                    }
                     UpdateTelemetryValue(chargePointId, "status", status);
+                    if (status.Equals("Available", StringComparison.OrdinalIgnoreCase) ||
+                        status.Equals("Faulted", StringComparison.OrdinalIgnoreCase) ||
+                        status.Equals("Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                        status.Equals("SuspendedEV", StringComparison.OrdinalIgnoreCase) ||
+                        status.Equals("SuspendedEVSE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        UpdateTelemetryValue(chargePointId, "power", 0.0);
+                        UpdateTelemetryValue(chargePointId, "current", 0.0);
+                    }
                     responsePayload = new { };
                     break;
 
@@ -273,9 +313,26 @@ namespace Pulswerk.Drivers.Ocpp
                     break;
 
                 case "StartTransaction":
-                    int connectorId = payload.GetProperty("connectorId").GetInt32();
-                    string startIdTag = payload.GetProperty("idTag").GetString() ?? "Guest";
-                    double startMeter = payload.GetProperty("meterStart").GetDouble(); // in Wh
+                    int connectorId = 1;
+                    if (payload.TryGetProperty("connectorId", out var cProp) || payload.TryGetProperty("ConnectorId", out cProp))
+                    {
+                        if (cProp.ValueKind == JsonValueKind.Number) connectorId = cProp.GetInt32();
+                        else if (int.TryParse(cProp.GetString(), out int cid)) connectorId = cid;
+                    }
+
+                    string startIdTag = "Guest";
+                    if (payload.TryGetProperty("idTag", out var idProp) || payload.TryGetProperty("IdTag", out idProp))
+                    {
+                        startIdTag = idProp.GetString() ?? "Guest";
+                    }
+
+                    double startMeter = 0.0;
+                    if (payload.TryGetProperty("meterStart", out var msProp) || payload.TryGetProperty("MeterStart", out msProp))
+                    {
+                        if (msProp.ValueKind == JsonValueKind.Number) startMeter = msProp.GetDouble();
+                        else if (double.TryParse(msProp.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double sm))
+                            startMeter = sm;
+                    }
 
                     int transId = Interlocked.Increment(ref _transactionIdCounter);
                     _activeTransactions[transId] = new ActiveTransactionInfo(chargePointId, connectorId, startIdTag, startMeter, DateTime.UtcNow);
@@ -283,12 +340,20 @@ namespace Pulswerk.Drivers.Ocpp
                     Log.Info($"[OCPP] [{chargePointId}] StartTransaction {transId} on connector {connectorId} by '{startIdTag}' (meterStart: {startMeter} Wh)");
                     UpdateTelemetryValue(chargePointId, "status", "Charging");
                     UpdateTelemetryValue(chargePointId, "active_user", startIdTag);
+                    UpdateTelemetryValue(chargePointId, "energy_import", Math.Round(startMeter / 1000.0, 3));
                     PublishServerTelemetry();
 
                     if (IsForcePowerActive(DateTime.UtcNow))
                     {
                         _ = Task.Run(() => DistributeForcePowerAsync());
                     }
+
+                    _ = Task.Run(async () =>
+                    {
+                        await ConfigureChargerTelemetryAsync(chargePointId);
+                        await Task.Delay(1000);
+                        await TriggerMessageAsync(chargePointId, "MeterValues", connectorId);
+                    });
 
                     responsePayload = new
                     {
@@ -301,8 +366,25 @@ namespace Pulswerk.Drivers.Ocpp
                     break;
 
                 case "StopTransaction":
-                    double stopMeter = payload.GetProperty("meterStop").GetDouble(); // in Wh
-                    int stopTransId = payload.GetProperty("transactionId").GetInt32();
+                    double stopMeter = 0.0;
+                    if (payload.TryGetProperty("meterStop", out var stpProp) || payload.TryGetProperty("MeterStop", out stpProp))
+                    {
+                        if (stpProp.ValueKind == JsonValueKind.Number) stopMeter = stpProp.GetDouble();
+                        else if (double.TryParse(stpProp.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double sm))
+                            stopMeter = sm;
+                    }
+
+                    int stopTransId = 0;
+                    if (payload.TryGetProperty("transactionId", out var tidProp) || payload.TryGetProperty("TransactionId", out tidProp))
+                    {
+                        if (tidProp.ValueKind == JsonValueKind.Number) stopTransId = tidProp.GetInt32();
+                        else if (int.TryParse(tidProp.GetString(), out int tid)) stopTransId = tid;
+                    }
+
+                    if (payload.TryGetProperty("transactionData", out var txData) || payload.TryGetProperty("TransactionData", out txData))
+                    {
+                        ProcessMeterValues(chargePointId, txData);
+                    }
 
                     string stopIdTag = "Guest";
                     if (_activeTransactions.TryRemove(stopTransId, out var info))
@@ -321,6 +403,12 @@ namespace Pulswerk.Drivers.Ocpp
 
                     UpdateTelemetryValue(chargePointId, "status", "Available");
                     UpdateTelemetryValue(chargePointId, "active_user", "None");
+                    UpdateTelemetryValue(chargePointId, "power", 0.0);
+                    UpdateTelemetryValue(chargePointId, "current", 0.0);
+                    if (stopMeter > 0)
+                    {
+                        UpdateTelemetryValue(chargePointId, "energy_import", Math.Round(stopMeter / 1000.0, 3));
+                    }
                     PublishServerTelemetry();
 
                     if (IsForcePowerActive(DateTime.UtcNow))
@@ -356,60 +444,219 @@ namespace Pulswerk.Drivers.Ocpp
             }
         }
 
-        private void ProcessMeterValues(string chargePointId, JsonElement payload)
+        public void ProcessMeterValues(string chargePointId, JsonElement payload)
         {
             try
             {
-                var values = payload.GetProperty("meterValue");
-                double? maxCurrent = null;
-                double? maxVoltage = null;
-                int activeCurrentPhases = 0;
-
-                foreach (var value in values.EnumerateArray())
+                // 1. Locate the array of meter values
+                JsonElement meterValuesArray = default;
+                if (payload.ValueKind == JsonValueKind.Array)
                 {
-                    var sampledValue = value.GetProperty("sampledValue");
-                    foreach (var sample in sampledValue.EnumerateArray())
+                    meterValuesArray = payload;
+                }
+                else if (payload.ValueKind == JsonValueKind.Object)
+                {
+                    if (!payload.TryGetProperty("meterValue", out meterValuesArray) &&
+                        !payload.TryGetProperty("MeterValue", out meterValuesArray) &&
+                        !payload.TryGetProperty("transactionData", out meterValuesArray) &&
+                        !payload.TryGetProperty("TransactionData", out meterValuesArray))
                     {
-                        string valStr = sample.GetProperty("value").GetString() ?? "0";
-                        double.TryParse(valStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val);
-
-                        string measurand = "Energy.Active.Import.Register";
-                        if (sample.TryGetProperty("measurand", out var mProp))
-                            measurand = mProp.GetString() ?? measurand;
-
-                        string unit = "Wh";
-                        if (sample.TryGetProperty("unit", out var uProp))
-                            unit = uProp.GetString() ?? unit;
-
-                        if (measurand == "Power.Active.Import")
+                        foreach (var prop in payload.EnumerateObject())
                         {
-                            // Convert W to kW
-                            double powerKw = unit.Equals("kW", StringComparison.OrdinalIgnoreCase) ? val : val / 1000.0;
-                            UpdateTelemetryValue(chargePointId, "power", Math.Round(powerKw, 3));
-                        }
-                        else if (measurand == "Energy.Active.Import.Register")
-                        {
-                            // Convert Wh to kWh
-                            double energyKwh = unit.Equals("kWh", StringComparison.OrdinalIgnoreCase) ? val : val / 1000.0;
-                            UpdateTelemetryValue(chargePointId, "energy_import", Math.Round(energyKwh, 3));
-                        }
-                        else if (measurand == "Current.Import")
-                        {
-                            maxCurrent = maxCurrent.HasValue ? Math.Max(maxCurrent.Value, val) : val;
-                            if (val > 0.2 && sample.TryGetProperty("phase", out var pProp))
+                            if (string.Equals(prop.Name, "meterValue", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(prop.Name, "transactionData", StringComparison.OrdinalIgnoreCase))
                             {
-                                string? ph = pProp.GetString();
-                                if (ph != null && (ph.StartsWith("L", StringComparison.OrdinalIgnoreCase) || ph.Contains("1") || ph.Contains("2") || ph.Contains("3")))
+                                meterValuesArray = prop.Value;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (meterValuesArray.ValueKind != JsonValueKind.Array)
+                {
+                    Log.Debug($"[OCPP] [{chargePointId}] No meterValue array found in payload.");
+                    return;
+                }
+
+                double? explicitTotalPowerKw = null;
+                var phasePowersKw = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                double? explicitTotalEnergyKwh = null;
+                var phaseCurrents = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                double? maxCurrent = null;
+                var phaseVoltages = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                double? maxVoltage = null;
+                var activePhases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var valueItem in meterValuesArray.EnumerateArray())
+                {
+                    JsonElement sampledValueArray = default;
+                    if (valueItem.ValueKind == JsonValueKind.Object)
+                    {
+                        if (!valueItem.TryGetProperty("sampledValue", out sampledValueArray) &&
+                            !valueItem.TryGetProperty("SampledValue", out sampledValueArray))
+                        {
+                            foreach (var prop in valueItem.EnumerateObject())
+                            {
+                                if (string.Equals(prop.Name, "sampledValue", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    activeCurrentPhases++;
+                                    sampledValueArray = prop.Value;
+                                    break;
                                 }
                             }
                         }
-                        else if (measurand == "Voltage")
+                    }
+
+                    if (sampledValueArray.ValueKind != JsonValueKind.Array)
+                        continue;
+
+                    foreach (var sample in sampledValueArray.EnumerateArray())
+                    {
+                        if (sample.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        // Value extraction (handles string and number)
+                        string valStr = "0";
+                        if (sample.TryGetProperty("value", out var vProp) || sample.TryGetProperty("Value", out vProp))
+                        {
+                            valStr = vProp.ValueKind switch
+                            {
+                                JsonValueKind.String => vProp.GetString() ?? "0",
+                                JsonValueKind.Number => vProp.GetRawText(),
+                                _ => vProp.ToString()
+                            };
+                        }
+
+                        // If comma-separated (e.g. "0.000,0.000"), take first token
+                        if (valStr.Contains(','))
+                        {
+                            if (valStr.Contains('.') || valStr.IndexOf(',') != valStr.LastIndexOf(','))
+                            {
+                                valStr = valStr.Split(',')[0].Trim();
+                            }
+                            else
+                            {
+                                // German decimal comma: "230,30" -> "230.30"
+                                valStr = valStr.Replace(',', '.').Trim();
+                            }
+                        }
+
+                        if (!double.TryParse(valStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val))
+                        {
+                            continue;
+                        }
+
+                        // Measurand extraction (case-insensitive)
+                        string measurand = "Energy.Active.Import.Register";
+                        if (sample.TryGetProperty("measurand", out var mProp) || sample.TryGetProperty("Measurand", out mProp))
+                        {
+                            measurand = mProp.GetString() ?? measurand;
+                        }
+
+                        // Unit extraction
+                        string unit = "";
+                        if (sample.TryGetProperty("unit", out var uProp) || sample.TryGetProperty("Unit", out uProp))
+                        {
+                            unit = uProp.GetString() ?? "";
+                        }
+
+                        // Phase extraction
+                        string? phase = null;
+                        if (sample.TryGetProperty("phase", out var pProp) || sample.TryGetProperty("Phase", out pProp))
+                        {
+                            phase = pProp.GetString()?.Trim();
+                        }
+
+                        if (measurand.Equals("Power.Active.Import", StringComparison.OrdinalIgnoreCase) ||
+                            measurand.Equals("Power.Active.Import.Register", StringComparison.OrdinalIgnoreCase))
+                        {
+                            double powerKw = unit.Equals("kW", StringComparison.OrdinalIgnoreCase) ? val : val / 1000.0;
+                            if (string.IsNullOrEmpty(phase))
+                            {
+                                explicitTotalPowerKw = powerKw;
+                            }
+                            else
+                            {
+                                phasePowersKw[phase] = powerKw;
+                            }
+                        }
+                        else if (measurand.Equals("Energy.Active.Import.Register", StringComparison.OrdinalIgnoreCase) ||
+                                 measurand.Equals("Energy.Active.Import", StringComparison.OrdinalIgnoreCase))
+                        {
+                            double energyKwh = unit.Equals("kWh", StringComparison.OrdinalIgnoreCase) ? val : val / 1000.0;
+                            if (string.IsNullOrEmpty(phase) || !explicitTotalEnergyKwh.HasValue)
+                            {
+                                explicitTotalEnergyKwh = energyKwh;
+                            }
+                        }
+                        else if (measurand.Equals("Current.Import", StringComparison.OrdinalIgnoreCase) ||
+                                 measurand.Equals("Current.Offered", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Current in Amps
+                            double curAmps = unit.Equals("mA", StringComparison.OrdinalIgnoreCase) ? val / 1000.0 : val;
+                            maxCurrent = maxCurrent.HasValue ? Math.Max(maxCurrent.Value, curAmps) : curAmps;
+
+                            if (!string.IsNullOrEmpty(phase))
+                            {
+                                phaseCurrents[phase] = curAmps;
+                                if (curAmps > 0.2 && (phase.StartsWith("L", StringComparison.OrdinalIgnoreCase) ||
+                                                      phase.Contains("1") || phase.Contains("2") || phase.Contains("3")))
+                                {
+                                    activePhases.Add(phase);
+                                }
+                            }
+                        }
+                        else if (measurand.Equals("Voltage", StringComparison.OrdinalIgnoreCase))
                         {
                             maxVoltage = maxVoltage.HasValue ? Math.Max(maxVoltage.Value, val) : val;
+                            if (!string.IsNullOrEmpty(phase))
+                            {
+                                phaseVoltages[phase] = val;
+                            }
                         }
                     }
+                }
+
+                // Calculate total power
+                double? resolvedPowerKw = null;
+                if (explicitTotalPowerKw.HasValue)
+                {
+                    resolvedPowerKw = explicitTotalPowerKw.Value;
+                }
+                else if (phasePowersKw.Count > 0)
+                {
+                    resolvedPowerKw = phasePowersKw.Values.Sum();
+                }
+                else if (maxCurrent.HasValue && maxCurrent.Value > 0)
+                {
+                    // Calculate power from Current and Voltage
+                    double defaultV = (maxVoltage.HasValue && maxVoltage.Value > 50.0) ? maxVoltage.Value : 230.0;
+                    if (phaseCurrents.Count > 0)
+                    {
+                        double totalW = 0.0;
+                        foreach (var (ph, cur) in phaseCurrents)
+                        {
+                            double v = phaseVoltages.GetValueOrDefault(ph, defaultV);
+                            totalW += cur * v;
+                        }
+                        resolvedPowerKw = totalW / 1000.0;
+                    }
+                    else
+                    {
+                        int phCount = activePhases.Count > 0 ? activePhases.Count : 1;
+                        resolvedPowerKw = (maxCurrent.Value * defaultV * phCount) / 1000.0;
+                    }
+                }
+
+                // Commit telemetry updates
+                if (resolvedPowerKw.HasValue)
+                {
+                    UpdateTelemetryValue(chargePointId, "power", Math.Round(resolvedPowerKw.Value, 3));
+                }
+
+                if (explicitTotalEnergyKwh.HasValue)
+                {
+                    UpdateTelemetryValue(chargePointId, "energy_import", Math.Round(explicitTotalEnergyKwh.Value, 3));
                 }
 
                 if (maxCurrent.HasValue)
@@ -422,9 +669,20 @@ namespace Pulswerk.Drivers.Ocpp
                     UpdateTelemetryValue(chargePointId, "voltage", Math.Round(maxVoltage.Value, 1));
                 }
 
-                if (activeCurrentPhases > 0)
+                if (activePhases.Count > 0)
                 {
-                    UpdateTelemetryValue(chargePointId, "charging_phases", (double)Math.Min(activeCurrentPhases, MaxPhases));
+                    UpdateTelemetryValue(chargePointId, "charging_phases", (double)Math.Min(activePhases.Count, MaxPhases));
+                }
+
+                // If actively drawing power, ensure status is "Charging"
+                if ((resolvedPowerKw.HasValue && resolvedPowerKw.Value > 0.1) || (maxCurrent.HasValue && maxCurrent.Value > 0.5))
+                {
+                    var curTelemetry = GetTelemetry(chargePointId);
+                    string curStatus = curTelemetry.GetValueOrDefault("status", "")?.ToString() ?? "";
+                    if (!curStatus.Equals("Charging", StringComparison.OrdinalIgnoreCase))
+                    {
+                        UpdateTelemetryValue(chargePointId, "status", "Charging");
+                    }
                 }
 
                 PublishServerTelemetry();
@@ -542,29 +800,138 @@ namespace Pulswerk.Drivers.Ocpp
             // capacity (16A x 3 phases), taking the active phase count into account.
             UpdateTelemetryValue(chargePointId, "power_limit", AmpsToPercent(chargePointId, maxCurrentAmps, phases));
 
-            string messageId = Guid.NewGuid().ToString("N")[..8];
-            var profile = new
+            // Find active transaction ID if any
+            int? activeTxId = null;
+            foreach (var kvp in _activeTransactions)
             {
-                connectorId = connectorId,
-                csChargingProfiles = new
+                if (string.Equals(kvp.Value.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase)
+                    && (connectorId == 0 || kvp.Value.ConnectorId == connectorId))
                 {
-                    chargingProfileId = 1,
-                    stackLevel = 0,
-                    chargingProfilePurpose = "TxDefaultProfile",
-                    chargingProfileKind = "Relative",
-                    chargingSchedule = new
+                    activeTxId = kvp.Key;
+                    if (connectorId == 0) connectorId = kvp.Value.ConnectorId;
+                    break;
+                }
+            }
+
+            // If unrestricted (16A and no force_power limit active), also clear existing profiles
+            if (maxCurrentAmps >= DefaultMaxCurrentAmps && _forcePowerKw <= 0.0)
+            {
+                _ = ClearChargingProfileAsync(chargePointId, 0);
+            }
+
+            int targetConnector = connectorId > 0 ? connectorId : 1;
+
+            // 1. Send ChargePointMaxProfile on connectorId: 0 (takes effect immediately across the hardware)
+            bool okMax = await SendChargingProfileMessageAsync(
+                chargePointId,
+                connectorId: 0,
+                profileId: 1,
+                stackLevel: 1,
+                purpose: "ChargePointMaxProfile",
+                kind: "Absolute",
+                limitAmps: maxCurrentAmps,
+                phases: phases);
+
+            // 2. Send TxDefaultProfile on connectorId (serves as default for upcoming transactions)
+            bool okDefault = await SendChargingProfileMessageAsync(
+                chargePointId,
+                connectorId: targetConnector,
+                profileId: 2,
+                stackLevel: 1,
+                purpose: "TxDefaultProfile",
+                kind: "Absolute",
+                limitAmps: maxCurrentAmps,
+                phases: phases);
+
+            // 3. If a transaction is actively ongoing, send TxProfile (required by OCPP 1.6 for live sessions)
+            bool okTx = true;
+            if (activeTxId.HasValue)
+            {
+                okTx = await SendChargingProfileMessageAsync(
+                    chargePointId,
+                    connectorId: targetConnector,
+                    profileId: 3,
+                    stackLevel: 2,
+                    purpose: "TxProfile",
+                    kind: "Relative",
+                    limitAmps: maxCurrentAmps,
+                    phases: phases,
+                    transactionId: activeTxId.Value);
+            }
+
+            return okMax || okDefault || okTx;
+        }
+
+        public async Task<bool> ClearChargingProfileAsync(string chargePointId, int connectorId = 0)
+        {
+            string messageId = Guid.NewGuid().ToString("N")[..8];
+            var payload = new { connectorId = connectorId };
+            string ocppMsg = $"[2,\"{messageId}\",\"ClearChargingProfile\",{JsonSerializer.Serialize(payload)}]";
+            Log.Debug($"[OCPP] [{chargePointId}] Sending ClearChargingProfile on connector {connectorId}");
+            return await SendMessageAsync(chargePointId, ocppMsg);
+        }
+
+        private async Task<bool> SendChargingProfileMessageAsync(
+            string chargePointId,
+            int connectorId,
+            int profileId,
+            int stackLevel,
+            string purpose,
+            string kind,
+            double limitAmps,
+            int phases,
+            int? transactionId = null)
+        {
+            string messageId = Guid.NewGuid().ToString("N")[..8];
+            object profile;
+            if (transactionId.HasValue)
+            {
+                profile = new
+                {
+                    connectorId = connectorId,
+                    csChargingProfiles = new
                     {
-                        chargingRateUnit = "A",
-                        chargingSchedulePeriod = new[]
+                        chargingProfileId = profileId,
+                        stackLevel = stackLevel,
+                        chargingProfilePurpose = purpose,
+                        chargingProfileKind = kind,
+                        transactionId = transactionId.Value,
+                        chargingSchedule = new
                         {
-                            new { startPeriod = 0, limit = maxCurrentAmps, numberPhases = phases }
+                            chargingRateUnit = "A",
+                            chargingSchedulePeriod = new[]
+                            {
+                                new { startPeriod = 0, limit = Math.Round(limitAmps, 1), numberPhases = phases }
+                            }
                         }
                     }
-                }
-            };
+                };
+            }
+            else
+            {
+                profile = new
+                {
+                    connectorId = connectorId,
+                    csChargingProfiles = new
+                    {
+                        chargingProfileId = profileId,
+                        stackLevel = stackLevel,
+                        chargingProfilePurpose = purpose,
+                        chargingProfileKind = kind,
+                        chargingSchedule = new
+                        {
+                            chargingRateUnit = "A",
+                            chargingSchedulePeriod = new[]
+                            {
+                                new { startPeriod = 0, limit = Math.Round(limitAmps, 1), numberPhases = phases }
+                            }
+                        }
+                    }
+                };
+            }
 
-            // Send call: [2, messageId, "SetChargingProfile", payload]
             string ocppMsg = $"[2,\"{messageId}\",\"SetChargingProfile\",{JsonSerializer.Serialize(profile)}]";
+            Log.Debug($"[OCPP] [{chargePointId}] Sending SetChargingProfile ({purpose}): {limitAmps}A, {phases}ph on connector {connectorId}" + (transactionId.HasValue ? $", txId={transactionId.Value}" : ""));
             return await SendMessageAsync(chargePointId, ocppMsg);
         }
 
@@ -591,7 +958,47 @@ namespace Pulswerk.Drivers.Ocpp
             return await SendMessageAsync(chargePointId, ocppMsg);
         }
 
+        public async Task<bool> ChangeConfigurationAsync(string chargePointId, string key, string value)
+        {
+            string messageId = Guid.NewGuid().ToString("N")[..8];
+            var payload = new { key = key, value = value };
+            string ocppMsg = $"[2,\"{messageId}\",\"ChangeConfiguration\",{JsonSerializer.Serialize(payload)}]";
+            Log.Debug($"[OCPP] [{chargePointId}] Sending ChangeConfiguration: {key}={value}");
+            return await SendMessageAsync(chargePointId, ocppMsg);
+        }
+
+        public async Task<bool> TriggerMessageAsync(string chargePointId, string requestedMessage, int connectorId = 1)
+        {
+            string messageId = Guid.NewGuid().ToString("N")[..8];
+            var payload = new { requestedMessage = requestedMessage, connectorId = connectorId };
+            string ocppMsg = $"[2,\"{messageId}\",\"TriggerMessage\",{JsonSerializer.Serialize(payload)}]";
+            Log.Debug($"[OCPP] [{chargePointId}] Sending TriggerMessage: {requestedMessage} on connector {connectorId}");
+            return await SendMessageAsync(chargePointId, ocppMsg);
+        }
+
+        public async Task ConfigureChargerTelemetryAsync(string chargePointId)
+        {
+            try
+            {
+                Log.Info($"[OCPP] [{chargePointId}] Configuring meter value sample interval and sampled measurands...");
+                // 1. Set sample interval to 10s (standard for responsive monitoring)
+                await ChangeConfigurationAsync(chargePointId, "MeterValueSampleInterval", "10");
+                // 2. Request essential measurands for real-time telemetry
+                await ChangeConfigurationAsync(chargePointId, "MeterValuesSampledData", "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage");
+                // 3. Ensure stop transaction message also carries these measurands
+                await ChangeConfigurationAsync(chargePointId, "StopTxnSampledData", "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage");
+                // 4. Clock-aligned measurands
+                await ChangeConfigurationAsync(chargePointId, "MeterValuesAlignedData", "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[OCPP] [{chargePointId}] Error configuring telemetry: {ex.Message}");
+            }
+        }
+
         // ── Server Telemetry & Force Power Setpoint ──────────────────────────
+
+        public const double DefaultManualValiditySeconds = 10 * 3600; // 10 hours (36,000 seconds)
 
         public double ForcePowerValiditySeconds
         {
@@ -604,6 +1011,7 @@ namespace Pulswerk.Drivers.Ocpp
             lock (_forcePowerLock)
             {
                 if (_forcePowerKw <= 0) return false;
+                if (_forcePowerValiditySeconds <= 0) return true;
                 return (now - _forcePowerSetAtUtc).TotalSeconds <= _forcePowerValiditySeconds;
             }
         }
@@ -612,26 +1020,27 @@ namespace Pulswerk.Drivers.Ocpp
         {
             lock (_forcePowerLock)
             {
-                if (_forcePowerKw > 0 && (now - _forcePowerSetAtUtc).TotalSeconds > _forcePowerValiditySeconds)
+                if (_forcePowerValiditySeconds > 0 && _forcePowerKw > 0 && (now - _forcePowerSetAtUtc).TotalSeconds > _forcePowerValiditySeconds)
                 {
                     _forcePowerKw = 0.0;
                     _forcePowerSetAtUtc = DateTime.MinValue;
-                    Log.Info("[OCPP] Server force_power setpoint expired after 60s. Reverted to 0.0 (Normal mode).");
+                    Log.Info("[OCPP] Server force_power setpoint expired. Reverted to 0.0 (Normal mode).");
                     _ = Task.Run(() => DistributeForcePowerAsync());
                 }
                 return _forcePowerKw;
             }
         }
 
-        public async Task SetForcePowerAsync(double value)
+        public async Task SetForcePowerAsync(double value, double validitySeconds = 0.0)
         {
             var now = DateTime.UtcNow;
             lock (_forcePowerLock)
             {
                 _forcePowerKw = Math.Max(0.0, value);
                 _forcePowerSetAtUtc = _forcePowerKw > 0 ? now : DateTime.MinValue;
+                _forcePowerValiditySeconds = validitySeconds;
             }
-            Log.Info($"[OCPP] Server force_power set to {_forcePowerKw} kW (valid {_forcePowerValiditySeconds}s)");
+            Log.Info($"[OCPP] Server force_power set to {_forcePowerKw} kW" + (_forcePowerValiditySeconds > 0 ? $" (valid {_forcePowerValiditySeconds}s)" : " (permanent)"));
             PublishServerTelemetry();
             await DistributeForcePowerAsync();
         }
@@ -680,7 +1089,7 @@ namespace Pulswerk.Drivers.Ocpp
             bool expired = false;
             lock (_forcePowerLock)
             {
-                if (_forcePowerKw > 0 && (now - _forcePowerSetAtUtc).TotalSeconds > _forcePowerValiditySeconds)
+                if (_forcePowerValiditySeconds > 0 && _forcePowerKw > 0 && (now - _forcePowerSetAtUtc).TotalSeconds > _forcePowerValiditySeconds)
                 {
                     _forcePowerKw = 0.0;
                     _forcePowerSetAtUtc = DateTime.MinValue;
@@ -690,9 +1099,21 @@ namespace Pulswerk.Drivers.Ocpp
 
             if (expired)
             {
-                Log.Info("[OCPP] Server force_power setpoint expired after 60s. Reverted to 0.0 (Normal mode).");
+                Log.Info("[OCPP] Server force_power setpoint expired. Reverted to 0.0 (Normal mode).");
                 PublishServerTelemetry();
                 _ = Task.Run(() => DistributeForcePowerAsync());
+            }
+
+            // Periodic trigger for active charging sessions: request live MeterValues
+            foreach (var cpId in _activeSockets.Keys)
+            {
+                var telem = GetTelemetry(cpId);
+                string currentStatus = telem.GetValueOrDefault("status", "")?.ToString() ?? "";
+                bool hasActiveSession = _activeTransactions.Values.Any(t => string.Equals(t.ChargePointId, cpId, StringComparison.OrdinalIgnoreCase));
+                if (hasActiveSession || currentStatus.Equals("Charging", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = TriggerMessageAsync(cpId, "MeterValues");
+                }
             }
         }
 
@@ -734,7 +1155,9 @@ namespace Pulswerk.Drivers.Ocpp
             if (share >= minPower3p)
             {
                 // 3-phase allocation: P = 3 * 230 * I / 1000 = 0.69 * I  ==>  I = P / 0.69
-                double amps = Math.Clamp(Math.Round(share / 0.69, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                double rawAmps = share / 0.69;
+                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
+                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
                 foreach (var s in activeSessions)
                 {
                     result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, amps, 3, share));
@@ -743,7 +1166,9 @@ namespace Pulswerk.Drivers.Ocpp
             else if (share >= minPower1p)
             {
                 // 1-phase allocation: P = 1 * 230 * I / 1000 = 0.23 * I  ==>  I = P / 0.23
-                double amps = Math.Clamp(Math.Round(share / 0.23, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                double rawAmps = share / 0.23;
+                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
+                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
                 foreach (var s in activeSessions)
                 {
                     result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, amps, 1, share));
@@ -793,6 +1218,32 @@ namespace Pulswerk.Drivers.Ocpp
             double forcePower = GetEffectiveForcePowerKw(now);
             var sessions = _activeTransactions.Values.ToList();
 
+            // Check for any connected charge points reporting "Charging" status even if not in _activeTransactions
+            var activeCpIds = new HashSet<string>(sessions.Select(s => s.ChargePointId), StringComparer.OrdinalIgnoreCase);
+            foreach (var cpId in _activeSockets.Keys)
+            {
+                if (!activeCpIds.Contains(cpId))
+                {
+                    var telem = GetTelemetry(cpId);
+                    string status = telem.GetValueOrDefault("status", "")?.ToString() ?? "";
+                    if (status.Equals("Charging", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sessions.Add(new ActiveTransactionInfo(cpId, 1, "Active", 0.0, DateTime.UtcNow));
+                        activeCpIds.Add(cpId);
+                    }
+                }
+            }
+
+            // If no active charging sessions are found, but wallboxes are connected,
+            // allocate across all connected wallboxes so hardware/defaults enforce the limit ahead of time.
+            if (sessions.Count == 0 && _activeSockets.Count > 0)
+            {
+                foreach (var cpId in _activeSockets.Keys)
+                {
+                    sessions.Add(new ActiveTransactionInfo(cpId, 1, "Standby", 0.0, DateTime.UtcNow));
+                }
+            }
+
             var allocations = ComputeAllocation(forcePower, sessions);
 
             foreach (var alloc in allocations)
@@ -823,6 +1274,7 @@ namespace Pulswerk.Drivers.Ocpp
             {
                 _forcePowerKw = 0.0;
                 _forcePowerSetAtUtc = DateTime.MinValue;
+                _forcePowerValiditySeconds = 0.0;
             }
         }
 

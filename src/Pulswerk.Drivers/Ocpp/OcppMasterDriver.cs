@@ -110,7 +110,8 @@ namespace Pulswerk.Drivers.Ocpp
         {
             if (key == TelemetryKeys.ForcePowerKw)
             {
-                OcppManagerService.Instance.SetForcePowerAsync(value).GetAwaiter().GetResult();
+                double validity = value > 0 ? OcppManagerService.DefaultManualValiditySeconds : 0.0;
+                OcppManagerService.Instance.SetForcePowerAsync(value, validity).GetAwaiter().GetResult();
             }
             else
             {

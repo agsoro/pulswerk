@@ -329,7 +329,16 @@ namespace Pulswerk.Host
                         {
                             [$"{device.Id}_{key}"] = value
                         };
-                        dataService.UpdateTelemetries(update);
+                        var persisted = dataService.UpdateTelemetries(update);
+                        if (persisted != null)
+                        {
+                            foreach (var p in persisted)
+                            {
+                                _dataStore.Insert(p.Key,
+                                    new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                    p.Value.val);
+                            }
+                        }
                     }
                 };
 
@@ -345,7 +354,16 @@ namespace Pulswerk.Host
                         {
                             [$"{sDev.Id}_{key}"] = value
                         };
-                        dataService.UpdateTelemetries(update);
+                        var persisted = dataService.UpdateTelemetries(update);
+                        if (persisted != null)
+                        {
+                            foreach (var p in persisted)
+                            {
+                                _dataStore.Insert(p.Key,
+                                    new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                    p.Value.val);
+                            }
+                        }
                     }
                 };
             }
