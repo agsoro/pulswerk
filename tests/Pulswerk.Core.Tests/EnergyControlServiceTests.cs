@@ -87,6 +87,61 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
+        public void Dispatch_WithoutBattery_ExpandsAboveBaseLimitFromGridExport()
+        {
+            var sources = new EnergySourcesConfig
+            {
+                HasBattery = false,
+                GridMaxImportKw = 8.0,
+                BatteryMinReserveKw = 1.0
+            };
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallboxes",
+                IsControllable = true,
+                BaseLimitKw = 8.0,
+                ActualPowerKw = 7.0,
+                MinPowerKw = 1.38,
+                MaxPowerKw = 22.0
+            };
+
+            // Grid export is 3.5 kW (-3.5 kW). No battery present.
+            // Available surplus should be 3.5 kW.
+            // Wallbox pool = 7.0 + 3.5 = 10.5 kW.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: -3.5, pvPowerKw: -10.0, batteryPowerKw: 0.0, batterySocPct: 0.0, new[] { wallbox });
+            Assert.Equal(10.5, wallbox.AllocatedPowerKw);
+            Assert.Contains("Surplus Boost", wallbox.Status);
+        }
+
+        [Fact]
+        public void Dispatch_WithoutBattery_IgnoresBatteryValues()
+        {
+            var sources = new EnergySourcesConfig
+            {
+                HasBattery = false,
+                GridMaxImportKw = 8.0,
+                BatteryMinReserveKw = 1.0
+            };
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallboxes",
+                IsControllable = true,
+                BaseLimitKw = 8.0,
+                ActualPowerKw = 7.0,
+                MinPowerKw = 1.38,
+                MaxPowerKw = 22.0
+            };
+
+            // Even if battery telemetry passes non-zero charge and high SoC, HasBattery = false ignores it.
+            // Grid is importing 2 kW (no export surplus).
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 2.0, pvPowerKw: -5.0, batteryPowerKw: -4.0, batterySocPct: 50.0, new[] { wallbox });
+            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
+            Assert.Equal("Base Limit (8.0 kW)", wallbox.Status);
+        }
+
+        [Fact]
         public void Dispatch_MultiConsumer_PrioritizesConsumersCorrectly()
         {
             var sources = CreateDefaultSources(12.0, reserve: 1.0);
@@ -439,6 +494,30 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
+        public void EnergyCalculator_WithNegativePvPower_AccumulatesPositiveGeneration()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var startTime = new DateTime(2026, 9, 13, 10, 0, 0, DateTimeKind.Utc);
+
+            // Feed 1 hour of constant negative PV power (-8.0 kW) from a feed-in meter convention
+            for (int minute = 0; minute <= 60; minute++)
+            {
+                var time = startTime.AddMinutes(minute);
+                calc.RecordSample(
+                    time,
+                    gridKw: 0.0,
+                    pvKw: -8.0,
+                    battKw: 0.0,
+                    uncontrollableKw: 2.0,
+                    surplusKw: 6.0,
+                    Array.Empty<(string, double)>());
+            }
+
+            var totals = calc.Get24hTotals(startTime.AddMinutes(60));
+            Assert.Equal(8.0, totals.PvGenerationKwh);
+        }
+
+        [Fact]
         public void EnergyCalculator_BidirectionalSplitting_CorrectlySeparatesInAndOut()
         {
             var calc = new EmsRollingEnergyCalculator();
@@ -550,6 +629,7 @@ namespace Pulswerk.Core.Tests
             Assert.True(values.ContainsKey("grid_export"));
             Assert.True(values.ContainsKey("grid_power"));
             Assert.True(values.ContainsKey("pv_power"));
+            Assert.True(values.ContainsKey("pv_generation"));
             Assert.True(values.ContainsKey("battery_power"));
             Assert.True(values.ContainsKey("battery_charge"));
             Assert.True(values.ContainsKey("battery_soc"));
@@ -577,6 +657,43 @@ namespace Pulswerk.Core.Tests
 
             Assert.NotNull(published);
             Assert.True(published!.ContainsKey("uncontrollable_load"));
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_WithoutBatteryAndNegativePv_ReflectsCorrectBalance()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig
+                {
+                    HasBattery = false,
+                    GridMaxImportKw = 10.0,
+                    PvMeterKey = "pv_test"
+                });
+
+                // Simulate live readings: Grid -3.0 (exporting 3 kW), PV -7.0 (generating 7 kW)
+                svc.SetLiveTelemetryForTesting(gridKw: -3.0, pvKw: -7.0, batteryKw: -2.0, batterySocPct: 80.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.False(snap.Sources.HasBattery);
+                Assert.Equal(-7.0, snap.PvPowerKw);
+                Assert.Equal(7.0, snap.PvGenerationKw);
+                Assert.Equal(0.0, snap.BatteryPowerKw);
+                Assert.Equal(0.0, snap.BatteryChargeKw);
+                Assert.Equal(0.0, snap.BatterySocPct);
+                Assert.False(snap.IsBatteryCharging);
+
+                // Residual base load balance without battery:
+                // Grid + Abs(PV) - Controllable = -3.0 + 7.0 - Controllable
+                // With controllable = 0, balanceLoad = 4.0 kW
+                Assert.Equal(4.0, snap.UncontrollableLoadKw);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
         }
 
         [Fact]

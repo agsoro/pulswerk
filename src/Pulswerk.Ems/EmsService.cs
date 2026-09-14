@@ -19,6 +19,7 @@ namespace Pulswerk.Ems
         public string GridMeterKey { get; set; } = "meter-main-a_power";
         public double GridMaxImportKw { get; set; } = 8.0;
         public string PvMeterKey { get; set; } = "pv-rooftop_power";
+        public bool HasBattery { get; set; } = true;
         public string BatteryPowerKey { get; set; } = "solis-battery_power";
         public string BatterySocKey { get; set; } = "solis-battery_battery_soc";
 
@@ -168,6 +169,7 @@ namespace Pulswerk.Ems
         public bool Enabled { get; set; }
         public double GridImportKw { get; set; }
         public double GridMaxImportKw { get; set; }
+        public double PvPowerKw { get; set; }
         public double PvGenerationKw { get; set; }
         public double BatteryPowerKw { get; set; }
         public double BatteryChargeKw { get; set; }
@@ -218,11 +220,12 @@ namespace Pulswerk.Ems
 
             // 1. Inverter / Battery Surplus Calculation
             // Negative power = Charging (absorbing surplus), Positive power = Discharging.
-            double rawCharge = batteryPowerKw < -0.2 ? Math.Abs(batteryPowerKw) : 0.0;
+            double rawCharge = (sources.HasBattery && batteryPowerKw < -0.2) ? Math.Abs(batteryPowerKw) : 0.0;
             double maxCharge = sources.BatteryMaxChargeKw > 0 ? sources.BatteryMaxChargeKw : 5.0;
             double battChargeKw = Math.Min(rawCharge, maxCharge);
 
-            bool isCharging = battChargeKw > 0.3 
+            bool isCharging = sources.HasBattery 
+                && battChargeKw > 0.3 
                 && batterySocPct >= sources.BatteryMinSocPct 
                 && batterySocPct < sources.BatteryFullSocPct;
 
@@ -231,7 +234,7 @@ namespace Pulswerk.Ems
                 ? Math.Max(0.0, battChargeKw - sources.BatteryMinReserveKw) 
                 : 0.0;
 
-            // Additional surplus: solar power exported to grid (e.g. PV generation exceeding battery charge capacity):
+            // Additional surplus: solar power exported to grid (e.g. PV generation exceeding battery charge capacity or without battery):
             double gridExportKw = gridPowerKw < -0.2 ? Math.Abs(gridPowerKw) : 0.0;
 
             double availableSurplus = battSurplus + gridExportKw;
@@ -298,9 +301,9 @@ namespace Pulswerk.Ems
                     double actualOpt = Math.Max(0.0, consumer.ActualPowerKw - consumer.BasePowerKw);
 
                     double targetOpt = consumer.MaxOptionalKw;
-                    if (isCharging && availableSurplus > 0.1)
+                    if (availableSurplus > 0.1)
                     {
-                        // Closed-loop virtual pool: actual consumption + surplus entering battery
+                        // Closed-loop virtual pool: actual consumption + surplus entering battery or exported to grid
                         double poolForThis = actualOpt + availableSurplus;
                         targetOpt = Math.Max(consumer.MaxOptionalKw, poolForThis);
                         targetOpt = Math.Min(targetOpt, consumer.MaxPowerKw - consumer.BasePowerKw);
@@ -449,6 +452,17 @@ namespace Pulswerk.Ems
             PublishTelemetries();
         }
 
+        public void SetLiveTelemetryForTesting(double gridKw, double pvKw, double batteryKw = 0.0, double batterySocPct = 100.0)
+        {
+            LiveGridKw = Math.Round(gridKw, 2);
+            LivePvKw = Math.Round(pvKw, 2);
+            LiveBatteryKw = SourcesConfig.HasBattery ? Math.Round(batteryKw, 2) : 0.0;
+            LiveBatterySocPct = SourcesConfig.HasBattery ? Math.Round(batterySocPct, 1) : 0.0;
+            double battCharge = (SourcesConfig.HasBattery && batteryKw < -0.2) ? Math.Abs(batteryKw) : 0.0;
+            LiveBatteryChargeKw = Math.Round(battCharge, 2);
+            IsBatteryCharging = SourcesConfig.HasBattery && battCharge > 0.3 && batterySocPct < SourcesConfig.BatteryFullSocPct;
+        }
+
         private EmsService() { }
 
         public void Initialize(
@@ -539,6 +553,7 @@ namespace Pulswerk.Ems
                     GridMaxImportKw = _billingStore.GetTariff("energy_control_base_kw", 8.0),
                     GridMeterKey = _billingStore.GetSetting("energy_control_grid_key", "meter-main-a_power"),
                     PvMeterKey = _billingStore.GetSetting("energy_control_pv_key", "pv-rooftop_power"),
+                    HasBattery = !string.IsNullOrWhiteSpace(_billingStore.GetSetting("energy_control_battery_power_key", "solis-battery_power")),
                     BatteryMinReserveKw = _billingStore.GetTariff("energy_control_reserve_kw", 1.0),
                     BatteryMaxPowerKw = _billingStore.GetTariff("energy_control_battery_max_kw", 5.0),
                     BatteryPowerKey = _billingStore.GetSetting("energy_control_battery_power_key", "solis-battery_power"),
@@ -647,6 +662,11 @@ namespace Pulswerk.Ems
             }
         }
 
+        public void Configure(EnergySourcesConfig sources)
+        {
+            SourcesConfig = sources;
+        }
+
         public void SaveConfiguration(bool enabled, EnergySourcesConfig sources, List<EnergyConsumer> consumers)
         {
             Enabled = enabled;
@@ -686,7 +706,9 @@ namespace Pulswerk.Ems
 
             // Uncontrollable base load is calculated dynamically from the site energy balance by default:
             // Residual Uncontrollable Base Load = (Grid + PV + Battery) - Total Controllable
-            double balanceLoad = (LiveGridKw + LivePvKw + LiveBatteryKw) - totalControllable;
+            double effectivePv = Math.Abs(LivePvKw);
+            double effectiveBatt = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0;
+            double balanceLoad = (LiveGridKw + effectivePv + effectiveBatt) - totalControllable;
             double calculatedBaseLoad = Math.Max(0.0, Math.Round(balanceLoad, 2));
 
             // If sub-metered uncontrollable consumers are explicitly configured, ensure total reflects measured sub-meters or balance
@@ -694,9 +716,9 @@ namespace Pulswerk.Ems
                 ? Math.Max(totalUncontrollable, calculatedBaseLoad)
                 : calculatedBaseLoad;
 
-            double rawCharge = LiveBatteryKw < -0.2 ? Math.Abs(LiveBatteryKw) : 0.0;
+            double rawCharge = (SourcesConfig.HasBattery && LiveBatteryKw < -0.2) ? Math.Abs(LiveBatteryKw) : 0.0;
             double battCharge = Math.Min(rawCharge, SourcesConfig.BatteryMaxChargeKw);
-            double battSurplus = IsBatteryCharging 
+            double battSurplus = (SourcesConfig.HasBattery && IsBatteryCharging) 
                 ? Math.Max(0.0, battCharge - SourcesConfig.BatteryMinReserveKw) 
                 : 0.0;
             double exportSurplus = LiveGridKw < -0.2 ? Math.Abs(LiveGridKw) : 0.0;
@@ -717,14 +739,15 @@ namespace Pulswerk.Ems
                 Enabled = Enabled,
                 GridImportKw = LiveGridKw,
                 GridMaxImportKw = SourcesConfig.GridMaxImportKw,
-                PvGenerationKw = LivePvKw,
-                BatteryPowerKw = LiveBatteryKw,
-                BatteryChargeKw = LiveBatteryChargeKw,
-                BatterySocPct = LiveBatterySocPct,
-                BatteryMaxPowerKw = SourcesConfig.BatteryMaxPowerKw,
-                BatteryMaxChargeKw = SourcesConfig.BatteryMaxChargeKw,
-                BatteryMaxDischargeKw = SourcesConfig.BatteryMaxDischargeKw,
-                IsBatteryCharging = IsBatteryCharging,
+                PvPowerKw = LivePvKw,
+                PvGenerationKw = Math.Abs(LivePvKw),
+                BatteryPowerKw = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0,
+                BatteryChargeKw = SourcesConfig.HasBattery ? LiveBatteryChargeKw : 0.0,
+                BatterySocPct = SourcesConfig.HasBattery ? LiveBatterySocPct : 0.0,
+                BatteryMaxPowerKw = SourcesConfig.HasBattery ? SourcesConfig.BatteryMaxPowerKw : 0.0,
+                BatteryMaxChargeKw = SourcesConfig.HasBattery ? SourcesConfig.BatteryMaxChargeKw : 0.0,
+                BatteryMaxDischargeKw = SourcesConfig.HasBattery ? SourcesConfig.BatteryMaxDischargeKw : 0.0,
+                IsBatteryCharging = SourcesConfig.HasBattery && IsBatteryCharging,
                 TotalSurplusAvailableKw = Math.Round(totalSurplus, 2),
                 TotalBaseLoadKw = Math.Round(totalBaseTier, 2),
                 TotalOptionalLoadKw = Math.Round(totalOptional, 2),
@@ -736,8 +759,8 @@ namespace Pulswerk.Ems
                 GridImport24hKwh = energyTotals.GridImportKwh,
                 GridExport24hKwh = energyTotals.GridExportKwh,
                 PvGeneration24hKwh = energyTotals.PvGenerationKwh,
-                BatteryCharged24hKwh = energyTotals.BatteryChargedKwh,
-                BatteryDischarged24hKwh = energyTotals.BatteryDischargedKwh,
+                BatteryCharged24hKwh = SourcesConfig.HasBattery ? energyTotals.BatteryChargedKwh : 0.0,
+                BatteryDischarged24hKwh = SourcesConfig.HasBattery ? energyTotals.BatteryDischargedKwh : 0.0,
                 Uncontrollable24hKwh = energyTotals.UncontrollableKwh,
                 TotalSurplus24hKwh = energyTotals.TotalSurplusKwh,
                 TotalControllable24hKwh = Math.Round(energyTotals.ConsumerKwh.Values.Sum(), 2),
@@ -754,6 +777,7 @@ namespace Pulswerk.Ems
             "grid_export",
             "grid_power",
             "pv_power",
+            "pv_generation",
             "battery_power",
             "battery_charge",
             "battery_soc",
@@ -784,7 +808,8 @@ namespace Pulswerk.Ems
                 ["grid_import"] = snap.GridImportKw >= 0 ? snap.GridImportKw : 0.0,
                 ["grid_export"] = snap.GridImportKw < 0 ? Math.Abs(snap.GridImportKw) : 0.0,
                 ["grid_power"] = snap.GridImportKw,
-                ["pv_power"] = snap.PvGenerationKw,
+                ["pv_power"] = snap.PvPowerKw,
+                ["pv_generation"] = snap.PvGenerationKw,
                 ["battery_power"] = snap.BatteryPowerKw,
                 ["battery_charge"] = snap.BatteryChargeKw,
                 ["battery_soc"] = snap.BatterySocPct,
@@ -843,6 +868,7 @@ namespace Pulswerk.Ems
                 ["grid_export"] = Units.Kilowatt,
                 ["grid_power"] = Units.Kilowatt,
                 ["pv_power"] = Units.Kilowatt,
+                ["pv_generation"] = Units.Kilowatt,
                 ["battery_power"] = Units.Kilowatt,
                 ["battery_charge"] = Units.Kilowatt,
                 ["battery_soc"] = Units.Percent,
@@ -885,7 +911,8 @@ namespace Pulswerk.Ems
                 "grid_import" => "Grid Import Power",
                 "grid_export" => "Grid Export Power",
                 "grid_power" => "Net Grid Power",
-                "pv_power" => "Solar PV Generation",
+                "pv_power" => "Solar PV Power",
+                "pv_generation" => "Solar PV Generation",
                 "battery_power" => "Battery Power",
                 "battery_charge" => "Battery Charging Power",
                 "battery_soc" => "Battery State of Charge",
@@ -996,17 +1023,22 @@ namespace Pulswerk.Ems
             }
             double pvVal = pvValNullable ?? 0.0;
 
-            double battPowerVal = _liveValueReader(SourcesConfig.BatteryPowerKey) ?? 0.0;
-            double battSocVal = _liveValueReader(SourcesConfig.BatterySocKey) ?? 100.0;
+            double battPowerVal = 0.0;
+            double battSocVal = 0.0;
+            if (SourcesConfig.HasBattery && !string.IsNullOrWhiteSpace(SourcesConfig.BatteryPowerKey))
+            {
+                battPowerVal = _liveValueReader(SourcesConfig.BatteryPowerKey) ?? 0.0;
+                battSocVal = _liveValueReader(SourcesConfig.BatterySocKey) ?? 100.0;
+            }
 
             LiveGridKw = Math.Round(gridVal, 2);
             LivePvKw = Math.Round(pvVal, 2);
             LiveBatteryKw = Math.Round(battPowerVal, 2);
             LiveBatterySocPct = Math.Round(battSocVal, 1);
 
-            double battCharge = battPowerVal < -0.2 ? Math.Abs(battPowerVal) : 0.0;
+            double battCharge = (SourcesConfig.HasBattery && battPowerVal < -0.2) ? Math.Abs(battPowerVal) : 0.0;
             LiveBatteryChargeKw = Math.Round(battCharge, 2);
-            IsBatteryCharging = battCharge > 0.3 && battSocVal < SourcesConfig.BatteryFullSocPct;
+            IsBatteryCharging = SourcesConfig.HasBattery && battCharge > 0.3 && battSocVal < SourcesConfig.BatteryFullSocPct;
 
             // 2. Read live consumers
             foreach (var consumer in Consumers)
@@ -1046,7 +1078,9 @@ namespace Pulswerk.Ems
                         if (ok)
                         {
                             string reason = consumer.AllocatedPowerKw > consumer.MaxOptionalKw
-                                ? $"Battery charging at {LiveBatteryChargeKw:F1} kW (SoC {LiveBatterySocPct}%). Setpoint boosted to {consumer.AllocatedPowerKw:F1} kW."
+                                ? (IsBatteryCharging 
+                                    ? $"Battery charging at {LiveBatteryChargeKw:F1} kW (SoC {LiveBatterySocPct}%). Setpoint boosted to {consumer.AllocatedPowerKw:F1} kW."
+                                    : $"Solar surplus export at {Math.Abs(LiveGridKw):F1} kW. Setpoint boosted to {consumer.AllocatedPowerKw:F1} kW.")
                                 : consumer.UnusedPowerKw > 0.1
                                     ? $"{consumer.Status}. Actual draw: {consumer.ActualPowerKw:F1} kW."
                                     : $"Setpoint {consumer.AllocatedPowerKw:F1} kW allocated. Actual draw: {consumer.ActualPowerKw:F1} kW.";
@@ -1069,13 +1103,15 @@ namespace Pulswerk.Ems
             // 5. Update Rolling 24-hour Energy Calculation
             double totalControllablePower = Consumers.Where(c => c.IsControllable).Sum(c => c.ActualPowerKw);
             double uncPower = Consumers.Where(c => !c.IsControllable).Sum(c => c.ActualPowerKw);
-            double bal = (LiveGridKw + LivePvKw + LiveBatteryKw) - totalControllablePower;
+            double effectivePv = Math.Abs(LivePvKw);
+            double effectiveBatt = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0;
+            double bal = (LiveGridKw + effectivePv + effectiveBatt) - totalControllablePower;
             double calculatedBal = Math.Max(0.0, Math.Round(bal, 2));
             uncPower = uncPower > 0.0 ? Math.Max(uncPower, calculatedBal) : calculatedBal;
 
-            double rawBattCharge = LiveBatteryKw < -0.2 ? Math.Abs(LiveBatteryKw) : 0.0;
+            double rawBattCharge = (SourcesConfig.HasBattery && LiveBatteryKw < -0.2) ? Math.Abs(LiveBatteryKw) : 0.0;
             double clampedCharge = Math.Min(rawBattCharge, SourcesConfig.BatteryMaxChargeKw);
-            double surplusBatt = IsBatteryCharging ? Math.Max(0.0, clampedCharge - SourcesConfig.BatteryMinReserveKw) : 0.0;
+            double surplusBatt = (SourcesConfig.HasBattery && IsBatteryCharging) ? Math.Max(0.0, clampedCharge - SourcesConfig.BatteryMinReserveKw) : 0.0;
             double expSurplus = LiveGridKw < -0.2 ? Math.Abs(LiveGridKw) : 0.0;
             double totalLiveSurplus = surplusBatt + expSurplus;
 
@@ -1083,7 +1119,7 @@ namespace Pulswerk.Ems
                 now,
                 LiveGridKw,
                 LivePvKw,
-                LiveBatteryKw,
+                SourcesConfig.HasBattery ? LiveBatteryKw : 0.0,
                 uncPower,
                 totalLiveSurplus,
                 Consumers.Select(c => (c.Id, c.ActualPowerKw)));
@@ -1113,7 +1149,7 @@ namespace Pulswerk.Ems
                 var keys = new List<string>();
                 if (!string.IsNullOrWhiteSpace(SourcesConfig.GridMeterKey)) keys.Add(SourcesConfig.GridMeterKey);
                 if (!string.IsNullOrWhiteSpace(SourcesConfig.PvMeterKey)) keys.Add(SourcesConfig.PvMeterKey);
-                if (!string.IsNullOrWhiteSpace(SourcesConfig.BatteryPowerKey)) keys.Add(SourcesConfig.BatteryPowerKey);
+                if (SourcesConfig.HasBattery && !string.IsNullOrWhiteSpace(SourcesConfig.BatteryPowerKey)) keys.Add(SourcesConfig.BatteryPowerKey);
                 foreach (var c in Consumers)
                 {
                     if (!string.IsNullOrWhiteSpace(c.ActualPowerKey))
@@ -1146,7 +1182,7 @@ namespace Pulswerk.Ems
                             }
                             else if (key == SourcesConfig.PvMeterKey)
                             {
-                                double pv = Math.Max(0.0, (Math.Max(0.0, vPrev) + Math.Max(0.0, vCurr)) * 0.5 * dtHours);
+                                double pv = (Math.Abs(vPrev) + Math.Abs(vCurr)) * 0.5 * dtHours;
                                 _energyCalc.AddEnergy(minKey, pvGenKwh: pv);
                             }
                             else if (key == SourcesConfig.BatteryPowerKey)

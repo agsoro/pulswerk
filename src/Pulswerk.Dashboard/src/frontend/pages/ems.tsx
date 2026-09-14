@@ -31,6 +31,7 @@ interface EnergySourcesConfig {
     gridMeterKey: string;
     gridMaxImportKw: number;
     pvMeterKey: string;
+    hasBattery?: boolean;
     batteryPowerKey: string;
     batterySocKey: string;
     batteryMaxPowerKw?: number;
@@ -45,6 +46,7 @@ interface EnergySystemSnapshot {
     enabled: boolean;
     gridImportKw: number;
     gridMaxImportKw: number;
+    pvPowerKw?: number;
     pvGenerationKw: number;
     batteryPowerKw: number;
     batteryChargeKw: number;
@@ -97,6 +99,7 @@ export function EmsPage() {
     const [gridMaxKw, setGridMaxKw] = useState(8.0);
     const [gridKey, setGridKey] = useState('meter-main-a_power');
     const [pvKey, setPvKey] = useState('pv-rooftop_power');
+    const [hasBattery, setHasBattery] = useState(true);
     const [battPowerKey, setBattPowerKey] = useState('solis-battery_power');
     const [battSocKey, setBattSocKey] = useState('solis-battery_battery_soc');
     const [battReserveKw, setBattReserveKw] = useState(1.0);
@@ -149,6 +152,7 @@ export function EmsPage() {
             setGridMaxKw(snapshot.sources.gridMaxImportKw ?? 8.0);
             setGridKey(snapshot.sources.gridMeterKey ?? 'meter-main-a_power');
             setPvKey(snapshot.sources.pvMeterKey ?? 'pv-rooftop_power');
+            setHasBattery(snapshot.sources.hasBattery ?? true);
             setBattPowerKey(snapshot.sources.batteryPowerKey ?? 'solis-battery_power');
             setBattSocKey(snapshot.sources.batterySocKey ?? 'solis-battery_battery_soc');
             setBattReserveKw(snapshot.sources.batteryMinReserveKw ?? 1.0);
@@ -169,14 +173,16 @@ export function EmsPage() {
                     baseLimitKw: gridMaxKw,
                     batteryReserveKw: battReserveKw,
                     batteryMaxPowerKw: battMaxKw,
-                    batteryPowerKey: battPowerKey,
-                    batterySocKey: battSocKey,
+                    batteryPowerKey: hasBattery ? battPowerKey : '',
+                    batterySocKey: hasBattery ? battSocKey : '',
+                    hasBattery: hasBattery,
                     sources: {
                         gridMeterKey: gridKey,
                         gridMaxImportKw: gridMaxKw,
                         pvMeterKey: pvKey,
-                        batteryPowerKey: battPowerKey,
-                        batterySocKey: battSocKey,
+                        hasBattery: hasBattery,
+                        batteryPowerKey: hasBattery ? battPowerKey : '',
+                        batterySocKey: hasBattery ? battSocKey : '',
                         batteryMaxPowerKw: battMaxKw,
                         batteryMaxChargeKw: battMaxKw,
                         batteryMaxDischargeKw: battMaxKw,
@@ -492,7 +498,7 @@ export function EmsPage() {
                                 title={`View telemetry details for ${snapshot?.sources?.pvMeterKey || 'ems_pv_power'}`}
                             >
                                 <span class="text-2xl font-black text-amber-400 group-hover/val:text-amber-300 transition-colors">
-                                    {(snapshot?.pvGenerationKw ?? 0).toFixed(1)}
+                                    {Math.abs(snapshot?.pvGenerationKw ?? snapshot?.pvPowerKw ?? 0).toFixed(1)}
                                 </span>
                                 <span class="text-xs font-bold text-slate-400 ml-1">kW</span>
                                 <i class="fas fa-chart-area text-[0.65rem] text-amber-600 group-hover/val:text-amber-400 ml-1.5 opacity-0 group-hover/val:opacity-100 transition-all"></i>
@@ -502,8 +508,9 @@ export function EmsPage() {
                                 class="text-xs text-amber-400 font-medium flex items-center gap-1.5 cursor-pointer hover:text-amber-300 transition-colors"
                                 title={`View telemetry details for ${snapshot?.sources?.pvMeterKey || 'ems_pv_power'}`}
                             >
+                                {(snapshot?.pvPowerKw ?? snapshot?.pvGenerationKw ?? 0) < -0.2 && <i class="fas fa-arrow-left text-[0.65rem]"></i>}
                                 {t('ems_generation')}
-                                <i class="fas fa-arrow-right text-[0.65rem]"></i>
+                                {(snapshot?.pvPowerKw ?? snapshot?.pvGenerationKw ?? 0) >= -0.2 && <i class="fas fa-arrow-right text-[0.65rem]"></i>}
                             </span>
                         </div>
 
@@ -523,6 +530,7 @@ export function EmsPage() {
                     </div>
 
                     {/* Battery Storage Card */}
+                    {snapshot?.sources?.hasBattery !== false && (
                     <div class={`bg-slate-900/70 border rounded-2xl p-5 shadow-lg relative overflow-hidden transition-all ${
                         snapshot?.isBatteryCharging 
                             ? 'border-emerald-500/40 shadow-emerald-500/5' 
@@ -642,6 +650,7 @@ export function EmsPage() {
                             </div>
                         </div>
                     </div>
+                    )}
                 </div>
 
                 {/* ── CENTER: POWER FLOW & SURPLUS DISPATCH (2 Cols) ───────────── */}
@@ -957,7 +966,7 @@ export function EmsPage() {
                             >
                                 <span class="text-slate-400 flex items-center gap-1.5">
                                     <i class="fas fa-calculator text-purple-400 text-[0.6rem]"></i>
-                                    <span>(Grid + PV + Battery) − Controllable:</span>
+                                    <span>(Grid + PV{snapshot?.sources?.hasBattery !== false ? ' + Battery' : ''}) − Controllable:</span>
                                 </span>
                                 <span class="text-purple-300 font-bold">
                                     {(snapshot?.uncontrollableLoadKw ?? 0).toFixed(1)} kW
@@ -1081,48 +1090,69 @@ export function EmsPage() {
                         </div>
 
                         <form onSubmit={handleSaveSystemConfig} class="space-y-4 text-xs">
-                            <div class="grid grid-cols-3 gap-3">
-                                <div>
-                                    <label class="block font-bold text-slate-300 mb-1">{t('ems_grid_limit')} (kW)</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        min="1"
-                                        max="100"
-                                        value={gridMaxKw}
-                                        onInput={(e: any) => setGridMaxKw(parseFloat(e.target.value) || 8.0)}
-                                        class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
-                                    />
-                                    <span class="text-[0.65rem] text-slate-500 mt-1 block">Contract/fuse ceiling</span>
+                            <div>
+                                <label class="block font-bold text-slate-300 mb-1">{t('ems_grid_limit')} (kW)</label>
+                                <input
+                                    type="number"
+                                    step="0.5"
+                                    min="1"
+                                    max="100"
+                                    value={gridMaxKw}
+                                    onInput={(e: any) => setGridMaxKw(parseFloat(e.target.value) || 8.0)}
+                                    class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
+                                />
+                                <span class="text-[0.65rem] text-slate-500 mt-1 block">Contract/fuse ceiling</span>
+                            </div>
+
+                            {/* Battery Storage Options */}
+                            <div class="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            id="hasBattery"
+                                            checked={hasBattery}
+                                            onChange={(e: any) => setHasBattery(e.target.checked)}
+                                            class="w-4 h-4 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                        />
+                                        <label for="hasBattery" class="font-bold text-slate-200 cursor-pointer">
+                                            {t('ems_has_battery')}
+                                        </label>
+                                    </div>
+                                    <span class="text-[0.65rem] text-slate-500">{t('ems_has_battery_desc')}</span>
                                 </div>
 
-                                <div>
-                                    <label class="block font-bold text-slate-300 mb-1">{t('ems_battery_max_power')}</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        min="1"
-                                        max="50"
-                                        value={battMaxKw}
-                                        onInput={(e: any) => setBattMaxKw(parseFloat(e.target.value) || 5.0)}
-                                        class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
-                                    />
-                                    <span class="text-[0.65rem] text-slate-500 mt-1 block">Max rating (5.0 kW)</span>
-                                </div>
+                                {hasBattery && (
+                                    <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                                        <div>
+                                            <label class="block font-bold text-slate-300 mb-1">{t('ems_battery_max_power')}</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                min="1"
+                                                max="50"
+                                                value={battMaxKw}
+                                                onInput={(e: any) => setBattMaxKw(parseFloat(e.target.value) || 5.0)}
+                                                class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
+                                            />
+                                            <span class="text-[0.65rem] text-slate-500 mt-1 block">Max rating (5.0 kW)</span>
+                                        </div>
 
-                                <div>
-                                    <label class="block font-bold text-slate-300 mb-1">{t('ems_reserve_headroom')} (kW)</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        min="0"
-                                        max="10"
-                                        value={battReserveKw}
-                                        onInput={(e: any) => setBattReserveKw(parseFloat(e.target.value) || 1.0)}
-                                        class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
-                                    />
-                                    <span class="text-[0.65rem] text-slate-500 mt-1 block">Trickle buffer (1.0 kW)</span>
-                                </div>
+                                        <div>
+                                            <label class="block font-bold text-slate-300 mb-1">{t('ems_reserve_headroom')} (kW)</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                min="0"
+                                                max="10"
+                                                value={battReserveKw}
+                                                onInput={(e: any) => setBattReserveKw(parseFloat(e.target.value) || 1.0)}
+                                                class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
+                                            />
+                                            <span class="text-[0.65rem] text-slate-500 mt-1 block">Trickle buffer (1.0 kW)</span>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             <div class="space-y-3 pt-2 border-t border-slate-800">
@@ -1148,24 +1178,28 @@ export function EmsPage() {
                                     />
                                 </div>
 
-                                <div>
-                                    <label class="block text-slate-400 mb-1">{t('ems_battery_power_key')}</label>
-                                    <input
-                                        type="text"
-                                        value={battPowerKey}
-                                        onInput={(e: any) => setBattPowerKey(e.target.value)}
-                                        class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
-                                    />
-                                </div>
-                                <div>
-                                    <label class="block text-slate-400 mb-1">{t('ems_battery_soc_key')}</label>
-                                    <input
-                                        type="text"
-                                        value={battSocKey}
-                                        onInput={(e: any) => setBattSocKey(e.target.value)}
-                                        class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
-                                    />
-                                </div>
+                                {hasBattery && (
+                                    <>
+                                        <div>
+                                            <label class="block text-slate-400 mb-1">{t('ems_battery_power_key')}</label>
+                                            <input
+                                                type="text"
+                                                value={battPowerKey}
+                                                onInput={(e: any) => setBattPowerKey(e.target.value)}
+                                                class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label class="block text-slate-400 mb-1">{t('ems_battery_soc_key')}</label>
+                                            <input
+                                                type="text"
+                                                value={battSocKey}
+                                                onInput={(e: any) => setBattSocKey(e.target.value)}
+                                                class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
+                                            />
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">

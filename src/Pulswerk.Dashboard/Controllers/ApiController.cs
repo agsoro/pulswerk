@@ -1710,6 +1710,7 @@ namespace Pulswerk.Dashboard.Controllers
             public string BatteryPowerKey { get; set; } = "";
             public string BatterySocKey { get; set; } = "";
             public double BatteryMaxPowerKw { get; set; } = 5.0;
+            public bool? HasBattery { get; set; }
 
             public EnergySourcesConfig? Sources { get; set; }
             public List<EnergyConsumer>? Consumers { get; set; }
@@ -1731,6 +1732,11 @@ namespace Pulswerk.Dashboard.Controllers
             var sources = req.Sources ?? svc.SourcesConfig;
             double baseLimit = req.BaseLimitKw > 0 ? req.BaseLimitKw : (req.MonthlyTargetKwh > 0 ? req.MonthlyTargetKwh : sources.GridMaxImportKw);
             sources.GridMaxImportKw = baseLimit;
+
+            if (req.HasBattery.HasValue)
+                sources.HasBattery = req.HasBattery.Value;
+            else if (req.Sources != null)
+                sources.HasBattery = req.Sources.HasBattery;
 
             if (req.BatteryMaxPowerKw > 0)
                 sources.BatteryMaxPowerKw = req.BatteryMaxPowerKw;

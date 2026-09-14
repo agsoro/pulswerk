@@ -103,8 +103,8 @@ namespace Pulswerk.Ems
                         bucket.GridImportKwh += avgGridImport * deltaHours;
                         bucket.GridExportKwh += avgGridExport * deltaHours;
 
-                        // 2. Solar PV (Out = Generation)
-                        double avgPv = (Math.Max(0.0, _lastPvKw) + Math.Max(0.0, pvKw)) * 0.5;
+                        // 2. Solar PV (Out = Generation; power may be signed positive or negative by meter convention)
+                        double avgPv = (Math.Abs(_lastPvKw) + Math.Abs(pvKw)) * 0.5;
                         bucket.PvGenKwh += avgPv * deltaHours;
 
                         // 3. Battery (In = Charge when P < 0, Out = Discharge when P > 0)
