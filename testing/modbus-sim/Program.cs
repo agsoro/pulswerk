@@ -53,9 +53,10 @@ network.AddSlave(slave2);
 var slave3 = factory.CreateSlave(3);
 network.AddSlave(slave3);
 
-// Slave 4 – HVAC Meter             (4–12 kW, fast 2-min cycle)
+// Slave 4 – HVAC Heat Pump Main     (2.2 kW base + 0–5 kW thermal buffer)
 var slave4 = factory.CreateSlave(4);
 network.AddSlave(slave4);
+slave4.DataStore.HoldingRegisters.WritePoints(401, new ushort[] { 0 });
 
 // Slave 5 – Glück Controller        (10–50 kW PV generation, 3-min sine)
 var slave5 = factory.CreateSlave(5);
@@ -63,9 +64,17 @@ network.AddSlave(slave5);
 // Initialize power limit to 100% — only changes when the connector writes
 slave5.DataStore.HoldingRegisters.WritePoints(401, new ushort[] { 100 });
 
+// Slave 6 – Annex Heat Pump         (1.5 kW base + 0–3 kW thermal buffer)
+var slave6 = factory.CreateSlave(6);
+network.AddSlave(slave6);
+
+// Slave 7 – Rooftop PV System       (5–25 kW solar PV generation)
+var slave7 = factory.CreateSlave(7);
+network.AddSlave(slave7);
+
 var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-Console.WriteLine($"=== Modbus TCP Simulator v{version?.Major}.{version?.Minor}.{version?.Build} (Janitza + Glück) ===");
-Console.WriteLine($"Listening on 0.0.0.0:502  slaves=1,2,3,4,5");
+Console.WriteLine($"=== Modbus TCP Simulator v{version?.Major}.{version?.Minor}.{version?.Build} (Janitza + HeatPumps + PV + Glück) ===");
+Console.WriteLine($"Listening on 0.0.0.0:502  slaves=1,2,3,4,5,6,7");
 Console.WriteLine($"Slave1 import = {importWh / 1000:F1} kWh");
 Console.WriteLine();
 
@@ -75,6 +84,8 @@ var prevAt = DateTime.UtcNow;
 double importWh2 = rng.NextDouble() * 200_000_000 + 500_000;
 double importWh3 = rng.NextDouble() * 150_000_000 + 300_000;
 double importWh4 = rng.NextDouble() * 300_000_000 + 800_000;
+double importWh6 = rng.NextDouble() * 100_000_000 + 400_000;
+double importWh7 = rng.NextDouble() * 400_000_000 + 1_000_000;
 
 var updater = Task.Run(async () =>
 {
@@ -110,13 +121,19 @@ var updater = Task.Run(async () =>
         WriteFloat32(slave3, REG_IMPORT_WH, (float)importWh3);
         WriteFloat32(slave3, REG_EXPORT_WH, 0f);
 
-        // Slave 4: 4–12 kW, fast 2-min cycle
+        // Slave 4: HVAC Heat Pump Main (2.2 kW base + 0–5 kW modulating buffer, 2-min cycle)
         double phase4  = elapsed % 120.0 / 120.0;
-        double powerW4 = 4000 + 8000 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * phase4));
+        double hpBufferW = 5000 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * phase4));
+        var hpSetpoints = slave4.DataStore.HoldingRegisters.ReadPoints(401, 1);
+        if (hpSetpoints[0] > 0)
+        {
+            hpBufferW = Math.Min(hpSetpoints[0] > 100 ? hpSetpoints[0] : hpSetpoints[0] * 100, 6000);
+        }
+        double powerW4 = 2200 + hpBufferW;
         importWh4 += powerW4 * dt / 3600.0;
         WriteFloat32(slave4, REG_POWER_W,   (float)powerW4);
         WriteFloat32(slave4, REG_IMPORT_WH, (float)importWh4);
-        WriteFloat32(slave4, REG_EXPORT_WH, (float)(powerW4 > 9000 ? (powerW4 - 9000) : 0));  // exports when peak
+        WriteFloat32(slave4, REG_EXPORT_WH, 0f);
 
         // Slave 5: Glück – 10–50 kW PV generation, 3-min sine
         double phase5 = elapsed % 180.0 / 180.0;
@@ -129,10 +146,25 @@ var updater = Task.Run(async () =>
         WriteInputUInt32Swapped(slave5, 1902, feedbackLimit);
         WriteInputInt32Swapped(slave5, 1904, genPowerW);
 
+        // Slave 6: Annex Heat Pump (1.5 kW base + 0–3 kW modulating buffer, 3-min cycle)
+        double phase6  = (elapsed % 180.0 / 180.0) + 0.3;
+        double powerW6 = 1500 + 3000 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * phase6));
+        importWh6 += powerW6 * dt / 3600.0;
+        WriteFloat32(slave6, REG_POWER_W,   (float)powerW6);
+        WriteFloat32(slave6, REG_IMPORT_WH, (float)importWh6);
+        WriteFloat32(slave6, REG_EXPORT_WH, 0f);
+
+        // Slave 7: Rooftop PV System (5–25 kW solar generation, 4-min sine)
+        double phasePv = elapsed % 240.0 / 240.0;
+        double pvPowerW = 5000 + 20000 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * phasePv));
+        importWh7 += pvPowerW * dt / 3600.0;
+        WriteFloat32(slave7, REG_POWER_W,   (float)pvPowerW);
+        WriteFloat32(slave7, REG_IMPORT_WH, (float)importWh7);
+        WriteFloat32(slave7, REG_EXPORT_WH, (float)importWh7);
+
         Console.WriteLine($"[{now:HH:mm:ss}] " +
-            $"S1={powerW1/1000:F2}kW  S2={powerW2/1000:F2}kW  " +
-            $"S3={powerW3/1000:F2}kW  S4={powerW4/1000:F2}kW  " +
-            $"G={genPowerW/1000:F1}kW lim={feedbackLimit}%");
+            $"Grid={powerW1/1000:F2}kW  HP-Main={powerW4/1000:F2}kW  HP-Annex={powerW6/1000:F2}kW  " +
+            $"PV-Roof={pvPowerW/1000:F1}kW  PV-Glück={genPowerW/1000:F1}kW");
 
         await Task.Delay(5_000, cts.Token).ConfigureAwait(false);
     }

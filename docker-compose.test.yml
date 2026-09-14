@@ -45,13 +45,22 @@ services:
     ports:
       - "47809:47808/udp"  # host 47809 → container 47808 (avoids clash with pulswerk)
 
-  # ── OCPP WebSocket simulator ────────────────────────────────────────────────
+  # ── OCPP WebSocket simulators ───────────────────────────────────────────────
   ocpp-sim:
     build:
       context: testing/OcppSim
     container_name: ocpp-sim
     restart: unless-stopped
-    command: ["wallbox-sim-01", "ws://pulswerk:5000/plswk/ocpp/wallbox-sim-01"]
+    command: ["wallbox-sim-01", "ws://pulswerk:5000/plswk/ocpp/wallbox-sim-01", "--auto-charge"]
+    depends_on:
+      - pulswerk
+
+  ocpp-sim2:
+    build:
+      context: testing/OcppSim
+    container_name: ocpp-sim2
+    restart: unless-stopped
+    command: ["wallbox-sim-02", "ws://pulswerk:5000/plswk/ocpp/wallbox-sim-02"]
     depends_on:
       - pulswerk
 
@@ -66,6 +75,10 @@ services:
 
   # ── Pulswerk overrides for test environment ─────────────────────────────────
   pulswerk:
+    ports:
+      - "5000:5000"
+      - "80:80"
+      - "47808:47808/udp"
     depends_on:
       influxdb:
         condition: service_started

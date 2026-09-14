@@ -492,41 +492,4 @@ namespace Pulswerk.Billing.Tests
     }
 
     // ── Curtailment Target Tests ──────────────────────────────────────────────
-
-    public class CurtailmentTargetTests : IDisposable
-    {
-        private readonly BillingStoreFixture _fx = new();
-
-        [Fact]
-        public void AddAndGetCurtailmentTargets_RoundTrips()
-        {
-            _fx.Store.AddCurtailmentTarget("power_kw", 100.0, 150.0, 200.0);
-            var list = _fx.Store.GetCurtailmentTargets();
-            Assert.Single(list);
-            Assert.Equal("power_kw", list[0].TelemetryKey);
-            Assert.Equal(100.0, list[0].NormalValue);
-            Assert.Equal(150.0, list[0].WarningValue);
-            Assert.Equal(200.0, list[0].CriticalValue);
-        }
-
-        [Fact]
-        public void AddCurtailmentTarget_Upserts_ExistingKey()
-        {
-            _fx.Store.AddCurtailmentTarget("power_kw", 100.0, 150.0, 200.0);
-            _fx.Store.AddCurtailmentTarget("power_kw", 90.0, 140.0, 190.0);
-            var list = _fx.Store.GetCurtailmentTargets();
-            Assert.Single(list);
-            Assert.Equal(90.0, list[0].NormalValue);
-        }
-
-        [Fact]
-        public void DeleteCurtailmentTarget_RemovesEntry()
-        {
-            _fx.Store.AddCurtailmentTarget("power_kw", 100.0, 150.0, 200.0);
-            _fx.Store.DeleteCurtailmentTarget("power_kw");
-            Assert.Empty(_fx.Store.GetCurtailmentTargets());
-        }
-
-        public void Dispose() => _fx.Dispose();
-    }
 }

@@ -180,17 +180,45 @@
     },
     {
       "id": "meter-hvac",
-      "name": "HVAC Meter",
+      "name": "HVAC Heat Pump Main",
       "deviceType": "janitza",
-      "connectionId": "modbus-test2",
-      "deviceId": 2,
+      "connectionId": "modbus-test",
+      "deviceId": 4,
       "pollIntervalSeconds": 30,
       "path": [
         "Building A",
         "HVAC",
-        "HVAC Meter"
+        "HVAC Heat Pump Main"
       ],
-      "assetType": "Meter"
+      "assetType": "Heat Pump"
+    },
+    {
+      "id": "heatpump-annex",
+      "name": "Annex Heat Pump",
+      "deviceType": "janitza",
+      "connectionId": "modbus-test2",
+      "deviceId": 6,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "HVAC",
+        "Annex Heat Pump"
+      ],
+      "assetType": "Heat Pump"
+    },
+    {
+      "id": "pv-rooftop",
+      "name": "Rooftop PV System",
+      "deviceType": "janitza",
+      "connectionId": "modbus-test",
+      "deviceId": 7,
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "PV",
+        "Rooftop PV"
+      ],
+      "assetType": "PV Inverter"
     },
     {
       "id": "glueck-pv",
@@ -257,6 +285,19 @@
         "Building A",
         "Garage",
         "Wallbox 1"
+      ],
+      "assetType": "Wallbox"
+    },
+    {
+      "id": "wallbox-sim-02",
+      "name": "Garage Wallbox 2",
+      "deviceType": "ocpp",
+      "connectionId": "ocpp-central",
+      "pollIntervalSeconds": 30,
+      "path": [
+        "Building A",
+        "Garage",
+        "Wallbox 2"
       ],
       "assetType": "Wallbox"
     },

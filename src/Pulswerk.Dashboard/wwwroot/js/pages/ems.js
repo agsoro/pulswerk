@@ -1,0 +1,255 @@
+import { jsx as _jsx, jsxs as _jsxs } from "preact/jsx-runtime";
+import { useState, useEffect } from 'preact/hooks';
+import { t } from '../i18n';
+export function EmsPage() {
+    const [snapshot, setSnapshot] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [toggling, setToggling] = useState(false);
+    // Modal state
+    const [showConfigModal, setShowConfigModal] = useState(false);
+    const [showConsumerModal, setShowConsumerModal] = useState(false);
+    const [editingConsumer, setEditingConsumer] = useState(null);
+    const [savingConsumer, setSavingConsumer] = useState(false);
+    const [savingConfig, setSavingConfig] = useState(false);
+    // Config form
+    const [gridMaxKw, setGridMaxKw] = useState(8.0);
+    const [gridKey, setGridKey] = useState('meter-main-a_power');
+    const [pvKey, setPvKey] = useState('pv-rooftop_power');
+    const [battPowerKey, setBattPowerKey] = useState('solis-battery_power');
+    const [battSocKey, setBattSocKey] = useState('solis-battery_battery_soc');
+    const [battReserveKw, setBattReserveKw] = useState(1.0);
+    const [battMaxKw, setBattMaxKw] = useState(5.0);
+    const fetchSnapshot = async () => {
+        try {
+            let res = await fetch('/plswk/api/ems/status');
+            if (!res.ok) {
+                res = await fetch('/plswk/api/trajectory/status');
+            }
+            if (res.ok) {
+                const data = await res.json();
+                if (data) {
+                    setSnapshot(data);
+                }
+            }
+        }
+        catch (e) {
+            console.error("Failed to fetch EMS status:", e);
+        }
+        finally {
+            setLoading(false);
+        }
+    };
+    useEffect(() => {
+        fetchSnapshot();
+        const interval = setInterval(fetchSnapshot, 4000);
+        return () => clearInterval(interval);
+    }, []);
+    const handleToggleEnabled = async () => {
+        if (!snapshot || toggling)
+            return;
+        setToggling(true);
+        try {
+            const res = await fetch('/plswk/api/ems/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !snapshot.enabled })
+            });
+            if (res.ok)
+                await fetchSnapshot();
+        }
+        catch (e) {
+            console.error("Failed to toggle EMS:", e);
+        }
+        finally {
+            setToggling(false);
+        }
+    };
+    const handleOpenConfigModal = () => {
+        if (snapshot?.sources) {
+            setGridMaxKw(snapshot.sources.gridMaxImportKw ?? 8.0);
+            setGridKey(snapshot.sources.gridMeterKey ?? 'meter-main-a_power');
+            setPvKey(snapshot.sources.pvMeterKey ?? 'pv-rooftop_power');
+            setBattPowerKey(snapshot.sources.batteryPowerKey ?? 'solis-battery_power');
+            setBattSocKey(snapshot.sources.batterySocKey ?? 'solis-battery_battery_soc');
+            setBattReserveKw(snapshot.sources.batteryMinReserveKw ?? 1.0);
+            setBattMaxKw(snapshot.sources.batteryMaxPowerKw ?? 5.0);
+        }
+        setShowConfigModal(true);
+    };
+    const handleSaveSystemConfig = async (e) => {
+        e.preventDefault();
+        setSavingConfig(true);
+        try {
+            const res = await fetch('/plswk/api/ems/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    enabled: snapshot?.enabled ?? true,
+                    baseLimitKw: gridMaxKw,
+                    batteryReserveKw: battReserveKw,
+                    batteryMaxPowerKw: battMaxKw,
+                    batteryPowerKey: battPowerKey,
+                    batterySocKey: battSocKey,
+                    sources: {
+                        gridMeterKey: gridKey,
+                        gridMaxImportKw: gridMaxKw,
+                        pvMeterKey: pvKey,
+                        batteryPowerKey: battPowerKey,
+                        batterySocKey: battSocKey,
+                        batteryMaxPowerKw: battMaxKw,
+                        batteryMaxChargeKw: battMaxKw,
+                        batteryMaxDischargeKw: battMaxKw,
+                        batteryMinReserveKw: battReserveKw,
+                        batteryMinSocPct: snapshot?.sources?.batteryMinSocPct ?? 15.0,
+                        batteryFullSocPct: snapshot?.sources?.batteryFullSocPct ?? 98.0
+                    }
+                })
+            });
+            if (res.ok) {
+                setShowConfigModal(false);
+                await fetchSnapshot();
+            }
+            else {
+                const errText = await res.text();
+                alert(`Failed to save system configuration: ${errText || res.statusText}`);
+            }
+        }
+        catch (err) {
+            console.error("Failed to save config:", err);
+            alert(`Error saving configuration: ${err?.message || err}`);
+        }
+        finally {
+            setSavingConfig(false);
+        }
+    };
+    const handleOpenAddConsumer = () => {
+        setEditingConsumer({
+            id: '',
+            name: '',
+            basePowerKw: 0.0,
+            hasOptionalTier: true,
+            maxOptionalKw: 8.0,
+            minOptionalKw: 1.38,
+            standbyOptionalKw: 0.0,
+            actualPowerKey: '',
+            forcePowerKey: '',
+            priority: (snapshot?.consumers?.length ?? 0) + 1,
+            maxPowerKw: 22.0
+        });
+        setShowConsumerModal(true);
+    };
+    const handleOpenEditConsumer = (c) => {
+        setEditingConsumer({
+            ...c,
+            id: c.id,
+            name: c.name,
+            basePowerKw: c.basePowerKw ?? 0.0,
+            hasOptionalTier: c.hasOptionalTier ?? c.isControllable ?? true,
+            maxOptionalKw: c.maxOptionalKw ?? c.baseLimitKw ?? 8.0,
+            minOptionalKw: c.minOptionalKw ?? c.minPowerKw ?? 0.0,
+            standbyOptionalKw: c.standbyOptionalKw ?? 0.0,
+            actualPowerKey: c.actualPowerKey ?? '',
+            forcePowerKey: c.forcePowerKey ?? '',
+            priority: c.priority ?? 1,
+            maxPowerKw: c.maxPowerKw ?? 22.0
+        });
+        setShowConsumerModal(true);
+    };
+    const handleDeleteConsumer = async (id, name) => {
+        if (!confirm(`Delete consumer '${name}'?`))
+            return;
+        try {
+            const res = await fetch(`/plswk/api/ems/consumers/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            });
+            if (res.ok)
+                await fetchSnapshot();
+            else
+                alert("Failed to delete consumer");
+        }
+        catch (e) {
+            console.error("Failed to delete consumer:", e);
+        }
+    };
+    const handleSaveConsumer = async (e) => {
+        e.preventDefault();
+        if (!editingConsumer)
+            return;
+        setSavingConsumer(true);
+        try {
+            const res = await fetch('/plswk/api/ems/consumers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(editingConsumer)
+            });
+            if (res.ok) {
+                setShowConsumerModal(false);
+                setEditingConsumer(null);
+                await fetchSnapshot();
+            }
+            else {
+                const errText = await res.text();
+                alert(`Failed to save consumer: ${errText || res.statusText}`);
+            }
+        }
+        catch (err) {
+            console.error("Failed to save consumer:", err);
+            alert(`Error saving consumer: ${err?.message || err}`);
+        }
+        finally {
+            setSavingConsumer(false);
+        }
+    };
+    const getConsumerIconConfig = (name = '', id = '') => {
+        const lower = (name + ' ' + id).toLowerCase();
+        if (lower.includes('wallbox') || lower.includes('wb-') || lower.includes('charger') || lower.includes('charge')) {
+            return { icon: 'fa-charging-station', text: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/30' };
+        }
+        if (lower.includes('heat') || lower.includes('hvac') || lower.includes('pump') || lower.includes('waerme')) {
+            return { icon: 'fa-fire-alt', text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30' };
+        }
+        return { icon: 'fa-building', text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/30' };
+    };
+    if (loading && !snapshot) {
+        return (_jsx("div", { class: "flex items-center justify-center min-h-[60vh]", children: _jsxs("div", { class: "flex items-center gap-3 text-cyan-400", children: [_jsx("i", { class: "fas fa-spinner fa-spin text-2xl" }), _jsx("span", { class: "font-medium text-slate-300", children: "Loading Energy Management..." })] }) }));
+    }
+    const controllableConsumers = snapshot?.consumers?.filter(c => c.hasOptionalTier ?? c.isControllable) ?? [];
+    const uncontrollableConsumers = snapshot?.consumers?.filter(c => !(c.hasOptionalTier ?? c.isControllable)) ?? [];
+    const isSurplusActive = (snapshot?.totalSurplusAvailableKw ?? 0) > 0.1;
+    const hasReclaimedPower = (snapshot?.totalReclaimedPowerKw ?? 0) > 0.1;
+    return (_jsxs("div", { class: "max-w-7xl mx-auto px-4 py-8 space-y-8", children: [_jsxs("div", { class: "flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 p-6 rounded-3xl shadow-xl", children: [_jsx("div", { children: _jsxs("div", { class: "flex items-center gap-3", children: [_jsx("div", { class: "w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-sm", children: _jsx("i", { class: "fas fa-bolt text-lg" }) }), _jsxs("div", { children: [_jsx("h1", { class: "text-2xl font-black text-slate-100 tracking-tight", children: t('ems_page_title') }), _jsx("p", { class: "text-xs text-slate-400 mt-0.5", children: t('ems_page_subtitle') })] })] }) }), _jsxs("div", { class: "flex items-center gap-3", children: [_jsxs("button", { onClick: handleToggleEnabled, disabled: toggling, class: `px-4 py-2.5 rounded-xl font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-2.5 shadow-sm ${snapshot?.enabled
+                                    ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25'
+                                    : 'bg-slate-800 border border-slate-700 text-slate-400 hover:bg-slate-750'}`, children: [_jsx("span", { class: `w-2.5 h-2.5 rounded-full ${snapshot?.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}` }), snapshot?.enabled ? 'EMS Active' : 'EMS Disabled'] }), _jsxs("button", { onClick: handleOpenConfigModal, class: "px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all flex items-center gap-2", title: t('ems_configure_system'), children: [_jsx("i", { class: "fas fa-sliders-h text-cyan-400" }), _jsx("span", { children: t('ems_configure_system') })] })] })] }), _jsxs("div", { class: "grid grid-cols-1 lg:grid-cols-12 gap-6 items-start", children: [_jsxs("div", { class: "lg:col-span-5 space-y-4", children: [_jsxs("div", { class: "flex items-center justify-between px-1", children: [_jsxs("h2", { class: "text-xs uppercase tracking-widest font-black text-slate-400 flex items-center gap-2", children: [_jsx("i", { class: "fas fa-layer-group text-emerald-400" }), t('ems_sources_title')] }), _jsx("span", { class: "text-[0.65rem] text-slate-500 font-mono", children: "SUPPLY & STORAGE" })] }), _jsxs("div", { class: "bg-slate-900/70 border border-slate-800/90 rounded-2xl p-5 shadow-lg relative overflow-hidden group hover:border-sky-500/30 transition-all", children: [_jsxs("div", { class: "flex items-center justify-between mb-3", children: [_jsxs("div", { class: "flex items-center gap-2.5", children: [_jsx("div", { class: "w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center text-xs", children: _jsx("i", { class: "fas fa-network-wired" }) }), _jsxs("div", { children: [_jsx("h3", { class: "text-sm font-bold text-slate-200", children: t('ems_grid_connection') }), _jsx("div", { class: "text-[0.65rem] text-slate-400 font-mono", children: snapshot?.sources?.gridMeterKey || 'meter-main-a_power' })] })] }), _jsx("div", { class: "text-right", children: _jsxs("span", { class: "px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-400 text-[0.65rem] font-bold border border-sky-500/20", children: ["Max ", snapshot?.gridMaxImportKw?.toFixed(1) ?? '8.0', " kW"] }) })] }), _jsxs("div", { class: "flex items-baseline justify-between mt-2", children: [_jsxs("div", { children: [_jsx("span", { class: "text-2xl font-black text-slate-100", children: Math.abs(snapshot?.gridImportKw ?? 0).toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" })] }), _jsxs("span", { class: `text-xs font-bold ${(snapshot?.gridImportKw ?? 0) >= 0 ? 'text-amber-400' : 'text-emerald-400'} flex items-center gap-1.5`, children: [(snapshot?.gridImportKw ?? 0) < 0 && _jsx("i", { class: "fas fa-arrow-left text-[0.65rem]" }), (snapshot?.gridImportKw ?? 0) >= 0 ? t('ems_grid_import') : t('ems_grid_export'), (snapshot?.gridImportKw ?? 0) >= 0 && _jsx("i", { class: "fas fa-arrow-right text-[0.65rem]" })] })] }), _jsx("div", { class: "w-full bg-slate-800/80 rounded-full h-1.5 mt-3 overflow-hidden", children: _jsx("div", { class: "h-full rounded-full transition-all duration-500 bg-sky-400", style: { width: `${Math.min(100, Math.max(0, ((snapshot?.gridImportKw ?? 0) / (snapshot?.gridMaxImportKw || 8.0)) * 100))}%` } }) }), _jsxs("div", { class: "mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs", children: [_jsx("span", { class: "text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider", children: t('ems_24h_rolling') }), _jsxs("div", { class: "flex items-center gap-2", children: [_jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_export'), children: [_jsx("i", { class: "fas fa-arrow-left text-[0.55rem] text-emerald-400" }), _jsxs("span", { class: "font-bold", children: [snapshot?.gridExport24hKwh?.toFixed(1) ?? '0.0', " kWh"] }), _jsx("span", { class: "text-[0.6rem] text-emerald-400/80 uppercase font-semibold", children: t('ems_export') })] }), _jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_import'), children: [_jsx("span", { class: "text-[0.6rem] text-amber-400/80 uppercase font-semibold", children: t('ems_import') }), _jsxs("span", { class: "font-bold", children: [snapshot?.gridImport24hKwh?.toFixed(1) ?? '0.0', " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-amber-400" })] })] })] })] }), _jsxs("div", { class: "bg-slate-900/70 border border-slate-800/90 rounded-2xl p-5 shadow-lg relative overflow-hidden group hover:border-amber-500/30 transition-all", children: [_jsxs("div", { class: "flex items-center justify-between mb-3", children: [_jsxs("div", { class: "flex items-center gap-2.5", children: [_jsx("div", { class: "w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center text-xs", children: _jsx("i", { class: "fas fa-solar-panel" }) }), _jsxs("div", { children: [_jsx("h3", { class: "text-sm font-bold text-slate-200", children: t('ems_pv_generation') }), _jsx("div", { class: "text-[0.65rem] text-slate-400 font-mono", children: snapshot?.sources?.pvMeterKey || 'pv-rooftop_power' })] })] }), _jsx("span", { class: "px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 text-[0.65rem] font-bold border border-amber-500/20", children: "PV Solar" })] }), _jsxs("div", { class: "flex items-baseline justify-between mt-2", children: [_jsxs("div", { children: [_jsx("span", { class: "text-2xl font-black text-amber-400", children: (snapshot?.pvGenerationKw ?? 0).toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" })] }), _jsxs("span", { class: "text-xs text-amber-400 font-medium flex items-center gap-1.5", children: [t('ems_generation'), _jsx("i", { class: "fas fa-arrow-right text-[0.65rem]" })] })] }), _jsxs("div", { class: "mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs", children: [_jsx("span", { class: "text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider", children: t('ems_24h_rolling') }), _jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_gen'), children: [_jsx("span", { class: "text-[0.6rem] text-amber-400/80 uppercase font-semibold", children: t('ems_generation') }), _jsxs("span", { class: "font-bold", children: [snapshot?.pvGeneration24hKwh?.toFixed(1) ?? '0.0', " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-amber-400" })] })] })] }), _jsxs("div", { class: `bg-slate-900/70 border rounded-2xl p-5 shadow-lg relative overflow-hidden transition-all ${snapshot?.isBatteryCharging
+                                    ? 'border-emerald-500/40 shadow-emerald-500/5'
+                                    : 'border-slate-800/90 hover:border-emerald-500/30'}`, children: [_jsxs("div", { class: "flex items-center justify-between mb-3", children: [_jsxs("div", { class: "flex items-center gap-2.5", children: [_jsx("div", { class: `w-8 h-8 rounded-xl flex items-center justify-center text-xs border ${snapshot?.isBatteryCharging
+                                                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 animate-pulse'
+                                                            : 'bg-slate-800 border-slate-700 text-slate-400'}`, children: _jsx("i", { class: "fas fa-battery-three-quarters" }) }), _jsxs("div", { children: [_jsx("h3", { class: "text-sm font-bold text-slate-200", children: t('ems_battery_storage') }), _jsx("div", { class: "text-[0.65rem] text-slate-400 font-mono", children: snapshot?.sources?.batteryPowerKey || 'solis-battery_power' })] })] }), _jsxs("span", { class: `px-2 py-0.5 rounded-md text-[0.65rem] font-bold border flex items-center gap-1 ${snapshot?.isBatteryCharging
+                                                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 animate-pulse'
+                                                    : (snapshot?.batteryPowerKw ?? 0) > 0.3
+                                                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                                                        : 'bg-slate-800 text-slate-400 border-slate-700'}`, children: [snapshot?.isBatteryCharging && _jsx("i", { class: "fas fa-arrow-left text-[0.55rem]" }), snapshot?.isBatteryCharging ? t('ems_battery_charging') : (snapshot?.batteryPowerKw ?? 0) > 0.3 ? t('ems_battery_discharging') : t('ems_battery_idle'), !snapshot?.isBatteryCharging && (snapshot?.batteryPowerKw ?? 0) > 0.3 && _jsx("i", { class: "fas fa-arrow-right text-[0.55rem]" })] })] }), _jsxs("div", { class: "grid grid-cols-3 gap-3 mt-2", children: [_jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: "Power Flow" }), _jsx("span", { class: `text-xl font-black ${snapshot?.isBatteryCharging ? 'text-emerald-400' : 'text-slate-100'}`, children: Math.abs(snapshot?.batteryPowerKw ?? 0).toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" })] }), _jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: "Max Power" }), _jsx("span", { class: "text-xl font-black text-slate-100", children: (snapshot?.batteryMaxPowerKw ?? snapshot?.sources?.batteryMaxPowerKw ?? 5.0).toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" })] }), _jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: t('ems_battery_soc') }), _jsxs("span", { class: "text-xl font-black text-slate-100", children: [(snapshot?.batterySocPct ?? 0).toFixed(0), "%"] })] })] }), _jsx("div", { class: "w-full bg-slate-800/80 rounded-full h-2 mt-4 overflow-hidden", children: _jsx("div", { class: `h-full rounded-full transition-all duration-500 ${(snapshot?.batterySocPct ?? 0) > 20 ? 'bg-emerald-400' : 'bg-amber-400'}`, style: { width: `${Math.min(100, Math.max(0, snapshot?.batterySocPct ?? 0))}%` } }) }), _jsxs("div", { class: "mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs", children: [_jsx("span", { class: "text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider", children: t('ems_24h_rolling') }), _jsxs("div", { class: "flex items-center gap-2", children: [_jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_charged'), children: [_jsx("i", { class: "fas fa-arrow-left text-[0.55rem] text-emerald-400" }), _jsxs("span", { class: "font-bold", children: [snapshot?.batteryCharged24hKwh?.toFixed(1) ?? '0.0', " kWh"] }), _jsx("span", { class: "text-[0.6rem] text-emerald-400/80 uppercase font-semibold", children: t('ems_charged') })] }), _jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_discharged'), children: [_jsx("span", { class: "text-[0.6rem] text-amber-400/80 uppercase font-semibold", children: t('ems_discharged') }), _jsxs("span", { class: "font-bold", children: [snapshot?.batteryDischarged24hKwh?.toFixed(1) ?? '0.0', " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-amber-400" })] })] })] })] })] }), _jsxs("div", { class: "lg:col-span-2 flex flex-col items-center justify-center gap-3 py-4", children: [_jsx("div", { class: "hidden lg:flex flex-col items-center gap-2 text-slate-600", children: _jsx("i", { class: "fas fa-chevron-right text-lg text-slate-500 animate-pulse" }) }), _jsxs("div", { class: `w-full bg-slate-900/80 border rounded-2xl p-4 text-center shadow-lg transition-all ${isSurplusActive
+                                    ? 'border-cyan-500/50 shadow-cyan-500/10 bg-cyan-950/20'
+                                    : 'border-slate-800/90'}`, children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider font-bold text-slate-400 mb-1", children: t('ems_surplus_pool') }), _jsx("div", { class: `text-2xl font-black ${isSurplusActive ? 'text-cyan-400' : 'text-slate-500'}`, children: isSurplusActive ? `+${snapshot?.totalSurplusAvailableKw.toFixed(1)} kW` : '0.0 kW' }), _jsx("div", { class: "text-[0.65rem] text-slate-400 mt-1 font-medium", children: isSurplusActive ? t('ems_surplus_active') : t('ems_base_active') }), _jsxs("div", { class: "text-[0.65rem] text-cyan-300/90 font-mono mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-center gap-1.5", children: [_jsxs("span", { class: "text-slate-400", children: [t('ems_24h_surplus'), ":"] }), _jsxs("span", { class: "font-bold text-cyan-300", children: [snapshot?.totalSurplus24hKwh?.toFixed(1) ?? '0.0', " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-cyan-400" })] })] }), hasReclaimedPower && (_jsxs("div", { class: "w-full bg-amber-950/25 border border-amber-500/40 rounded-2xl p-3 text-center shadow-lg transition-all animate-fade-in", children: [_jsxs("div", { class: "text-[0.65rem] uppercase tracking-wider font-bold text-amber-400 mb-0.5 flex items-center justify-center gap-1", children: [_jsx("i", { class: "fas fa-redo-alt text-[0.6rem]" }), t('ems_reclaimed_power')] }), _jsxs("div", { class: "text-xl font-black text-amber-300", children: [snapshot?.totalReclaimedPowerKw?.toFixed(1), " kW"] }), _jsx("div", { class: "text-[0.6rem] text-amber-400/80 mt-0.5", children: "Idle capacity redistributed" })] })), _jsx("div", { class: "hidden lg:flex flex-col items-center gap-2 text-slate-600", children: _jsx("i", { class: "fas fa-chevron-right text-lg text-slate-500 animate-pulse" }) })] }), _jsxs("div", { class: "lg:col-span-5 space-y-4", children: [_jsxs("div", { class: "flex items-center justify-between px-1", children: [_jsxs("h2", { class: "text-xs uppercase tracking-widest font-black text-slate-400 flex items-center gap-2", children: [_jsx("i", { class: "fas fa-charging-station text-cyan-400" }), t('ems_consumers_title')] }), _jsx("div", { class: "flex items-center gap-2", children: _jsxs("button", { onClick: handleOpenAddConsumer, class: "text-xs font-bold text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1", children: [_jsx("i", { class: "fas fa-plus" }), t('ems_add_consumer')] }) })] }), controllableConsumers.map((consumer) => {
+                                const optQuota = consumer.maxOptionalKw ?? consumer.baseLimitKw ?? 8.0;
+                                const isBoosted = consumer.allocatedPowerKw > (consumer.basePowerKw ?? 0) + optQuota + 0.1;
+                                const isIdle = !consumer.isActivelyDemanding;
+                                const hasUnused = (consumer.unusedPowerKw ?? 0) > 0.1;
+                                const iconCfg = getConsumerIconConfig(consumer.name, consumer.id);
+                                return (_jsxs("div", { class: `bg-slate-900/70 border rounded-2xl p-5 shadow-lg relative overflow-hidden transition-all ${isBoosted
+                                        ? 'border-cyan-500/40 shadow-cyan-500/5'
+                                        : isIdle
+                                            ? 'border-amber-500/30 bg-amber-950/5'
+                                            : 'border-slate-800/90 hover:border-cyan-500/30'}`, children: [_jsxs("div", { class: "flex items-center justify-between mb-3", children: [_jsxs("div", { class: "flex items-center gap-2.5", children: [_jsx("div", { class: `w-8 h-8 rounded-xl flex items-center justify-center text-xs border ${isBoosted
+                                                                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300 animate-pulse'
+                                                                : isIdle
+                                                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                                                    : `${iconCfg.bg} ${iconCfg.border} ${iconCfg.text}`}`, children: _jsx("i", { class: `fas ${iconCfg.icon}` }) }), _jsxs("div", { children: [_jsx("div", { class: "flex items-center gap-2", children: _jsx("h3", { class: "text-sm font-bold text-slate-200", children: consumer.name || consumer.id }) }), _jsx("div", { class: "text-[0.65rem] text-slate-400 font-mono flex items-center gap-2 mt-0.5", children: _jsx("span", { children: consumer.actualPowerKey || consumer.forcePowerKey || consumer.id }) })] })] }), _jsxs("div", { class: "flex items-center gap-2", children: [_jsxs("span", { class: "px-1.5 py-0.5 rounded text-[0.65rem] font-bold bg-slate-800 text-slate-300 border border-slate-700", children: ["P", consumer.priority] }), _jsx("span", { class: `text-[0.65rem] font-bold px-2 py-0.5 rounded border ${isBoosted
+                                                                ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                                                                : isIdle
+                                                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                                                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'}`, children: consumer.status || (isIdle ? 'Idle' : 'Active') }), _jsx("button", { onClick: () => handleOpenEditConsumer(consumer), class: "w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-cyan-400 flex items-center justify-center text-xs transition-all", title: t('ems_edit_consumer'), children: _jsx("i", { class: "fas fa-pencil-alt" }) }), _jsx("button", { onClick: () => handleDeleteConsumer(consumer.id, consumer.name), class: "w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 flex items-center justify-center text-xs transition-all", title: t('ems_delete_consumer'), children: _jsx("i", { class: "fas fa-trash" }) })] })] }), _jsxs("div", { class: "grid grid-cols-2 gap-4 mt-2", children: [_jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: t('ems_allocated_power') }), _jsx("span", { class: `text-2xl font-black ${isBoosted ? 'text-cyan-400' : 'text-slate-100'}`, children: consumer.allocatedPowerKw.toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" }), hasUnused && (_jsxs("div", { class: "text-[0.65rem] font-bold text-amber-400 flex items-center gap-1 mt-1", children: [_jsx("i", { class: "fas fa-share text-[0.55rem]" }), consumer.unusedPowerKw.toFixed(1), " kW shared"] }))] }), _jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: t('ems_actual_power') }), _jsx("span", { class: "text-2xl font-black text-slate-200", children: consumer.actualPowerKw.toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" })] })] }), _jsxs("div", { class: "mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs gap-2", children: [_jsxs("div", { class: "flex items-center gap-2 whitespace-nowrap shrink-0", children: [_jsx("span", { class: "text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider", children: t('ems_24h_rolling') }), _jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_consumed'), children: [_jsx("span", { class: "text-[0.6rem] text-cyan-400/80 uppercase font-semibold", children: t('ems_consumed') }), _jsxs("span", { class: "font-bold", children: [(consumer.energy24hKwh ?? 0).toFixed(1), " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-cyan-400" })] })] }), _jsxs("span", { class: "text-[0.68rem] text-slate-400 font-mono whitespace-nowrap text-right", children: ["Base: ", (consumer.basePowerKw ?? 0).toFixed(1), " kW \u00B7 Opt: ", (consumer.maxOptionalKw ?? consumer.baseLimitKw ?? 8.0).toFixed(1), " kW"] })] })] }, consumer.id));
+                            }), _jsxs("div", { class: "bg-slate-900/70 border border-slate-800/90 rounded-2xl p-5 shadow-lg relative overflow-hidden space-y-3", children: [_jsxs("div", { class: "flex items-center justify-between", children: [_jsxs("div", { class: "flex items-center gap-2.5", children: [_jsx("div", { class: "w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 flex items-center justify-center text-xs", children: _jsx("i", { class: "fas fa-building" }) }), _jsxs("div", { children: [_jsx("h3", { class: "text-sm font-bold text-slate-200", children: t('ems_uncontrollable_loads') }), _jsx("div", { class: "text-[0.65rem] text-slate-400 font-mono", children: "Building Infrastructure & Floor Sub-meters" })] })] }), _jsx("span", { class: "px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 text-[0.65rem] font-bold border border-purple-500/20", children: "Essential Load" })] }), _jsxs("div", { class: "grid grid-cols-2 gap-4 mt-2", children: [_jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: t('ems_actual_power') }), _jsx("span", { class: "text-2xl font-black text-slate-200", children: (snapshot?.uncontrollableLoadKw ?? 0).toFixed(1) }), _jsx("span", { class: "text-xs font-bold text-slate-400 ml-1", children: "kW" })] }), _jsxs("div", { children: [_jsx("div", { class: "text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5", children: "Load Profile" }), _jsx("span", { class: "text-sm font-bold text-slate-300", children: "Continuous Draw" })] })] }), _jsxs("div", { class: "mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs", children: [_jsxs("div", { class: "flex items-center gap-2", children: [_jsx("span", { class: "text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider", children: t('ems_24h_rolling') }), _jsxs("div", { class: "flex items-center gap-1 text-[0.68rem] bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded-md px-2 py-0.5", title: t('ems_24h_consumed'), children: [_jsx("span", { class: "text-[0.6rem] text-purple-400/80 uppercase font-semibold", children: t('ems_consumed') }), _jsxs("span", { class: "font-bold", children: [(snapshot?.uncontrollable24hKwh ?? 0).toFixed(1), " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-purple-400" })] })] }), _jsx("span", { class: "text-[0.7rem] text-slate-400 font-mono", children: "Uncurtailable Base" })] }), uncontrollableConsumers.length > 0 && (_jsx("div", { class: "pt-2 border-t border-slate-800/60 space-y-1", children: uncontrollableConsumers.map(uc => (_jsxs("div", { class: "flex items-center justify-between text-xs text-slate-400", children: [_jsx("span", { children: uc.name }), _jsxs("div", { class: "flex items-center gap-3 font-mono", children: [_jsxs("span", { children: [uc.actualPowerKw.toFixed(1), " kW"] }), _jsxs("div", { class: "flex items-center gap-1 text-purple-300 font-semibold", children: [_jsxs("span", { children: [(uc.energy24hKwh ?? 0).toFixed(1), " kWh"] }), _jsx("i", { class: "fas fa-arrow-right text-[0.55rem] text-purple-400/70" })] })] })] }, uc.id))) }))] })] })] }), _jsxs("div", { class: "bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-3xl p-6 shadow-xl space-y-4", children: [_jsxs("div", { class: "flex items-center justify-between", children: [_jsxs("h2", { class: "text-sm uppercase tracking-widest font-black text-slate-300 flex items-center gap-2", children: [_jsx("i", { class: "fas fa-history text-cyan-400" }), t('ems_intervention_logs')] }), _jsx("span", { class: "text-xs text-slate-500 font-mono", children: "Live Stream" })] }), (!snapshot?.logs || snapshot.logs.length === 0) ? (_jsx("div", { class: "py-8 text-center text-slate-500 text-xs", children: t('ems_no_intervention') })) : (_jsx("div", { class: "overflow-x-auto", children: _jsxs("table", { class: "w-full text-left text-xs text-slate-300", children: [_jsx("thead", { class: "text-[0.65rem] uppercase tracking-wider text-slate-500 border-b border-slate-800", children: _jsxs("tr", { children: [_jsx("th", { class: "py-2.5 px-3", children: "Timestamp" }), _jsx("th", { class: "py-2.5 px-3", children: "Decision / Event" }), _jsx("th", { class: "py-2.5 px-3 text-right", children: "State" })] }) }), _jsx("tbody", { class: "divide-y divide-slate-800/60 font-mono text-[0.7rem]", children: snapshot.logs.slice().reverse().map((log, idx) => (_jsxs("tr", { class: "hover:bg-slate-800/30 transition-colors", children: [_jsx("td", { class: "py-2.5 px-3 text-slate-400 whitespace-nowrap", children: log.timestamp }), _jsx("td", { class: "py-2.5 px-3 font-sans text-slate-200", children: log.message }), _jsx("td", { class: "py-2.5 px-3 text-right whitespace-nowrap", children: _jsx("span", { class: `px-2 py-0.5 rounded text-[0.65rem] font-bold ${log.state.includes('Surplus')
+                                                        ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+                                                        : 'bg-slate-800 text-slate-400 border border-slate-700'}`, children: log.state }) })] }, idx))) })] }) }))] }), showConfigModal && (_jsx("div", { class: "fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4", children: _jsxs("div", { class: "bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5", children: [_jsxs("div", { class: "flex items-center justify-between border-b border-slate-800 pb-4", children: [_jsxs("h3", { class: "text-base font-bold text-slate-100 flex items-center gap-2", children: [_jsx("i", { class: "fas fa-sliders-h text-cyan-400" }), _jsx("span", { children: t('ems_configure_system') })] }), _jsx("button", { onClick: () => setShowConfigModal(false), class: "w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center justify-center text-xs", children: _jsx("i", { class: "fas fa-times" }) })] }), _jsxs("form", { onSubmit: handleSaveSystemConfig, class: "space-y-4 text-xs", children: [_jsxs("div", { class: "grid grid-cols-3 gap-3", children: [_jsxs("div", { children: [_jsxs("label", { class: "block font-bold text-slate-300 mb-1", children: [t('ems_grid_limit'), " (kW)"] }), _jsx("input", { type: "number", step: "0.5", min: "1", max: "100", value: gridMaxKw, onInput: (e) => setGridMaxKw(parseFloat(e.target.value) || 8.0), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.65rem] text-slate-500 mt-1 block", children: "Contract/fuse ceiling" })] }), _jsxs("div", { children: [_jsx("label", { class: "block font-bold text-slate-300 mb-1", children: t('ems_battery_max_power') }), _jsx("input", { type: "number", step: "0.5", min: "1", max: "50", value: battMaxKw, onInput: (e) => setBattMaxKw(parseFloat(e.target.value) || 5.0), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.65rem] text-slate-500 mt-1 block", children: "Max rating (5.0 kW)" })] }), _jsxs("div", { children: [_jsxs("label", { class: "block font-bold text-slate-300 mb-1", children: [t('ems_reserve_headroom'), " (kW)"] }), _jsx("input", { type: "number", step: "0.5", min: "0", max: "10", value: battReserveKw, onInput: (e) => setBattReserveKw(parseFloat(e.target.value) || 1.0), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.65rem] text-slate-500 mt-1 block", children: "Trickle buffer (1.0 kW)" })] })] }), _jsxs("div", { class: "space-y-3 pt-2 border-t border-slate-800", children: [_jsx("div", { class: "text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold", children: "Telemetry Key Mappings" }), _jsxs("div", { children: [_jsx("label", { class: "block text-slate-400 mb-1", children: "Grid Power Key" }), _jsx("input", { type: "text", value: gridKey, onInput: (e) => setGridKey(e.target.value), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none" })] }), _jsxs("div", { children: [_jsx("label", { class: "block text-slate-400 mb-1", children: "PV Solar Power Key" }), _jsx("input", { type: "text", value: pvKey, onInput: (e) => setPvKey(e.target.value), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none" })] }), _jsxs("div", { children: [_jsx("label", { class: "block text-slate-400 mb-1", children: t('ems_battery_power_key') }), _jsx("input", { type: "text", value: battPowerKey, onInput: (e) => setBattPowerKey(e.target.value), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none" })] }), _jsxs("div", { children: [_jsx("label", { class: "block text-slate-400 mb-1", children: t('ems_battery_soc_key') }), _jsx("input", { type: "text", value: battSocKey, onInput: (e) => setBattSocKey(e.target.value), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none" })] })] }), _jsxs("div", { class: "flex items-center justify-end gap-3 pt-4 border-t border-slate-800", children: [_jsx("button", { type: "button", onClick: () => setShowConfigModal(false), class: "px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition-all", children: t('ems_cancel') }), _jsxs("button", { type: "submit", disabled: savingConfig, class: "px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition-all shadow-md flex items-center gap-2", children: [savingConfig && _jsx("i", { class: "fas fa-spinner fa-spin" }), t('ems_save_changes')] })] })] })] }) })), showConsumerModal && editingConsumer && (_jsx("div", { class: "fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4", children: _jsxs("div", { class: "bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5", children: [_jsxs("div", { class: "flex items-center justify-between border-b border-slate-800 pb-4", children: [_jsxs("h3", { class: "text-base font-bold text-slate-100 flex items-center gap-2", children: [_jsx("i", { class: `fas ${editingConsumer.id ? 'fa-edit' : 'fa-plus-circle'} text-cyan-400` }), _jsx("span", { children: editingConsumer.id ? t('ems_edit_consumer') : t('ems_add_consumer') }), editingConsumer.name && (_jsxs("span", { class: "text-xs text-slate-400 font-mono", children: ["(", editingConsumer.name, ")"] }))] }), _jsx("button", { onClick: () => setShowConsumerModal(false), class: "w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center justify-center text-xs", children: _jsx("i", { class: "fas fa-times" }) })] }), _jsxs("form", { onSubmit: handleSaveConsumer, class: "space-y-4 text-xs", children: [_jsxs("div", { class: "grid grid-cols-2 gap-4", children: [_jsxs("div", { children: [_jsx("label", { class: "block font-bold text-slate-300 mb-1", children: t('ems_consumer_name') }), _jsx("input", { type: "text", required: true, value: editingConsumer.name || '', onInput: (e) => setEditingConsumer({ ...editingConsumer, name: e.target.value }), placeholder: "e.g. Garage Wallbox 1", class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" })] }), _jsxs("div", { children: [_jsx("label", { class: "block font-bold text-slate-300 mb-1", children: t('ems_priority') }), _jsx("input", { type: "number", min: "1", max: "10", value: editingConsumer.priority ?? 1, onInput: (e) => setEditingConsumer({ ...editingConsumer, priority: parseInt(e.target.value) || 1 }), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.65rem] text-slate-500 mt-0.5 block", children: "1 = Highest Priority" })] })] }), _jsxs("div", { class: "bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2", children: [_jsxs("div", { class: "flex items-center justify-between", children: [_jsx("label", { class: "font-bold text-slate-200", children: t('ems_base_tier') }), _jsx("span", { class: "text-[0.65rem] text-purple-400 font-mono", children: "Tier 1 (Base Load)" })] }), _jsxs("div", { class: "flex items-center gap-3", children: [_jsx("input", { type: "number", step: "0.1", min: "0", value: editingConsumer.basePowerKw ?? 0.0, onInput: (e) => setEditingConsumer({ ...editingConsumer, basePowerKw: parseFloat(e.target.value) || 0.0 }), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-xs font-bold text-slate-400", children: "kW" })] }), _jsx("span", { class: "text-[0.65rem] text-slate-500 block", children: "Essential continuous load drawn without curtailment (e.g. electronics, compressor)." })] }), _jsxs("div", { class: "bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-3", children: [_jsxs("div", { class: "flex items-center justify-between", children: [_jsxs("div", { class: "flex items-center gap-2", children: [_jsx("input", { type: "checkbox", id: "hasOptionalTier", checked: editingConsumer.hasOptionalTier ?? true, onChange: (e) => setEditingConsumer({ ...editingConsumer, hasOptionalTier: e.target.checked, isControllable: e.target.checked }), class: "w-4 h-4 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700" }), _jsx("label", { for: "hasOptionalTier", class: "font-bold text-slate-200 cursor-pointer", children: t('ems_optional_tier') })] }), _jsx("span", { class: "text-[0.65rem] text-cyan-400 font-mono", children: "Tier 2 (Modulatable)" })] }), editingConsumer.hasOptionalTier && (_jsxs("div", { class: "space-y-3 pt-2 border-t border-slate-800", children: [_jsxs("div", { class: "grid grid-cols-3 gap-3", children: [_jsxs("div", { children: [_jsxs("label", { class: "block font-bold text-slate-300 mb-1", children: [t('ems_max_power'), " (kW)"] }), _jsx("input", { type: "number", step: "0.5", value: editingConsumer.maxOptionalKw ?? editingConsumer.baseLimitKw ?? 8.0, onInput: (e) => setEditingConsumer({ ...editingConsumer, maxOptionalKw: parseFloat(e.target.value) || 8.0 }), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.6rem] text-slate-500 mt-0.5 block", children: "Max optional quota" })] }), _jsxs("div", { children: [_jsxs("label", { class: "block font-bold text-slate-300 mb-1", children: [t('ems_min_power'), " (kW)"] }), _jsx("input", { type: "number", step: "0.1", value: editingConsumer.minOptionalKw ?? editingConsumer.minPowerKw ?? 0.0, onInput: (e) => setEditingConsumer({ ...editingConsumer, minOptionalKw: parseFloat(e.target.value) || 0.0 }), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.6rem] text-slate-500 mt-0.5 block", children: "Min operating threshold" })] }), _jsxs("div", { children: [_jsx("label", { class: "block font-bold text-slate-300 mb-1", children: t('ems_standby_power') }), _jsx("input", { type: "number", step: "0.1", value: editingConsumer.standbyOptionalKw ?? 0.0, onInput: (e) => setEditingConsumer({ ...editingConsumer, standbyOptionalKw: parseFloat(e.target.value) || 0.0 }), class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none" }), _jsx("span", { class: "text-[0.6rem] text-slate-500 mt-0.5 block", children: "Standby when idle" })] })] }), _jsxs("div", { children: [_jsx("label", { class: "block text-slate-400 mb-1", children: "Force Power Key (Setpoint write)" }), _jsx("input", { type: "text", value: editingConsumer.forcePowerKey || '', onInput: (e) => setEditingConsumer({ ...editingConsumer, forcePowerKey: e.target.value }), placeholder: "e.g. wallbox-sim-01_force_power", class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none" })] })] }))] }), _jsxs("div", { children: [_jsx("label", { class: "block text-slate-400 mb-1", children: "Actual Power Key (Telemetry read)" }), _jsx("input", { type: "text", value: editingConsumer.actualPowerKey || '', onInput: (e) => setEditingConsumer({ ...editingConsumer, actualPowerKey: e.target.value }), placeholder: "e.g. wallbox-sim-01_power", class: "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none" })] }), _jsxs("div", { class: "flex items-center justify-end gap-3 pt-4 border-t border-slate-800", children: [_jsx("button", { type: "button", onClick: () => setShowConsumerModal(false), class: "px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition-all", children: t('ems_cancel') }), _jsxs("button", { type: "submit", disabled: savingConsumer, class: "px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition-all shadow-md flex items-center gap-2", children: [savingConsumer && _jsx("i", { class: "fas fa-spinner fa-spin" }), editingConsumer.id ? t('ems_save_changes') : t('ems_add_consumer')] })] })] })] }) }))] }));
+}
+export const TrajectoryPage = EmsPage;

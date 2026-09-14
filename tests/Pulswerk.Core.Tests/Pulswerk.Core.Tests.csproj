@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Pulswerk.Core\Pulswerk.Core.csproj" />
+    <ProjectReference Include="..\..\src\Pulswerk.Ems\Pulswerk.Ems.csproj" />
   </ItemGroup>
 
 </Project>

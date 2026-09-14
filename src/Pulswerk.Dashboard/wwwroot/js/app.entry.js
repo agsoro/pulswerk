@@ -18,7 +18,7 @@ import { LogsPage } from './pages/logs';
 import { HeartbeatPage } from './pages/heartbeat';
 import { WallboxesPage } from './pages/wallboxes';
 import { BillingPage } from './pages/billing';
-import { TrajectoryPage } from './pages/trajectory';
+import { EmsPage } from './pages/ems';
 import { TelemetryCrudPage } from './pages/telemetryCrud';
 // Imports of i18n
 import { initI18n, setLanguage, t, currentLang } from './i18n';
@@ -169,9 +169,9 @@ export function App() {
         pageTitle = 'Billing';
         pageComponent = _jsx(BillingPage, {});
     }
-    else if (routePath === '/Trajectory' && user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false) {
-        pageTitle = 'Trajectory';
-        pageComponent = _jsx(TrajectoryPage, {});
+    else if ((routePath === '/ems' || routePath === '/Trajectory') && user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false) {
+        pageTitle = 'Energy Management';
+        pageComponent = _jsx(EmsPage, {});
     }
     else if (routePath === '/TelemetryCrud' && user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false) {
         pageTitle = 'Historical Data';
@@ -199,7 +199,7 @@ export function App() {
         user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false ? { id: 'connections', path: '/plswk/Connections', icon: 'fa-network-wired', labelKey: 'nav_connections', title: 'Connections' } : null,
         user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false ? { id: 'wallboxes', path: '/plswk/Wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes', title: 'Wallboxes' } : null,
         user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false ? { id: 'billing', path: '/plswk/Billing', icon: 'fa-file-invoice-dollar', labelKey: 'nav_billing', title: 'Billing' } : null,
-        user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false ? { id: 'trajectory', path: '/plswk/Trajectory', icon: 'fa-chart-line', labelKey: 'nav_trajectory', title: 'Trajectory' } : null,
+        user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false ? { id: 'ems', path: '/plswk/ems', icon: 'fa-bolt', labelKey: 'nav_ems', title: 'Energy Management' } : null,
         user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false ? { id: 'telemetryCrud', path: '/plswk/TelemetryCrud', icon: 'fa-history', labelKey: 'nav_historical_data', title: 'Historical Data' } : null,
         user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false ? { id: 'alarms', path: '/plswk/Alarms', icon: 'fa-bell', labelKey: 'nav_alarms', title: 'Alarms' } : null,
         user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false ? { id: 'logs', path: '/plswk/Logs', icon: 'fa-terminal', labelKey: 'nav_logs', title: 'Logs' } : null,
@@ -219,8 +219,8 @@ export function App() {
             return 'wallboxes';
         if (path.startsWith('/plswk/Billing'))
             return 'billing';
-        if (path.startsWith('/plswk/Trajectory'))
-            return 'trajectory';
+        if (path.startsWith('/plswk/ems') || path.startsWith('/plswk/Trajectory'))
+            return 'ems';
         if (path.startsWith('/plswk/TelemetryCrud'))
             return 'telemetryCrud';
         if (path.startsWith('/plswk/Alarms'))
@@ -247,7 +247,7 @@ export function App() {
                                                             pageTitle === 'System Logs' ? t('nav_logs') :
                                                                 pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
                                                                     pageTitle === 'Billing' ? t('nav_billing') :
-                                                                        pageTitle === 'Trajectory' ? t('nav_trajectory') :
+                                                                        (pageTitle === 'Energy Management' || pageTitle === 'Trajectory') ? t('nav_ems') :
                                                                             pageTitle === 'Historical Data' ? t('nav_historical_data') :
                                                                                 pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle }) }), _jsxs("div", { class: "flex items-center gap-2", children: [_jsxs("div", { class: "flex items-center gap-1 text-[0.65rem] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full px-2 py-0.5", children: [_jsx("span", { class: "w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" }), _jsx("span", { class: "font-mono", children: "Live" })] }), _jsx("button", { type: "button", onClick: () => setMobileDrawerOpen(true), class: "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer", title: "Menu & Profile", "data-testid": "mobile-menu-btn", children: isUserAuth ? (_jsx("span", { class: "font-bold text-[0.65rem] text-sky-400", children: userInitials })) : (_jsx("i", { class: "fas fa-bars" })) })] })] }), _jsx("header", { id: "pageHeader", class: "hidden md:flex justify-between items-center mb-4 border-b border-white/5 pb-2.5", "data-testid": "page-header", children: _jsx("h1", { class: "text-xl font-extrabold tracking-tight text-white/95", "data-testid": "page-title", children: pageTitle === 'Home' ? t('nav_home') :
                                 pageTitle === 'Dashboards' ? t('nav_dashboards') :
@@ -258,7 +258,7 @@ export function App() {
                                                     pageTitle === 'System Logs' ? t('nav_logs') :
                                                         pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
                                                             pageTitle === 'Billing' ? t('nav_billing') :
-                                                                pageTitle === 'Trajectory' ? t('nav_trajectory') :
+                                                                (pageTitle === 'Energy Management' || pageTitle === 'Trajectory') ? t('nav_ems') :
                                                                     pageTitle === 'Historical Data' ? t('nav_historical_data') :
                                                                         pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle }) }), _jsx("div", { class: "w-full", children: pageComponent })] }), _jsxs("nav", { class: "md:hidden fixed bottom-0 inset-x-0 h-16 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-40 flex items-center justify-around px-2 pb-safe", "data-testid": "bottom-nav", children: [[
                         { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home' },

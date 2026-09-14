@@ -1612,51 +1612,87 @@ namespace Pulswerk.Dashboard.Controllers
             return Ok(new { success = ok });
         }
 
-        [HttpPost("trajectory/targets/15min")]
-        public IActionResult Set15MinTrajectoryTargets([FromBody] List<TrajectoryTarget15MinDto> req)
-        {
-            var serverCfg = _data.Config.Server;
-            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
 
-            if (req == null) return BadRequest("Targets list is required");
+        // ── Energy Management System (EMS) Endpoints ─────────────────────────
 
-            var list = req.Select(t => new TrajectoryTarget15Min(t.Timestamp, t.TargetKwh)).ToList();
-            _billing.SetTrajectoryTargets15Min(list);
-            return Ok(new { success = true });
-        }
-
-        [HttpGet("trajectory/targets/15min")]
-        public IActionResult Get15MinTrajectoryTargets()
-        {
-            var list = _billing.GetTrajectoryTargets15Min().Select(t => new {
-                timestamp = t.Timestamp,
-                targetKwh = t.TargetKwh
-            }).ToList();
-            return Ok(list);
-        }
-
-        public class TrajectoryTarget15MinDto
-        {
-            public long Timestamp { get; set; }
-            public double TargetKwh { get; set; }
-        }
-
-        // ── Trajectory Control Endpoints ────────────────────────────────────
-
+        [HttpGet("ems/status")]
         [HttpGet("trajectory/status")]
-        public IActionResult GetTrajectoryStatus()
+        public IActionResult GetEmsStatus()
         {
-            var svc = TrajectoryService.Instance;
+            var svc = EmsService.Instance;
+            var snapshot = svc.GetSnapshot();
             return Ok(new {
-                enabled = _billing.GetTariff("trajectory_control_enabled", 0) == 1,
-                monthlyTargetKwh = _billing.GetTariff("trajectory_monthly_target_kwh", 3000.0),
-                mainMeterKey = _billing.GetRfidMap().TryGetValue("trajectory_main_meter_key", out var k) ? k : "analytics-summary_daily-kwh",
+                enabled = snapshot.Enabled,
+                gridImportKw = snapshot.GridImportKw,
+                gridMaxImportKw = snapshot.GridMaxImportKw,
+                pvGenerationKw = snapshot.PvGenerationKw,
+                batteryPowerKw = snapshot.BatteryPowerKw,
+                batteryChargeKw = snapshot.BatteryChargeKw,
+                batterySocPct = snapshot.BatterySocPct,
+                batteryMaxPowerKw = snapshot.BatteryMaxPowerKw,
+                batteryMaxChargeKw = snapshot.BatteryMaxChargeKw,
+                batteryMaxDischargeKw = snapshot.BatteryMaxDischargeKw,
+                isBatteryCharging = snapshot.IsBatteryCharging,
+                totalSurplusAvailableKw = snapshot.TotalSurplusAvailableKw,
+                totalBaseLoadKw = snapshot.TotalBaseLoadKw,
+                totalOptionalLoadKw = snapshot.TotalOptionalLoadKw,
+                totalReclaimedPowerKw = snapshot.TotalReclaimedPowerKw,
+                uncontrollableLoadKw = snapshot.UncontrollableLoadKw,
+                totalControllableLoadKw = snapshot.TotalControllableLoadKw,
+
+                // Rolling 24-hour calculated energy
+                gridImport24hKwh = snapshot.GridImport24hKwh,
+                gridExport24hKwh = snapshot.GridExport24hKwh,
+                pvGeneration24hKwh = snapshot.PvGeneration24hKwh,
+                batteryCharged24hKwh = snapshot.BatteryCharged24hKwh,
+                batteryDischarged24hKwh = snapshot.BatteryDischarged24hKwh,
+                uncontrollable24hKwh = snapshot.Uncontrollable24hKwh,
+                totalSurplus24hKwh = snapshot.TotalSurplus24hKwh,
+                totalControllable24hKwh = snapshot.TotalControllable24hKwh,
+
+                consumers = snapshot.Consumers.Select(c => new {
+                    id = c.Id,
+                    name = c.Name,
+                    basePowerKw = c.BasePowerKw,
+                    hasOptionalTier = c.HasOptionalTier,
+                    maxOptionalKw = c.MaxOptionalKw,
+                    minOptionalKw = c.MinOptionalKw,
+                    standbyOptionalKw = c.StandbyOptionalKw,
+                    maxPowerKw = c.MaxPowerKw,
+                    actualPowerKey = c.ActualPowerKey,
+                    forcePowerKey = c.ForcePowerKey,
+                    priority = c.Priority,
+                    isControllable = c.IsControllable,
+                    baseLimitKw = c.BaseLimitKw,
+                    minPowerKw = c.MinPowerKw,
+                    actualPowerKw = c.ActualPowerKw,
+                    isActivelyDemanding = c.IsActivelyDemanding,
+                    allocatedOptionalKw = c.AllocatedOptionalKw,
+                    allocatedPowerKw = c.AllocatedPowerKw,
+                    unusedPowerKw = c.UnusedPowerKw,
+                    status = c.Status,
+                    energy24hKwh = c.Energy24hKwh
+                }).ToList(),
+                sources = svc.SourcesConfig,
+
+                // Legacy & convenience aliases for backward compatibility
+                baseLimitKw = svc.BaseLimitKw,
+                effectiveLimitKw = svc.EffectiveLimitKw,
+                wbActualKw = svc.WbActualKw,
+                batteryPowerKey = svc.BatteryPowerKey,
+                batterySocKey = svc.BatterySocKey,
+                batteryReserveKw = svc.BatteryReserveKw,
+                wbForcePowerKey = svc.WbForcePowerKey,
+                wbActualPowerKey = svc.WbActualPowerKey,
+                controlMode = svc.ControlMode,
+                monthlyTargetKwh = svc.BaseLimitKw,
+                mainMeterKey = svc.WbActualPowerKey,
                 targetKwh = svc.TargetKwh,
                 actualKwh = svc.ActualKwh,
                 deviationPct = svc.DeviationPct,
                 isCurtailmentActive = svc.IsCurtailmentActive,
                 controlState = svc.ControlState,
-                logs = svc.GetLogs().Select(l => new {
+                logs = snapshot.Logs.Select(l => new {
                     timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
                     message = l.Message,
                     state = l.State
@@ -1664,66 +1700,97 @@ namespace Pulswerk.Dashboard.Controllers
             });
         }
 
-        public class TrajectoryConfigDto
+        public class EmsConfigDto
         {
-            public bool Enabled { get; set; }
+            public bool Enabled { get; set; } = true;
+            public double BaseLimitKw { get; set; } = 8.0;
+            public double BatteryReserveKw { get; set; } = 1.0;
+            public string WbForcePowerKey { get; set; } = "";
+            public string WbActualPowerKey { get; set; } = "";
+            public string BatteryPowerKey { get; set; } = "";
+            public string BatterySocKey { get; set; } = "";
+            public double BatteryMaxPowerKw { get; set; } = 5.0;
+
+            public EnergySourcesConfig? Sources { get; set; }
+            public List<EnergyConsumer>? Consumers { get; set; }
+
+            // Legacy fallbacks
             public double MonthlyTargetKwh { get; set; }
             public string MainMeterKey { get; set; } = "";
         }
 
+        [HttpPost("ems/config")]
         [HttpPost("trajectory/config")]
-        public IActionResult UpdateTrajectoryConfig([FromBody] TrajectoryConfigDto req)
+        public IActionResult UpdateEmsConfig([FromBody] EmsConfigDto req)
         {
             var serverCfg = _data.Config.Server;
             if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
 
-            _billing.SetTariff("trajectory_control_enabled", req.Enabled ? 1 : 0);
-            _billing.SetTariff("trajectory_monthly_target_kwh", req.MonthlyTargetKwh);
-            _billing.AddRfidMapping("trajectory_main_meter_key", req.MainMeterKey);
+            var svc = EmsService.Instance;
+
+            var sources = req.Sources ?? svc.SourcesConfig;
+            double baseLimit = req.BaseLimitKw > 0 ? req.BaseLimitKw : (req.MonthlyTargetKwh > 0 ? req.MonthlyTargetKwh : sources.GridMaxImportKw);
+            sources.GridMaxImportKw = baseLimit;
+
+            if (req.BatteryMaxPowerKw > 0)
+                sources.BatteryMaxPowerKw = req.BatteryMaxPowerKw;
+            if (req.BatteryReserveKw > 0)
+                sources.BatteryMinReserveKw = req.BatteryReserveKw;
+            if (!string.IsNullOrWhiteSpace(req.BatteryPowerKey))
+                sources.BatteryPowerKey = req.BatteryPowerKey;
+            if (!string.IsNullOrWhiteSpace(req.BatterySocKey))
+                sources.BatterySocKey = req.BatterySocKey;
+
+            var consumers = req.Consumers ?? svc.Consumers;
+            var primary = consumers.FirstOrDefault(c => c.IsControllable);
+            if (primary != null)
+            {
+                if (!string.IsNullOrWhiteSpace(req.WbForcePowerKey))
+                    primary.ForcePowerKey = req.WbForcePowerKey;
+                if (!string.IsNullOrWhiteSpace(req.WbActualPowerKey))
+                    primary.ActualPowerKey = req.WbActualPowerKey;
+                primary.BaseLimitKw = baseLimit;
+            }
+
+            svc.SaveConfiguration(req.Enabled, sources, consumers);
             return Ok(new { success = true });
         }
 
-        [HttpGet("trajectory/targets")]
-        public IActionResult GetTrajectoryTargets()
-        {
-            var list = _billing.GetCurtailmentTargets().Select(t => new {
-                telemetryKey = t.TelemetryKey,
-                normalValue = t.NormalValue,
-                warningValue = t.WarningValue,
-                criticalValue = t.CriticalValue
-            }).ToList();
-            return Ok(list);
-        }
-
-        public class CurtailmentTargetDto
-        {
-            public string TelemetryKey { get; set; } = "";
-            public double NormalValue { get; set; }
-            public double WarningValue { get; set; }
-            public double CriticalValue { get; set; }
-        }
-
-        [HttpPost("trajectory/targets")]
-        public IActionResult AddOrUpdateTrajectoryTarget([FromBody] CurtailmentTargetDto req)
+        [HttpPost("ems/consumers")]
+        [HttpPost("trajectory/consumers")]
+        public IActionResult AddOrUpdateConsumer([FromBody] EnergyConsumer consumer)
         {
             var serverCfg = _data.Config.Server;
             if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
 
-            if (string.IsNullOrEmpty(req.TelemetryKey)) return BadRequest("telemetryKey is required");
+            if (string.IsNullOrWhiteSpace(consumer.Id))
+                consumer.Id = "consumer-" + Guid.NewGuid().ToString("N")[..8];
+            if (string.IsNullOrWhiteSpace(consumer.Name))
+                consumer.Name = "Consumer " + consumer.Id;
 
-            _billing.AddCurtailmentTarget(req.TelemetryKey, req.NormalValue, req.WarningValue, req.CriticalValue);
-            return Ok(new { success = true });
+            var svc = EmsService.Instance;
+            var list = svc.Consumers.Where(c => !string.IsNullOrWhiteSpace(c.Id) && !string.IsNullOrWhiteSpace(c.Name)).ToList();
+            int idx = list.FindIndex(c => c.Id.Equals(consumer.Id, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) list[idx] = consumer;
+            else list.Add(consumer);
+
+            svc.SaveConfiguration(svc.Enabled, svc.SourcesConfig, list);
+            return Ok(new { success = true, consumer });
         }
 
-        [HttpDelete("trajectory/targets/{*telemetryKey}")]
-        public IActionResult DeleteTrajectoryTarget(string telemetryKey)
+        [HttpDelete("ems/consumers/{id}")]
+        [HttpDelete("trajectory/consumers/{id}")]
+        public IActionResult DeleteConsumer(string id)
         {
             var serverCfg = _data.Config.Server;
             if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
 
-            _billing.DeleteCurtailmentTarget(telemetryKey);
+            var svc = EmsService.Instance;
+            var list = svc.Consumers.Where(c => !c.Id.Equals(id, StringComparison.OrdinalIgnoreCase)).ToList();
+            svc.SaveConfiguration(svc.Enabled, svc.SourcesConfig, list);
             return Ok(new { success = true });
         }
+
 
         public class TelemetryInsertDto
         {

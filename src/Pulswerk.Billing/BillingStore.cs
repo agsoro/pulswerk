@@ -49,22 +49,10 @@ namespace Pulswerk.Billing
                     timestamp      INTEGER NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS curtailment_targets (
-                    telemetry_key   TEXT PRIMARY KEY,
-                    normal_value    REAL NOT NULL,
-                    warning_value   REAL NOT NULL,
-                    critical_value  REAL NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS tenants (
                     id        TEXT PRIMARY KEY,
                     name      TEXT NOT NULL,
                     meter_key TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS trajectory_targets_15min (
-                    timestamp  INTEGER PRIMARY KEY,
-                    target_kwh REAL NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS meter_replacements (
@@ -179,6 +167,25 @@ namespace Pulswerk.Billing
             }
         }
 
+        // ── Energy Control / General Settings ───────────────────────────────
+
+        public string GetSetting(string key, string defaultValue)
+        {
+            lock (_lock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText = "SELECT user_name FROM rfid_user_map WHERE id_tag = @key";
+                cmd.Parameters.AddWithValue("@key", key);
+                var val = cmd.ExecuteScalar();
+                return val != null ? val.ToString()! : defaultValue;
+            }
+        }
+
+        public void SetSetting(string key, string value)
+        {
+            AddRfidMapping(key, value);
+        }
+
         // ── Tenants ──────────────────────────────────────────────────────────
 
         public List<TenantRecord> GetTenants()
@@ -274,60 +281,6 @@ namespace Pulswerk.Billing
             }
         }
 
-        // ── Curtailment Targets ──────────────────────────────────────────────
-
-        public List<CurtailmentTarget> GetCurtailmentTargets()
-        {
-            lock (_lock)
-            {
-                var list = new List<CurtailmentTarget>();
-                using var cmd = _db.CreateCommand();
-                cmd.CommandText = "SELECT telemetry_key, normal_value, warning_value, critical_value FROM curtailment_targets";
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    list.Add(new CurtailmentTarget(
-                        TelemetryKey: reader.GetString(0),
-                        NormalValue: reader.GetDouble(1),
-                        WarningValue: reader.GetDouble(2),
-                        CriticalValue: reader.GetDouble(3)
-                    ));
-                }
-                return list;
-            }
-        }
-
-        public void AddCurtailmentTarget(string key, double normal, double warning, double critical)
-        {
-            lock (_lock)
-            {
-                using var cmd = _db.CreateCommand();
-                cmd.CommandText = """
-                    INSERT INTO curtailment_targets (telemetry_key, normal_value, warning_value, critical_value)
-                    VALUES (@key, @norm, @warn, @crit)
-                    ON CONFLICT(telemetry_key) DO UPDATE SET
-                        normal_value = excluded.normal_value,
-                        warning_value = excluded.warning_value,
-                        critical_value = excluded.critical_value
-                    """;
-                cmd.Parameters.AddWithValue("@key", key);
-                cmd.Parameters.AddWithValue("@norm", normal);
-                cmd.Parameters.AddWithValue("@warn", warning);
-                cmd.Parameters.AddWithValue("@crit", critical);
-                cmd.ExecuteNonQuery();
-            }
-        }
-
-        public void DeleteCurtailmentTarget(string key)
-        {
-            lock (_lock)
-            {
-                using var cmd = _db.CreateCommand();
-                cmd.CommandText = "DELETE FROM curtailment_targets WHERE telemetry_key = @key";
-                cmd.Parameters.AddWithValue("@key", key);
-                cmd.ExecuteNonQuery();
-            }
-        }
 
         // ── Meter Replacements ────────────────────────────────────────────────
 
@@ -425,78 +378,6 @@ namespace Pulswerk.Billing
 
         // ── 15-Min Trajectory Targets ────────────────────────────────────────
 
-        public List<TrajectoryTarget15Min> GetTrajectoryTargets15Min()
-        {
-            lock (_lock)
-            {
-                var list = new List<TrajectoryTarget15Min>();
-                using var cmd = _db.CreateCommand();
-                cmd.CommandText = "SELECT timestamp, target_kwh FROM trajectory_targets_15min ORDER BY timestamp ASC";
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    list.Add(new TrajectoryTarget15Min(
-                        Timestamp: reader.GetInt64(0),
-                        TargetKwh: reader.GetDouble(1)
-                    ));
-                }
-                return list;
-            }
-        }
-
-        public void SetTrajectoryTargets15Min(List<TrajectoryTarget15Min> targets)
-        {
-            lock (_lock)
-            {
-                using var tx = _db.BeginTransaction();
-                try
-                {
-                    using var deleteCmd = _db.CreateCommand();
-                    deleteCmd.Transaction = tx;
-                    deleteCmd.CommandText = "DELETE FROM trajectory_targets_15min";
-                    deleteCmd.ExecuteNonQuery();
-
-                    using var insertCmd = _db.CreateCommand();
-                    insertCmd.Transaction = tx;
-                    insertCmd.CommandText = "INSERT INTO trajectory_targets_15min (timestamp, target_kwh) VALUES (@ts, @target)";
-                    
-                    var tsParam = insertCmd.Parameters.Add("@ts", SqliteType.Integer);
-                    var targetParam = insertCmd.Parameters.Add("@target", SqliteType.Real);
-
-                    foreach (var t in targets)
-                    {
-                        tsParam.Value = t.Timestamp;
-                        targetParam.Value = t.TargetKwh;
-                        insertCmd.ExecuteNonQuery();
-                    }
-
-                    tx.Commit();
-                }
-                catch
-                {
-                    tx.Rollback();
-                    throw;
-                }
-            }
-        }
-
-        public double GetTrajectoryTargetForTimestamp(long tsMs)
-        {
-            lock (_lock)
-            {
-                using var cmd = _db.CreateCommand();
-                cmd.CommandText = "SELECT target_kwh FROM trajectory_targets_15min WHERE timestamp <= @ts ORDER BY timestamp DESC LIMIT 1";
-                cmd.Parameters.AddWithValue("@ts", tsMs);
-                var val = cmd.ExecuteScalar();
-                if (val != null) return Convert.ToDouble(val);
-
-                cmd.CommandText = "SELECT target_kwh FROM trajectory_targets_15min ORDER BY timestamp ASC LIMIT 1";
-                cmd.Parameters.Clear();
-                val = cmd.ExecuteScalar();
-                return val != null ? Convert.ToDouble(val) : double.NaN;
-            }
-        }
-
         public void Dispose()
         {
             if (_disposed) return;
@@ -507,8 +388,6 @@ namespace Pulswerk.Billing
     }
 
     public record ChargingTransaction(int Id, string ChargepointId, int ConnectorId, string IdTag, double Kwh, long Timestamp);
-    public record CurtailmentTarget(string TelemetryKey, double NormalValue, double WarningValue, double CriticalValue);
     public record TenantRecord(string Id, string Name, string MeterKey);
-    public record TrajectoryTarget15Min(long Timestamp, double TargetKwh);
     public record MeterReplacement(int Id, string TenantId, long ReplacedAt, double? OldFinalKwh, double? NewStartKwh, string? Note);
 }

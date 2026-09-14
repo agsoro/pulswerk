@@ -77,7 +77,7 @@ namespace Pulswerk.Drivers.Modbus
                 {
                     [TelemetryKeys.UtilityLimitPct] = (double)utilLimitRaw,
                     [TelemetryKeys.PowerLimitPct] = (double)feedbackLimitRaw,
-                    [TelemetryKeys.PowerKw] = (double)powerRaw
+                    [TelemetryKeys.PowerKw] = Math.Round(powerRaw > 500 ? powerRaw / 1000.0 : (double)powerRaw, 2)
                 };
             });
         }

@@ -9,6 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Same NModbus version as the connector so wire encoding is identical -->
-    <PackageReference Include="NModbus" Version="3.0.81" />
+    <PackageReference Include="NModbus" />
   </ItemGroup>
 </Project>

@@ -19,7 +19,7 @@ const MODULE_META = [
     { key: 'heartbeat', label: 'Heartbeat', icon: 'fa-heart-pulse', description: 'System health, uptime, and performance stats' },
     { key: 'billing', label: 'Billing', icon: 'fa-dollar-sign', description: 'RFID card billing and tenant energy invoicing' },
     { key: 'wallbox', label: 'Wallboxes', icon: 'fa-charging-station', description: 'OCPP EV chargepoint management and monitoring' },
-    { key: 'ems', label: 'Energy Management', icon: 'fa-bolt', description: 'Trajectory control, targets, and curtailment' },
+    { key: 'ems', label: 'Energy Management', icon: 'fa-bolt', description: 'Real-time supply/demand balancing, dynamic surplus smart charging, and peak shaving' },
     { key: 'connections', label: 'Connections', icon: 'fa-network-wired', description: 'Device connection management and diagnostics' },
 ];
 const DEFAULT_MODULES = {

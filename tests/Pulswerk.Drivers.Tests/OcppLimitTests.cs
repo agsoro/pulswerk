@@ -1,12 +1,13 @@
+using System.Threading.Tasks;
 using Xunit;
+using Pulswerk.Core;
 using Pulswerk.Drivers.Ocpp;
 
 namespace Pulswerk.Drivers.Tests
 {
     /// <summary>
-    /// Tests the OCPP power_limit ⇄ charge-current conversion logic, where the
-    /// percentage refers to the TOTAL power capacity (16A × 3 phases = 48 "phase-A"),
-    /// with a 6A-per-phase minimum and a 10% shut-off threshold.
+    /// Tests the OCPP force_power (kW) setpoint and current/phase resolution logic,
+    /// ensuring direct power control in kW without percentage conversions.
     /// </summary>
     [Collection("OcppTests")]
     public class OcppLimitTests
@@ -14,135 +15,148 @@ namespace Pulswerk.Drivers.Tests
         private const string Cp = "test-cp";
         private static OcppManagerService Svc => OcppManagerService.Instance;
 
-        // ── Constants / capacity ────────────────────────────────────────────
+        // ── Constants ───────────────────────────────────────────────────────
         [Fact]
         public void Constants_HaveExpectedValues()
         {
             Assert.Equal(16.0, OcppManagerService.DefaultMaxCurrentAmps);
             Assert.Equal(3, OcppManagerService.MaxPhases);
             Assert.Equal(6.0, OcppManagerService.MinCurrentAmps);
-            Assert.Equal(10.0, OcppManagerService.MinChargePercent);
         }
 
-        [Fact]
-        public void GetMaxTotalCapacity_Is16Times3()
-        {
-            Assert.Equal(48.0, Svc.GetMaxTotalCapacity(Cp));
-        }
-
-        // ── AmpsToPercent (per-phase amps × phases / total) ─────────────────
-        [Theory]
-        [InlineData(16, 3, 100.0)] // full
-        [InlineData(8, 3, 50.0)]   // half on three phases
-        [InlineData(6, 3, 37.5)]   // 18 / 48
-        [InlineData(6, 2, 25.0)]   // 12 / 48
-        [InlineData(6, 1, 12.5)]   // 6 / 48 (minimum)
-        [InlineData(0, 3, 0.0)]    // off
-        public void AmpsToPercent_Cases(double amps, int phases, double expected)
-        {
-            Assert.Equal(expected, Svc.AmpsToPercent(Cp, amps, phases));
-        }
-
-        [Fact]
-        public void AmpsToPercent_IsClampedTo100()
-        {
-            // 20A on 3 phases would be 125% – clamped to 100.
-            Assert.Equal(100.0, Svc.AmpsToPercent(Cp, 20, 3));
-        }
-
-        // ── PercentToAmps (total / phases, per-phase capped at 16A) ─────────
-        [Theory]
-        [InlineData(100, 3, 16.0)] // 48 / 3
-        [InlineData(50, 3, 8.0)]   // 24 / 3
-        [InlineData(25, 2, 6.0)]   // 12 / 2
-        [InlineData(100, 1, 16.0)] // 48 / 1 -> capped at per-phase max 16A
-        [InlineData(0, 3, 0.0)]    // off
-        public void PercentToAmps_Cases(double percent, int phases, double expected)
-        {
-            Assert.Equal(expected, Svc.PercentToAmps(Cp, percent, phases));
-        }
-
-        [Fact]
-        public void AmpsToPercent_And_PercentToAmps_RoundTrip()
-        {
-            // 8A on 3 phases -> 50% -> back to 8A on 3 phases.
-            double pct = Svc.AmpsToPercent(Cp, 8, 3);
-            Assert.Equal(50.0, pct);
-            Assert.Equal(8.0, Svc.PercentToAmps(Cp, pct, 3));
-        }
-
-        // ── ResolveLimit: shut-off below 10% ────────────────────────────────
+        // ── ResolveForcePower: Sub-minimum shuts off (0A) ────────────────────
         [Theory]
         [InlineData(0.0)]
+        [InlineData(0.5)]
         [InlineData(1.0)]
-        [InlineData(5.0)]
-        [InlineData(9.9)]
-        public void ResolveLimit_BelowThreshold_ShutsOff(double percent)
+        [InlineData(1.37)]
+        public void ResolveForcePower_SubMinimum_ShutsOff(double powerKw)
         {
-            var (amps, phases) = Svc.ResolveLimit(Cp, percent);
+            var (amps, phases) = OcppManagerService.ResolveForcePower(powerKw);
             Assert.Equal(0.0, amps);
             Assert.Equal(1, phases);
         }
 
-        // ── ResolveLimit: charges at/above 10%, never below 6A per phase ────
+        // ── ResolveForcePower: Negative reverts to unrestricted (16A, 3p) ───
         [Theory]
-        [InlineData(10.0, 6.0, 1)]   // minimum: 4.8 phase-A bumped to 1×6A
-        [InlineData(12.5, 6.0, 1)]   // exactly 6 phase-A -> 1×6A
-        [InlineData(25.0, 6.0, 2)]   // 12 phase-A -> 2×6A
-        [InlineData(33.333, 8.0, 2)] // 16 phase-A -> 2×8A
-        [InlineData(37.5, 6.0, 3)]   // 18 phase-A -> 3×6A
-        [InlineData(50.0, 8.0, 3)]   // 24 phase-A -> 3×8A
-        [InlineData(100.0, 16.0, 3)] // full -> 3×16A
-        public void ResolveLimit_AtOrAboveThreshold_Cases(double percent, double expectedAmps, int expectedPhases)
+        [InlineData(-1.0)]
+        [InlineData(-10.0)]
+        public void ResolveForcePower_Negative_ReturnsUnrestricted(double powerKw)
         {
-            var (amps, phases) = Svc.ResolveLimit(Cp, percent);
+            var (amps, phases) = OcppManagerService.ResolveForcePower(powerKw);
+            Assert.Equal(16.0, amps);
+            Assert.Equal(3, phases);
+        }
+
+        // ── ResolveForcePower: 1-phase range (1.38 kW to 4.13 kW) ───────────
+        [Theory]
+        [InlineData(1.38, 6.0, 1)]   // 1.38 kW / 0.23 = 6.0A (minimum 1-phase)
+        [InlineData(2.3, 10.0, 1)]   // 2.3 kW / 0.23 = 10.0A
+        [InlineData(3.0, 13.0, 1)]   // 3.0 kW / 0.23 = 13.04A -> 13.0A
+        [InlineData(3.68, 16.0, 1)]  // 3.68 kW / 0.23 = 16.0A (maximum 1-phase)
+        public void ResolveForcePower_SinglePhase_Range(double powerKw, double expectedAmps, int expectedPhases)
+        {
+            var (amps, phases) = OcppManagerService.ResolveForcePower(powerKw);
             Assert.Equal(expectedAmps, amps);
             Assert.Equal(expectedPhases, phases);
         }
 
-        [Fact]
-        public void ResolveLimit_NeverBelowMinimumPerPhaseWhileCharging()
+        // ── ResolveForcePower: 3-phase range (>= 4.14 kW) ────────────────────
+        [Theory]
+        [InlineData(4.14, 6.0, 3)]   // 4.14 kW / 0.69 = 6.0A (minimum 3-phase)
+        [InlineData(6.9, 10.0, 3)]   // 6.9 kW / 0.69 = 10.0A
+        [InlineData(8.0, 11.6, 3)]   // 8.0 kW / 0.69 = 11.59A -> 11.6A
+        [InlineData(10.0, 14.5, 3)]  // 10.0 kW / 0.69 = 14.49A -> 14.5A
+        [InlineData(11.0, 16.0, 3)]  // 11.0 kW / 0.69 = 15.94A -> 16.0A (capped at 16A)
+        [InlineData(22.0, 16.0, 3)]  // Over capacity capped at 16.0A
+        public void ResolveForcePower_ThreePhase_Range(double powerKw, double expectedAmps, int expectedPhases)
         {
-            // Every chargeable percentage from the threshold up must stay >= 6A/phase.
-            for (double pct = OcppManagerService.MinChargePercent; pct <= 100.0; pct += 0.5)
-            {
-                var (amps, _) = Svc.ResolveLimit(Cp, pct);
-                Assert.True(amps >= OcppManagerService.MinCurrentAmps,
-                    $"At {pct}% the per-phase current {amps}A dropped below the 6A minimum.");
-            }
+            var (amps, phases) = OcppManagerService.ResolveForcePower(powerKw);
+            Assert.Equal(expectedAmps, amps);
+            Assert.Equal(expectedPhases, phases);
+        }
+
+        // ── ResolveForcePower: Preferred phases ──────────────────────────────
+        [Fact]
+        public void ResolveForcePower_PreferredSinglePhase_UsesSinglePhase()
+        {
+            // 3.0 kW on 1-phase
+            var (amps, phases) = OcppManagerService.ResolveForcePower(3.0, preferredPhases: 1);
+            Assert.Equal(13.0, amps);
+            Assert.Equal(1, phases);
         }
 
         [Fact]
-        public void ResolveLimit_NeverExceedsPerPhaseMax()
+        public void ResolveForcePower_PreferredThreePhase_FallsBackIfBelowMinimum()
         {
-            for (double pct = 0; pct <= 100.0; pct += 1.0)
-            {
-                var (amps, _) = Svc.ResolveLimit(Cp, pct);
-                Assert.True(amps <= OcppManagerService.DefaultMaxCurrentAmps,
-                    $"At {pct}% the per-phase current {amps}A exceeded the 16A maximum.");
-            }
+            // 2.3 kW cannot run on 3 phases at 6A (needs 4.14 kW), so it falls back to 1 phase
+            var (amps, phases) = OcppManagerService.ResolveForcePower(2.3, preferredPhases: 3);
+            Assert.Equal(10.0, amps);
+            Assert.Equal(1, phases);
         }
 
+        // ── SetChargingLimitAsync & Telemetry ────────────────────────────────
         [Fact]
-        public void ResolveLimit_AboveThreshold_ResultedPercentIsAtLeastMinimum()
+        public async Task SetChargingLimitAsync_UpdatesForcePowerTelemetry()
         {
-            // A small (but >= 10%) request charges minimally; the effective stored
-            // percentage reflects the real 1×6A = 12.5% floor.
-            var (amps, phases) = Svc.ResolveLimit(Cp, 10.0);
-            double effective = Svc.AmpsToPercent(Cp, amps, phases);
-            Assert.Equal(12.5, effective);
-        }
-
-        [Fact]
-        public async Task SetChargingLimitAsync_UpdatesTelemetry()
-        {
-            await Svc.SetChargingLimitAsync("test-cp-limit", 1, 10.0, 3);
+            await Svc.SetChargingLimitAsync("test-cp-limit", 1, 10.0, 3, 6.9);
             var telem = Svc.GetTelemetry("test-cp-limit");
-            Assert.True(telem.ContainsKey("power_limit"));
+
+            Assert.True(telem.ContainsKey("force_power"));
             Assert.True(telem.ContainsKey("charging_phases"));
+            Assert.False(telem.ContainsKey("power_limit")); // Percentage removed
+
+            Assert.Equal(6.9, telem["force_power"]);
             Assert.Equal(3.0, telem["charging_phases"]);
-            // 10A * 3 phases / 48 = 62.5%
-            Assert.Equal(62.5, telem["power_limit"]);
+        }
+
+        [Fact]
+        public async Task SetChargingLimitAsync_ZeroAmps_ReportsZeroForcePower()
+        {
+            await Svc.SetChargingLimitAsync("test-cp-zero", 1, 0.0, 1);
+            var telem = Svc.GetTelemetry("test-cp-zero");
+
+            Assert.True(telem.ContainsKey("force_power"));
+            Assert.Equal(0.0, telem["force_power"]);
+            Assert.Equal(1.0, telem["charging_phases"]);
+        }
+
+        // ── OcppDriver: Direct write of force_power ──────────────────────────
+        [Fact]
+        public void OcppDriver_Write_ForcePower_ActuatesWallbox()
+        {
+            var driver = new OcppDriver();
+            var conn = new ConnectionConfig("conn-1", "ocpp-ws");
+            var device = new DeviceConfig("wb-test-1", "Wallbox 1", "ocpp");
+
+            // Write 10.0 kW
+            driver.Write(conn, device, "force_power", 10.0);
+            var telem = Svc.GetTelemetry("wb-test-1");
+
+            Assert.Equal(10.0, telem["force_power"]);
+            Assert.Equal(3.0, telem["charging_phases"]);
+
+            // Write 0.0 kW (EMS pause/curtailment)
+            driver.Write(conn, device, "force_power", 0.0);
+            telem = Svc.GetTelemetry("wb-test-1");
+
+            Assert.Equal(0.0, telem["force_power"]);
+            Assert.Equal(1.0, telem["charging_phases"]);
+        }
+
+        [Fact]
+        public void OcppDriver_TelemetryKeys_ContainForcePowerAndNoPowerLimit()
+        {
+            var driver = new OcppDriver();
+            var keys = driver.GetTelemetryKeys();
+            var units = driver.GetTelemetryUnits();
+
+            Assert.Contains("force_power", keys);
+            Assert.Contains("charging_phases", keys);
+            Assert.DoesNotContain("power_limit", keys);
+
+            Assert.Equal(Units.Kilowatt, units["force_power"]);
+            Assert.False(units.ContainsKey("power_limit"));
         }
     }
 }

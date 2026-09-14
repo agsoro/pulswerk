@@ -19,6 +19,7 @@ namespace OcppSim
         private static double _currentLimit = 16.0;
         private static int _chargingPhases = 3;
         private static string _activeRfid = "None";
+        private static bool _autoCharge = false;
         private static readonly CancellationTokenSource _cts = new();
 
         static async Task Main(string[] args)
@@ -26,8 +27,15 @@ namespace OcppSim
             if (args.Length > 0) _chargePointId = args[0];
             if (args.Length > 1) _serverUrl = args[1];
 
+            if (args.Any(a => a.Equals("--auto-charge", StringComparison.OrdinalIgnoreCase) || a.Equals("--charging", StringComparison.OrdinalIgnoreCase))
+                || string.Equals(Environment.GetEnvironmentVariable("AUTO_CHARGE"), "true", StringComparison.OrdinalIgnoreCase))
+            {
+                _autoCharge = true;
+            }
+
             Console.WriteLine($"[OcppSim] ChargePointId: '{_chargePointId}'");
             Console.WriteLine($"[OcppSim] Server URL: '{_serverUrl}'");
+            Console.WriteLine($"[OcppSim] AutoCharge: {_autoCharge}");
 
             while (!_cts.IsCancellationRequested)
             {
@@ -49,13 +57,39 @@ namespace OcppSim
                         firmwareVersion = "2.0.0"
                     });
 
-                    // Send StatusNotification
-                    await SendCallAsync("StatusNotification", new
+                    if (_autoCharge)
                     {
-                        connectorId = 1,
-                        errorCode = "NoError",
-                        status = "Available"
-                    });
+                        _chargingActive = true;
+                        _activeRfid = "AutoTester";
+                        _transactionId = 1001;
+
+                        // Send StatusNotification: Charging
+                        await SendCallAsync("StatusNotification", new
+                        {
+                            connectorId = 1,
+                            errorCode = "NoError",
+                            status = "Charging"
+                        });
+
+                        // Send StartTransaction
+                        await SendCallAsync("StartTransaction", new
+                        {
+                            connectorId = 1,
+                            idTag = "AutoTester",
+                            meterStart = (int)_meterValueWh,
+                            timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        });
+                    }
+                    else
+                    {
+                        // Send StatusNotification: Available
+                        await SendCallAsync("StatusNotification", new
+                        {
+                            connectorId = 1,
+                            errorCode = "NoError",
+                            status = "Available"
+                        });
+                    }
 
                     // Start simulation loop (Meter values / telemetry updates)
                     var simTask = SimulationLoopAsync(_cts.Token);
@@ -238,6 +272,7 @@ namespace OcppSim
 
         private static async Task SimulationLoopAsync(CancellationToken ct)
         {
+            int heartbeatCounter = 0;
             while (!ct.IsCancellationRequested && _ws.State == WebSocketState.Open)
             {
                 if (_chargingActive)
@@ -269,6 +304,14 @@ namespace OcppSim
                             }
                         }
                     });
+                }
+                else
+                {
+                    heartbeatCounter++;
+                    if (heartbeatCounter % 6 == 0) // Periodic heartbeat every 30s when idle
+                    {
+                        await SendCallAsync("Heartbeat", new { });
+                    }
                 }
 
                 await Task.Delay(5000, ct);

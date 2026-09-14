@@ -38,19 +38,13 @@ namespace Pulswerk.Drivers.Ocpp
         private Timer? _watchdogTimer;
 
         // Fixed maximum per-phase charge current (A) and the default number of phases.
-        // The 100% power_limit reference is the TOTAL power capacity, i.e.
-        // DefaultMaxCurrentAmps * MaxPhases (= 16A x 3 phases).
         public const double DefaultMaxCurrentAmps = 16.0;
         public const int MaxPhases = 3;
 
         // Minimum charge current per phase (IEC 61851 / OCPP). A car will not charge
-        // below this, so when a low power_limit would require less than this per phase
-        // we drop phases (e.g. to 1 phase @ 6A) instead of going below it.
+        // below this, so when power drops below 4.14 kW we switch to 1 phase (@ 6A = 1.38 kW)
+        // instead of reducing below 6A. Below 1.38 kW charging is paused (0A).
         public const double MinCurrentAmps = 6.0;
-
-        // Power_limit cut-off threshold (% of total capacity). At or above this we
-        // charge (at least minimally, 1 phase @ 6A); below it charging is shut off.
-        public const double MinChargePercent = 10.0;
 
         public event Action<string, string, object>? OnTelemetryUpdated;
         public event Action<string, object>? OnServerTelemetryUpdated;
@@ -712,75 +706,79 @@ namespace Pulswerk.Drivers.Ocpp
         public double GetMaxCurrentAmps(string chargePointId) => DefaultMaxCurrentAmps;
 
         /// <summary>
-        /// Maximum total charge capacity used as the 100% reference for power_limit,
-        /// expressed in "phase-amperes" (per-phase current x max phases = 16A x 3).
+        /// Resolves a requested force_power (kW) into per-phase charge current (A) and phase count (1 or 3):
+        ///  - Negative (< 0): Unrestricted mode (16A, 3 phases = 11.04 kW).
+        ///  - Sub-minimum (< 1.38 kW or <= 0): Charging paused/shut off (0A, 1 phase).
+        ///  - 1.38 kW .. 4.14 kW: 1-phase charging (6A to 16A @ 230V).
+        ///  - >= 4.14 kW: 3-phase charging (6A to 16A @ 3x230V).
         /// </summary>
-        public double GetMaxTotalCapacity(string chargePointId) => GetMaxCurrentAmps(chargePointId) * MaxPhases;
-
-        /// <summary>
-        /// Converts a per-phase charge current (A) into a percentage of the TOTAL power
-        /// capacity (16A x 3 phases). The active <paramref name="phases"/> determines how
-        /// much of the total capacity the per-phase current represents.
-        /// </summary>
-        public double AmpsToPercent(string chargePointId, double amps, int phases)
+        public static (double Amps, int Phases) ResolveForcePower(double valueKw, int? preferredPhases = null)
         {
-            double maxTotal = GetMaxTotalCapacity(chargePointId);
-            if (maxTotal <= 0) return 0.0;
-            double total = amps * Math.Max(phases, 1);
-            return Math.Clamp(Math.Round(total / maxTotal * 100.0, 1), 0.0, 100.0);
-        }
-
-        /// <summary>
-        /// Converts a power_limit percentage (0-100) of the TOTAL power capacity into a
-        /// per-phase charge current (A), given the active number of <paramref name="phases"/>.
-        /// The result is capped at the per-phase maximum (16A).
-        /// </summary>
-        public double PercentToAmps(string chargePointId, double percent, int phases)
-        {
-            double maxTotal = GetMaxTotalCapacity(chargePointId);
-            double totalAmps = Math.Clamp(percent, 0.0, 100.0) / 100.0 * maxTotal;
-            double perPhase = totalAmps / Math.Max(phases, 1);
-            return Math.Round(Math.Min(perPhase, GetMaxCurrentAmps(chargePointId)), 2);
-        }
-
-        /// <summary>
-        /// Resolves a power_limit percentage (of total capacity, 16A x 3) into the
-        /// per-phase current and phase count to actually apply:
-        ///  - Below <see cref="MinChargePercent"/> (10%): charging is shut off (0A).
-        ///  - At or above 10%: charge with at least the minimum (1 phase @ 6A), using
-        ///    the most phases that keep each phase at or above <see cref="MinCurrentAmps"/>.
-        /// </summary>
-        public (double Amps, int Phases) ResolveLimit(string chargePointId, double percent)
-        {
-            double maxPerPhase = GetMaxCurrentAmps(chargePointId);
-            double maxTotal = GetMaxTotalCapacity(chargePointId);
-
-            // Below the cut-off threshold we shut off charging entirely.
-            if (percent < MinChargePercent)
-                return (0.0, 1);
-
-            double totalAmps = Math.Clamp(percent, 0.0, 100.0) / 100.0 * maxTotal;
-
-            // Use the most phases that still keep each phase at or above the minimum,
-            // so we curtail by reducing phases before reducing below 6A per phase.
-            for (int phases = MaxPhases; phases >= 1; phases--)
+            if (valueKw < 0.0)
             {
-                double perPhase = totalAmps / phases;
-                if (perPhase >= MinCurrentAmps || phases == 1)
-                {
-                    // At/above 10% we always charge at least the minimum current.
-                    perPhase = Math.Clamp(perPhase, MinCurrentAmps, maxPerPhase);
-                    return (Math.Round(perPhase, 2), phases);
-                }
+                // Unrestricted mode
+                return (DefaultMaxCurrentAmps, MaxPhases);
             }
 
-            return (MinCurrentAmps, 1);
+            const double minPower1p = 1.38; // 1 * 230V * 6A = 1380 W
+            const double minPower3p = 4.14; // 3 * 230V * 6A = 4140 W
+
+            if (valueKw < minPower1p)
+            {
+                // Sub-minimum: cannot charge even at 6A 1-phase -> shut off / pause
+                return (0.0, 1);
+            }
+
+            if (preferredPhases.HasValue && preferredPhases.Value == 1)
+            {
+                // Explicit 1-phase requested
+                double rawAmps = valueKw / 0.23;
+                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
+                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                return (amps, 1);
+            }
+
+            if (preferredPhases.HasValue && preferredPhases.Value == 3)
+            {
+                if (valueKw >= minPower3p)
+                {
+                    double rawAmps = valueKw / 0.69;
+                    if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
+                    double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                    return (amps, 3);
+                }
+                // If power is below 3-phase minimum (4.14 kW), drop to 1-phase to maintain >= 6A
+                double fallbackAmps = valueKw / 0.23;
+                if (Math.Abs(fallbackAmps - DefaultMaxCurrentAmps) < 0.2) fallbackAmps = DefaultMaxCurrentAmps;
+                double clampedFallback = Math.Clamp(Math.Round(fallbackAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                return (clampedFallback, 1);
+            }
+
+            // Automatic phase selection based on power
+            if (valueKw >= minPower3p)
+            {
+                double rawAmps = valueKw / 0.69;
+                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
+                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                return (amps, 3);
+            }
+            else
+            {
+                double rawAmps = valueKw / 0.23;
+                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
+                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
+                return (amps, 1);
+            }
         }
 
         // Dynamic charging curtailment (Smart Charging)
-        public async Task<bool> SetChargingLimitAsync(string chargePointId, int connectorId, double maxCurrentAmps, int? numPhases = null)
+        public async Task<bool> SetChargingLimitAsync(
+            string chargePointId,
+            int connectorId,
+            double maxCurrentAmps,
+            int? numPhases = null,
+            double? explicitForcePowerKw = null)
         {
-            Log.Info($"[OCPP] [{chargePointId}] Setting charge limit to {maxCurrentAmps}A" + (numPhases.HasValue ? $", Phases: {numPhases.Value}" : ""));
             if (numPhases.HasValue)
             {
                 UpdateTelemetryValue(chargePointId, "charging_phases", (double)numPhases.Value);
@@ -794,11 +792,16 @@ namespace Pulswerk.Drivers.Ocpp
                 }
             }
 
-            int phases = numPhases ?? MaxPhases;
+            int phases = maxCurrentAmps <= 0.0 ? 1 : (numPhases ?? MaxPhases);
+            double forcePowerKw = explicitForcePowerKw ?? (maxCurrentAmps <= 0.0
+                ? 0.0
+                : Math.Round(maxCurrentAmps * 230.0 * phases / 1000.0, 2));
 
-            // power_limit telemetry is exposed as a percentage of the TOTAL power
-            // capacity (16A x 3 phases), taking the active phase count into account.
-            UpdateTelemetryValue(chargePointId, "power_limit", AmpsToPercent(chargePointId, maxCurrentAmps, phases));
+            Log.Info($"[OCPP] [{chargePointId}] Setting charge limit to {maxCurrentAmps}A ({forcePowerKw:F1} kW), Phases: {phases}");
+
+            UpdateTelemetryValue(chargePointId, "charging_phases", (double)phases);
+            UpdateTelemetryValue(chargePointId, "force_power", forcePowerKw);
+            UpdateTelemetryValue(chargePointId, TelemetryKeys.ForcePowerKw, forcePowerKw);
 
             // Find active transaction ID if any
             int? activeTxId = null;
@@ -1250,7 +1253,7 @@ namespace Pulswerk.Drivers.Ocpp
             {
                 try
                 {
-                    await SetChargingLimitAsync(alloc.ChargePointId, alloc.ConnectorId, alloc.Amps, alloc.Phases);
+                    await SetChargingLimitAsync(alloc.ChargePointId, alloc.ConnectorId, alloc.Amps, alloc.Phases, alloc.TargetPowerKw);
                 }
                 catch (Exception ex)
                 {

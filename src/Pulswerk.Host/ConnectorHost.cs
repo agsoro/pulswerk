@@ -370,7 +370,7 @@ namespace Pulswerk.Host
 
             if (modules.Ems)
             {
-                TrajectoryService.Instance.Initialize(
+                EmsService.Instance.Initialize(
                     _dataStore,
                     _billingStore,
                     key =>
@@ -382,7 +382,7 @@ namespace Pulswerk.Host
                     },
                     async (key, value) => await dataService.WriteValueAsync(key, value)
                 );
-                TrajectoryService.Instance.Start();
+                EmsService.Instance.Start();
             }
 
             _ = Task.Run(async () =>
@@ -731,7 +731,7 @@ namespace Pulswerk.Host
 
             if (_cfg.Modules?.Ems ?? true)
             {
-                TrajectoryService.Instance.Stop();
+                EmsService.Instance.Stop();
             }
             _dataStore.Dispose();
             _alarmStore.Dispose();
