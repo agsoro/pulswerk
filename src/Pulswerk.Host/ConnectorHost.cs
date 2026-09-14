@@ -264,9 +264,10 @@ namespace Pulswerk.Host
 
         void InitDrivers()
         {
+            _ = typeof(Pulswerk.Ems.EmsService).Assembly;
             foreach (var d in _cfg.Devices)
             {
-                if (d.DeviceType == "virtual") continue;
+                if (d.DeviceType == "virtual" || d.DeviceType == "ems") continue;
                 _drivers[d.Name] = DeviceDriverFactory.Create(d.DeviceType);
                 _lastPolledAt[d.Name] = DateTime.MinValue;
             }
@@ -370,6 +371,23 @@ namespace Pulswerk.Host
 
             if (modules.Ems)
             {
+                var emsDevice = dataService.Config.Devices.FirstOrDefault(d => d.Id.Equals("ems", StringComparison.OrdinalIgnoreCase));
+                if (emsDevice == null)
+                {
+                    emsDevice = new DeviceConfig(
+                        Id: "ems",
+                        Name: "Energy Management System",
+                        DeviceType: "ems",
+                        Path: new List<string> { "EMS" }
+                    );
+                    dataService.Config.Devices.Add(emsDevice);
+                }
+
+                if (!_drivers.ContainsKey(emsDevice.Name))
+                {
+                    _drivers[emsDevice.Name] = new Pulswerk.Ems.EmsDriver();
+                }
+
                 EmsService.Instance.Initialize(
                     _dataStore,
                     _billingStore,
@@ -382,6 +400,28 @@ namespace Pulswerk.Host
                     },
                     async (key, value) => await dataService.WriteValueAsync(key, value)
                 );
+
+                EmsService.Instance.OnTelemetryUpdated += (telemetries) =>
+                {
+                    var update = new Dictionary<string, object>();
+                    foreach (var kvp in telemetries)
+                    {
+                        string fullKey = kvp.Key.StartsWith("ems_") ? kvp.Key : $"ems_{kvp.Key}";
+                        update[fullKey] = kvp.Value;
+                    }
+
+                    var persisted = dataService.UpdateTelemetries(update, isPush: true);
+                    if (persisted != null)
+                    {
+                        foreach (var p in persisted)
+                        {
+                            _dataStore.Insert(p.Key,
+                                new DateTimeOffset(p.Value.ts).ToUnixTimeMilliseconds(),
+                                p.Value.val);
+                        }
+                    }
+                };
+
                 EmsService.Instance.Start();
             }
 
@@ -656,7 +696,7 @@ namespace Pulswerk.Host
             int staggerIndex = 0;
             foreach (var device in _cfg.Devices)
             {
-                if (device.DeviceType == "virtual") continue;
+                if (device.DeviceType == "virtual" || device.DeviceType == "ems") continue;
                 var capturedDevice = device;
                 if (device.ConnectionId == null || !_connections.TryGetValue(device.ConnectionId, out var capturedConn))
                 {

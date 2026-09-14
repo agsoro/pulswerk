@@ -437,6 +437,18 @@ namespace Pulswerk.Ems
         public bool IsCurtailmentActive => EffectiveLimitKw < BaseLimitKw;
         public string ControlState => ControlMode;
 
+        public event Action<Dictionary<string, object>>? OnTelemetryUpdated;
+
+        public void SetEnabled(bool enabled)
+        {
+            Enabled = enabled;
+            if (_billingStore != null)
+            {
+                _billingStore.SetTariff("energy_control_enabled", enabled ? 1 : 0);
+            }
+            PublishTelemetries();
+        }
+
         private EmsService() { }
 
         public void Initialize(
@@ -466,6 +478,7 @@ namespace Pulswerk.Ems
             _cts = new CancellationTokenSource();
             Task.Run(() => LoopAsync(_cts.Token));
             _ = Task.Run(BootstrapHistoricalEnergyAsync);
+            PublishTelemetries();
             Log.Info("[EnergyControl] Energy dispatch loop started.");
         }
 
@@ -543,6 +556,8 @@ namespace Pulswerk.Ems
                     if (parsed != null)
                     {
                         var valid = parsed.Where(c => !string.IsNullOrWhiteSpace(c.Id) && !string.IsNullOrWhiteSpace(c.Name)).ToList();
+                        // Ignore legacy demo base loads so they do not obstruct calculated base loads
+                        valid = valid.Where(c => c.Id != "base-building-infrastructure" && c.Id != "base-server-room").ToList();
                         if (valid.Count > 0) Consumers = valid;
                     }
                 }
@@ -552,7 +567,8 @@ namespace Pulswerk.Ems
                 }
             }
 
-            // Default fallback consumers if list is empty or had only corrupted entries: realistic fleet of controllable + base loads
+            // Default fallback consumers if list is empty or had only corrupted entries: realistic fleet of controllable loads
+            // Uncontrollable base loads are calculated dynamically from the site energy balance by default.
             if (Consumers.Count == 0)
             {
                 Consumers = new List<EnergyConsumer>
@@ -612,34 +628,6 @@ namespace Pulswerk.Ems
                         ForcePowerKey = "",
                         Priority = 4,
                         MaxPowerKw = 4.5
-                    },
-                    new EnergyConsumer
-                    {
-                        Id = "base-building-infrastructure",
-                        Name = "Building Floor 2 Base Load",
-                        BasePowerKw = 1.8,
-                        HasOptionalTier = false,
-                        MaxOptionalKw = 0.0,
-                        MinOptionalKw = 0.0,
-                        StandbyOptionalKw = 0.0,
-                        ActualPowerKey = "meter-sub-f2_power",
-                        ForcePowerKey = "",
-                        Priority = 5,
-                        MaxPowerKw = 5.0
-                    },
-                    new EnergyConsumer
-                    {
-                        Id = "base-server-room",
-                        Name = "Building Floor 3 Base Load",
-                        BasePowerKw = 1.5,
-                        HasOptionalTier = false,
-                        MaxOptionalKw = 0.0,
-                        MinOptionalKw = 0.0,
-                        StandbyOptionalKw = 0.0,
-                        ActualPowerKey = "meter-sub-f3_power",
-                        ForcePowerKey = "",
-                        Priority = 6,
-                        MaxPowerKw = 5.0
                     }
                 };
             }
@@ -684,6 +672,8 @@ namespace Pulswerk.Ems
                     _billingStore.SetSetting("energy_control_wb_actual_key", primaryControllable.ActualPowerKey);
                 }
             }
+
+            PublishTelemetries();
         }
 
         public EnergySystemSnapshot GetSnapshot()
@@ -694,12 +684,15 @@ namespace Pulswerk.Ems
             double totalOptional = Consumers.Sum(c => c.AllocatedOptionalKw);
             double totalReclaimed = Consumers.Sum(c => c.UnusedPowerKw);
 
-            // If no uncontrollable loads configured, calculate from grid balance
-            if (totalUncontrollable <= 0.0)
-            {
-                double balanceLoad = (LiveGridKw + LivePvKw + LiveBatteryKw) - totalControllable;
-                totalUncontrollable = Math.Max(0.0, Math.Round(balanceLoad, 2));
-            }
+            // Uncontrollable base load is calculated dynamically from the site energy balance by default:
+            // Residual Uncontrollable Base Load = (Grid + PV + Battery) - Total Controllable
+            double balanceLoad = (LiveGridKw + LivePvKw + LiveBatteryKw) - totalControllable;
+            double calculatedBaseLoad = Math.Max(0.0, Math.Round(balanceLoad, 2));
+
+            // If sub-metered uncontrollable consumers are explicitly configured, ensure total reflects measured sub-meters or balance
+            totalUncontrollable = totalUncontrollable > 0.0
+                ? Math.Max(totalUncontrollable, calculatedBaseLoad)
+                : calculatedBaseLoad;
 
             double rawCharge = LiveBatteryKw < -0.2 ? Math.Abs(LiveBatteryKw) : 0.0;
             double battCharge = Math.Min(rawCharge, SourcesConfig.BatteryMaxChargeKw);
@@ -753,6 +746,204 @@ namespace Pulswerk.Ems
                 Logs = GetLogs(),
                 Sources = SourcesConfig
             };
+        }
+
+        public static readonly string[] StandardTelemetryKeys = new[]
+        {
+            "grid_import",
+            "grid_export",
+            "grid_power",
+            "pv_power",
+            "battery_power",
+            "battery_charge",
+            "battery_soc",
+            "surplus_power",
+            "uncontrollable_load",
+            "controllable_load",
+            "total_base_load",
+            "total_optional_load",
+            "reclaimed_power",
+            "enabled",
+            "grid_max_import",
+
+            "grid_import_24h",
+            "grid_export_24h",
+            "pv_generation_24h",
+            "battery_charged_24h",
+            "battery_discharged_24h",
+            "uncontrollable_24h",
+            "controllable_24h",
+            "total_surplus_24h"
+        };
+
+        public Dictionary<string, object> GetTelemetryValues()
+        {
+            var snap = GetSnapshot();
+            var dict = new Dictionary<string, object>
+            {
+                ["grid_import"] = snap.GridImportKw >= 0 ? snap.GridImportKw : 0.0,
+                ["grid_export"] = snap.GridImportKw < 0 ? Math.Abs(snap.GridImportKw) : 0.0,
+                ["grid_power"] = snap.GridImportKw,
+                ["pv_power"] = snap.PvGenerationKw,
+                ["battery_power"] = snap.BatteryPowerKw,
+                ["battery_charge"] = snap.BatteryChargeKw,
+                ["battery_soc"] = snap.BatterySocPct,
+                ["surplus_power"] = snap.TotalSurplusAvailableKw,
+                ["uncontrollable_load"] = snap.UncontrollableLoadKw,
+                ["controllable_load"] = snap.TotalControllableLoadKw,
+                ["total_base_load"] = snap.TotalBaseLoadKw,
+                ["total_optional_load"] = snap.TotalOptionalLoadKw,
+                ["reclaimed_power"] = snap.TotalReclaimedPowerKw,
+                ["enabled"] = snap.Enabled ? 1.0 : 0.0,
+                ["grid_max_import"] = snap.GridMaxImportKw,
+
+                ["grid_import_24h"] = snap.GridImport24hKwh,
+                ["grid_export_24h"] = snap.GridExport24hKwh,
+                ["pv_generation_24h"] = snap.PvGeneration24hKwh,
+                ["battery_charged_24h"] = snap.BatteryCharged24hKwh,
+                ["battery_discharged_24h"] = snap.BatteryDischarged24hKwh,
+                ["uncontrollable_24h"] = snap.Uncontrollable24hKwh,
+                ["controllable_24h"] = snap.TotalControllable24hKwh,
+                ["total_surplus_24h"] = snap.TotalSurplus24hKwh
+            };
+
+            foreach (var consumer in snap.Consumers)
+            {
+                if (string.IsNullOrWhiteSpace(consumer.Id)) continue;
+                string cleanId = consumer.Id.ToLowerInvariant().Replace('-', '_');
+                dict[$"{cleanId}_actual_power"] = consumer.ActualPowerKw;
+                dict[$"{cleanId}_allocated_power"] = consumer.AllocatedPowerKw;
+                dict[$"{cleanId}_unused_power"] = consumer.UnusedPowerKw;
+                dict[$"{cleanId}_energy_24h"] = consumer.Energy24hKwh;
+            }
+
+            return dict;
+        }
+
+        public IEnumerable<string> GetTelemetryKeys()
+        {
+            var list = new List<string>(StandardTelemetryKeys);
+            foreach (var c in Consumers)
+            {
+                if (string.IsNullOrWhiteSpace(c.Id)) continue;
+                string cleanId = c.Id.ToLowerInvariant().Replace('-', '_');
+                list.Add($"{cleanId}_actual_power");
+                list.Add($"{cleanId}_allocated_power");
+                list.Add($"{cleanId}_unused_power");
+                list.Add($"{cleanId}_energy_24h");
+            }
+            return list;
+        }
+
+        public IReadOnlyDictionary<string, string> GetTelemetryUnits()
+        {
+            var map = new Dictionary<string, string>
+            {
+                ["grid_import"] = Units.Kilowatt,
+                ["grid_export"] = Units.Kilowatt,
+                ["grid_power"] = Units.Kilowatt,
+                ["pv_power"] = Units.Kilowatt,
+                ["battery_power"] = Units.Kilowatt,
+                ["battery_charge"] = Units.Kilowatt,
+                ["battery_soc"] = Units.Percent,
+                ["surplus_power"] = Units.Kilowatt,
+                ["uncontrollable_load"] = Units.Kilowatt,
+                ["controllable_load"] = Units.Kilowatt,
+                ["total_base_load"] = Units.Kilowatt,
+                ["total_optional_load"] = Units.Kilowatt,
+                ["reclaimed_power"] = Units.Kilowatt,
+                ["enabled"] = "",
+                ["grid_max_import"] = Units.Kilowatt,
+
+                ["grid_import_24h"] = Units.KilowattHour,
+                ["grid_export_24h"] = Units.KilowattHour,
+                ["pv_generation_24h"] = Units.KilowattHour,
+                ["battery_charged_24h"] = Units.KilowattHour,
+                ["battery_discharged_24h"] = Units.KilowattHour,
+                ["uncontrollable_24h"] = Units.KilowattHour,
+                ["controllable_24h"] = Units.KilowattHour,
+                ["total_surplus_24h"] = Units.KilowattHour
+            };
+
+            foreach (var c in Consumers)
+            {
+                if (string.IsNullOrWhiteSpace(c.Id)) continue;
+                string cleanId = c.Id.ToLowerInvariant().Replace('-', '_');
+                map[$"{cleanId}_actual_power"] = Units.Kilowatt;
+                map[$"{cleanId}_allocated_power"] = Units.Kilowatt;
+                map[$"{cleanId}_unused_power"] = Units.Kilowatt;
+                map[$"{cleanId}_energy_24h"] = Units.KilowattHour;
+            }
+
+            return map;
+        }
+
+        public string GetTelemetryFriendlyName(string key)
+        {
+            return key switch
+            {
+                "grid_import" => "Grid Import Power",
+                "grid_export" => "Grid Export Power",
+                "grid_power" => "Net Grid Power",
+                "pv_power" => "Solar PV Generation",
+                "battery_power" => "Battery Power",
+                "battery_charge" => "Battery Charging Power",
+                "battery_soc" => "Battery State of Charge",
+                "surplus_power" => "Available Solar Surplus Pool",
+                "uncontrollable_load" => "Uncontrollable Base Load",
+                "controllable_load" => "Total Controllable Consumers Load",
+                "total_base_load" => "Total Base Tier Quota",
+                "total_optional_load" => "Allocated Optional Load",
+                "reclaimed_power" => "Reclaimed Idle Power",
+                "enabled" => "EMS Master Enable",
+                "grid_max_import" => "Grid Import Limit",
+
+                "grid_import_24h" => "Rolling 24h Grid Import",
+                "grid_export_24h" => "Rolling 24h Grid Export",
+                "pv_generation_24h" => "Rolling 24h PV Generation",
+                "battery_charged_24h" => "Rolling 24h Battery Charged",
+                "battery_discharged_24h" => "Rolling 24h Battery Discharged",
+                "uncontrollable_24h" => "Rolling 24h Uncontrollable Base Energy",
+                "controllable_24h" => "Rolling 24h Controllable Load Energy",
+                "total_surplus_24h" => "Rolling 24h Solar Surplus Energy",
+                _ => FormatConsumerKeyName(key)
+            };
+        }
+
+        private string FormatConsumerKeyName(string key)
+        {
+            foreach (var c in Consumers)
+            {
+                if (string.IsNullOrWhiteSpace(c.Id)) continue;
+                string cleanId = c.Id.ToLowerInvariant().Replace('-', '_');
+                if (key.StartsWith(cleanId + "_"))
+                {
+                    string suffix = key.Substring(cleanId.Length + 1);
+                    string suffixName = suffix switch
+                    {
+                        "actual_power" => "Actual Power",
+                        "allocated_power" => "Allocated Setpoint",
+                        "unused_power" => "Unused / Shared Power",
+                        "energy_24h" => "Rolling 24h Consumed Energy",
+                        _ => suffix.Replace('_', ' ')
+                    };
+                    return $"{c.Name} {suffixName}";
+                }
+            }
+            return key.Replace('_', ' ');
+        }
+
+        public void PublishTelemetries()
+        {
+            try
+            {
+                var dict = GetTelemetryValues();
+                OnTelemetryUpdated?.Invoke(dict);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[EnergyControl] Failed publishing telemetries: {ex.Message}");
+            }
         }
 
         private async Task LoopAsync(CancellationToken ct)
@@ -878,11 +1069,9 @@ namespace Pulswerk.Ems
             // 5. Update Rolling 24-hour Energy Calculation
             double totalControllablePower = Consumers.Where(c => c.IsControllable).Sum(c => c.ActualPowerKw);
             double uncPower = Consumers.Where(c => !c.IsControllable).Sum(c => c.ActualPowerKw);
-            if (uncPower <= 0.0)
-            {
-                double bal = (LiveGridKw + LivePvKw + LiveBatteryKw) - totalControllablePower;
-                uncPower = Math.Max(0.0, Math.Round(bal, 2));
-            }
+            double bal = (LiveGridKw + LivePvKw + LiveBatteryKw) - totalControllablePower;
+            double calculatedBal = Math.Max(0.0, Math.Round(bal, 2));
+            uncPower = uncPower > 0.0 ? Math.Max(uncPower, calculatedBal) : calculatedBal;
 
             double rawBattCharge = LiveBatteryKw < -0.2 ? Math.Abs(LiveBatteryKw) : 0.0;
             double clampedCharge = Math.Min(rawBattCharge, SourcesConfig.BatteryMaxChargeKw);
@@ -898,6 +1087,8 @@ namespace Pulswerk.Ems
                 uncPower,
                 totalLiveSurplus,
                 Consumers.Select(c => (c.Id, c.ActualPowerKw)));
+
+            PublishTelemetries();
 
             _cyclesSinceEnergySave++;
             if (_cyclesSinceEnergySave >= 30) // ~5 minutes

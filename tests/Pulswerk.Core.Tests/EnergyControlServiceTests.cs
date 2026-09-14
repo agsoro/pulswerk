@@ -538,6 +538,97 @@ namespace Pulswerk.Core.Tests
             Assert.Equal(5.0, totals.TotalSurplusKwh);
             Assert.Equal(12.0, totals.ConsumerKwh["wb1"]);
         }
+
+        [Fact]
+        public void EmsService_GetTelemetryValues_PublishesStandardAndConsumerKeys()
+        {
+            var svc = EmsService.Instance;
+            var values = svc.GetTelemetryValues();
+
+            Assert.NotNull(values);
+            Assert.True(values.ContainsKey("grid_import"));
+            Assert.True(values.ContainsKey("grid_export"));
+            Assert.True(values.ContainsKey("grid_power"));
+            Assert.True(values.ContainsKey("pv_power"));
+            Assert.True(values.ContainsKey("battery_power"));
+            Assert.True(values.ContainsKey("battery_charge"));
+            Assert.True(values.ContainsKey("battery_soc"));
+            Assert.True(values.ContainsKey("surplus_power"));
+            Assert.True(values.ContainsKey("uncontrollable_load"));
+            Assert.True(values.ContainsKey("controllable_load"));
+            Assert.True(values.ContainsKey("total_base_load"));
+            Assert.True(values.ContainsKey("total_optional_load"));
+            Assert.True(values.ContainsKey("reclaimed_power"));
+
+            // 24h rolling energy keys
+            Assert.True(values.ContainsKey("grid_import_24h"));
+            Assert.True(values.ContainsKey("grid_export_24h"));
+            Assert.True(values.ContainsKey("pv_generation_24h"));
+            Assert.True(values.ContainsKey("battery_charged_24h"));
+            Assert.True(values.ContainsKey("battery_discharged_24h"));
+            Assert.True(values.ContainsKey("uncontrollable_24h"));
+            Assert.True(values.ContainsKey("controllable_24h"));
+            Assert.True(values.ContainsKey("total_surplus_24h"));
+
+            // Verify event publishing
+            Dictionary<string, object>? published = null;
+            svc.OnTelemetryUpdated += vals => published = vals;
+            svc.PublishTelemetries();
+
+            Assert.NotNull(published);
+            Assert.True(published!.ContainsKey("uncontrollable_load"));
+        }
+
+        [Fact]
+        public void EmsDriver_GetAssetHierarchy_ExposesAllTelemetryPoints()
+        {
+            var driver = new EmsDriver();
+            Assert.Equal("ems", driver.DriverName);
+
+            var dev = new Pulswerk.Core.DeviceConfig(
+                Id: "ems",
+                Name: "Energy Management System",
+                DeviceType: "ems",
+                Path: new List<string> { "EMS" });
+
+            var tree = driver.GetAssetHierarchy(dev);
+            Assert.NotNull(tree);
+            Assert.Equal("ems", tree.Id);
+            Assert.Equal("Energy Management System", tree.Name);
+            Assert.True(tree.Telemetries.Count >= 20);
+
+            var unc = tree.Telemetries.Find(t => t.Key == "ems_uncontrollable_load");
+            Assert.NotNull(unc);
+            Assert.Equal("Uncontrollable Base Load", unc!.Name);
+            Assert.Equal(Pulswerk.Core.Units.Kilowatt, unc.Units);
+
+            var surplus = tree.Telemetries.Find(t => t.Key == "ems_surplus_power");
+            Assert.NotNull(surplus);
+            Assert.Equal(Pulswerk.Core.Units.Kilowatt, surplus!.Units);
+        }
+
+        [Fact]
+        public void EmsDriver_Write_UpdatesEnabledAndGridMaxImport()
+        {
+            var driver = new EmsDriver();
+            Assert.True(driver.IsWritable("enabled"));
+            Assert.True(driver.IsWritable("grid_max_import"));
+            Assert.False(driver.IsWritable("uncontrollable_load"));
+
+            var dev = new Pulswerk.Core.DeviceConfig(
+                Id: "ems",
+                Name: "Energy Management System",
+                DeviceType: "ems");
+
+            driver.Write(null!, dev, "enabled", 0.0);
+            Assert.False(EmsService.Instance.Enabled);
+
+            driver.Write(null!, dev, "enabled", 1.0);
+            Assert.True(EmsService.Instance.Enabled);
+
+            driver.Write(null!, dev, "grid_max_import", 15.0);
+            Assert.Equal(15.0, EmsService.Instance.SourcesConfig.GridMaxImportKw);
+        }
     }
 }
 

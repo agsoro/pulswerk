@@ -99,7 +99,7 @@ namespace Pulswerk.Core
                     if (string.IsNullOrWhiteSpace(dev.Name))
                         errors.Add($"Device '{dev.Id}' is missing a name.");
 
-                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ocpp" && dev.DeviceType != "ocpp-master" && dev.DeviceType != "knx" && dev.DeviceType != "smgw")
+                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ems" && dev.DeviceType != "ocpp" && dev.DeviceType != "ocpp-master" && dev.DeviceType != "knx" && dev.DeviceType != "smgw")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");

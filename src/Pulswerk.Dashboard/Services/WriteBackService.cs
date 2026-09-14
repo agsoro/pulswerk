@@ -25,7 +25,7 @@ namespace Pulswerk.Dashboard
             string driverKey = key.Substring(device.Id.Length + 1);
 
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
-            if (conn == null)
+            if (conn == null && device.DeviceType != "ems" && device.DeviceType != "virtual")
             {
                 Log.Error($"[Dashboard] Write rejected: no connection for device '{device.Name}'");
                 return Task.FromResult(false);
@@ -45,7 +45,7 @@ namespace Pulswerk.Dashboard
 
             try
             {
-                writer.Write(conn, device, driverKey, value);
+                writer.Write(conn!, device, driverKey, value);
                 Log.Info($"[Dashboard] Manual write success: {key} = {value}");
 
                 // Immediately update LatestValues with the correctly formatted display value
@@ -87,14 +87,14 @@ namespace Pulswerk.Dashboard
             string driverKey = key.Substring(device.Id.Length + 1);
 
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
-            if (conn == null) return Task.FromResult(false);
+            if (conn == null && device.DeviceType != "ems" && device.DeviceType != "virtual") return Task.FromResult(false);
 
             var writer = (Drivers.TryGetValue(device.Name, out var drv) ? drv : null) as IDeviceWriter;
             if (writer == null || !writer.IsWritable(driverKey)) return Task.FromResult(false);
 
             try
             {
-                writer.WriteComplex(conn, device, driverKey, value);
+                writer.WriteComplex(conn!, device, driverKey, value);
                 Log.Info($"[Dashboard] Complex write success: {key}");
                 return Task.FromResult(true);
             }
