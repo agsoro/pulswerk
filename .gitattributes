@@ -1,0 +1,52 @@
+# Normalize line endings: LF in the repository, checked out per-platform.
+* text=auto
+
+# Source code — always LF in repo
+*.cs          text
+*.csproj      text
+*.props       text
+*.targets     text
+*.sln         text eol=crlf
+*.ts          text
+*.tsx         text
+*.js          text
+*.mts         text
+*.json        text
+*.html        text
+*.htm         text
+*.css         text
+*.scss        text
+*.md          text
+*.txt         text
+*.xml         text
+*.config      text
+*.yml         text
+*.yaml        text
+*.sh          text eol=lf
+*.ps1         text eol=crlf
+*.sql         text
+
+# Scripts without extension
+gitignore     text
+
+# Binary assets — never touch
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.ico         binary
+*.woff        binary
+*.woff2       binary
+*.ttf         binary
+*.eot         binary
+*.dll         binary
+*.exe         binary
+*.pdb         binary
+*.snk         binary
+*.zip         binary
+*.pdf         binary
+*.db          binary
+*.bin         binary
+
+# Generated / vendored files — keep as-is in repo, no diff noise
+wwwroot/lib/** linguist-generated
