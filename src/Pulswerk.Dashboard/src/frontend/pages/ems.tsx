@@ -40,6 +40,9 @@ interface EnergySourcesConfig {
     batteryMinReserveKw: number;
     batteryMinSocPct: number;
     batteryFullSocPct: number;
+    invertGridPowerSign?: boolean;
+    invertPvPowerSign?: boolean;
+    invertBatteryPowerSign?: boolean;
 }
 
 interface EnergySystemSnapshot {
@@ -104,6 +107,9 @@ export function EmsPage() {
     const [battSocKey, setBattSocKey] = useState('solis-battery_battery_soc');
     const [battReserveKw, setBattReserveKw] = useState(1.0);
     const [battMaxKw, setBattMaxKw] = useState(5.0);
+    const [invertGridSign, setInvertGridSign] = useState(false);
+    const [invertPvSign, setInvertPvSign] = useState(false);
+    const [invertBattSign, setInvertBattSign] = useState(false);
 
     const fetchSnapshot = async () => {
         try {
@@ -157,6 +163,9 @@ export function EmsPage() {
             setBattSocKey(snapshot.sources.batterySocKey ?? 'solis-battery_battery_soc');
             setBattReserveKw(snapshot.sources.batteryMinReserveKw ?? 1.0);
             setBattMaxKw(snapshot.sources.batteryMaxPowerKw ?? 5.0);
+            setInvertGridSign(snapshot.sources.invertGridPowerSign ?? false);
+            setInvertPvSign(snapshot.sources.invertPvPowerSign ?? false);
+            setInvertBattSign(snapshot.sources.invertBatteryPowerSign ?? false);
         }
         setShowConfigModal(true);
     };
@@ -188,7 +197,10 @@ export function EmsPage() {
                         batteryMaxDischargeKw: battMaxKw,
                         batteryMinReserveKw: battReserveKw,
                         batteryMinSocPct: snapshot?.sources?.batteryMinSocPct ?? 15.0,
-                        batteryFullSocPct: snapshot?.sources?.batteryFullSocPct ?? 98.0
+                        batteryFullSocPct: snapshot?.sources?.batteryFullSocPct ?? 98.0,
+                        invertGridPowerSign: invertGridSign,
+                        invertPvPowerSign: invertPvSign,
+                        invertBatteryPowerSign: invertBattSign
                     }
                 })
             });
@@ -498,7 +510,7 @@ export function EmsPage() {
                                 title={`View telemetry details for ${snapshot?.sources?.pvMeterKey || 'ems_pv_power'}`}
                             >
                                 <span class="text-2xl font-black text-amber-400 group-hover/val:text-amber-300 transition-colors">
-                                    {Math.abs(snapshot?.pvGenerationKw ?? snapshot?.pvPowerKw ?? 0).toFixed(1)}
+                                    {Math.abs(snapshot?.pvPowerKw ?? snapshot?.pvGenerationKw ?? 0).toFixed(1)}
                                 </span>
                                 <span class="text-xs font-bold text-slate-400 ml-1">kW</span>
                                 <i class="fas fa-chart-area text-[0.65rem] text-amber-600 group-hover/val:text-amber-400 ml-1.5 opacity-0 group-hover/val:opacity-100 transition-all"></i>
@@ -508,9 +520,9 @@ export function EmsPage() {
                                 class="text-xs text-amber-400 font-medium flex items-center gap-1.5 cursor-pointer hover:text-amber-300 transition-colors"
                                 title={`View telemetry details for ${snapshot?.sources?.pvMeterKey || 'ems_pv_power'}`}
                             >
-                                {(snapshot?.pvPowerKw ?? snapshot?.pvGenerationKw ?? 0) < -0.2 && <i class="fas fa-arrow-left text-[0.65rem]"></i>}
+                                {(snapshot?.pvPowerKw ?? 0) < -0.2 && <i class="fas fa-arrow-left text-[0.65rem]"></i>}
                                 {t('ems_generation')}
-                                {(snapshot?.pvPowerKw ?? snapshot?.pvGenerationKw ?? 0) >= -0.2 && <i class="fas fa-arrow-right text-[0.65rem]"></i>}
+                                {(snapshot?.pvPowerKw ?? 0) >= -0.2 && <i class="fas fa-arrow-right text-[0.65rem]"></i>}
                             </span>
                         </div>
 
@@ -1096,7 +1108,7 @@ export function EmsPage() {
                                     type="number"
                                     step="0.5"
                                     min="1"
-                                    max="100"
+                                    max="500"
                                     value={gridMaxKw}
                                     onInput={(e: any) => setGridMaxKw(parseFloat(e.target.value) || 8.0)}
                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
@@ -1166,6 +1178,18 @@ export function EmsPage() {
                                         onInput={(e: any) => setGridKey(e.target.value)}
                                         class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
                                     />
+                                    <div class="flex items-center justify-between mt-1.5">
+                                        <span class="text-[0.65rem] text-slate-500 font-mono">{t('ems_sign_rule')}</span>
+                                        <label class="flex items-center gap-1.5 cursor-pointer text-[0.65rem] text-slate-400">
+                                            <input
+                                                type="checkbox"
+                                                checked={invertGridSign}
+                                                onChange={(e: any) => setInvertGridSign(e.target.checked)}
+                                                class="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                            />
+                                            {t('ems_invert_sign')}
+                                        </label>
+                                    </div>
                                 </div>
 
                                 <div>
@@ -1176,6 +1200,18 @@ export function EmsPage() {
                                         onInput={(e: any) => setPvKey(e.target.value)}
                                         class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
                                     />
+                                    <div class="flex items-center justify-between mt-1.5">
+                                        <span class="text-[0.65rem] text-slate-500 font-mono">{t('ems_sign_rule')}</span>
+                                        <label class="flex items-center gap-1.5 cursor-pointer text-[0.65rem] text-slate-400">
+                                            <input
+                                                type="checkbox"
+                                                checked={invertPvSign}
+                                                onChange={(e: any) => setInvertPvSign(e.target.checked)}
+                                                class="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                            />
+                                            {t('ems_invert_sign')}
+                                        </label>
+                                    </div>
                                 </div>
 
                                 {hasBattery && (
@@ -1188,6 +1224,18 @@ export function EmsPage() {
                                                 onInput={(e: any) => setBattPowerKey(e.target.value)}
                                                 class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
                                             />
+                                            <div class="flex items-center justify-between mt-1.5">
+                                                <span class="text-[0.65rem] text-slate-500 font-mono">{t('ems_sign_rule')}</span>
+                                                <label class="flex items-center gap-1.5 cursor-pointer text-[0.65rem] text-slate-400">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={invertBattSign}
+                                                        onChange={(e: any) => setInvertBattSign(e.target.checked)}
+                                                        class="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                                    />
+                                                    {t('ems_invert_sign')}
+                                                </label>
+                                            </div>
                                         </div>
                                         <div>
                                             <label class="block text-slate-400 mb-1">{t('ems_battery_soc_key')}</label>

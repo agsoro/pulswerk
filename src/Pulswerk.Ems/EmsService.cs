@@ -14,6 +14,48 @@ namespace Pulswerk.Ems
 {
     // ── Domain Models for Two-Sided Energy Management ────────────────────────
 
+    /// <summary>
+    /// Fixed sign convention used internally by the EMS for all power flows.
+    /// <para>
+    /// The EMS is a pool model: all sources feed a shared power pool and all consumers
+    /// draw from it. There is exactly one rule, applied uniformly to every power key:
+    /// <b>positive = into the pool (supply), negative = out of the pool (sink)</b>.
+    /// </para>
+    /// <para>
+    /// Every raw telemetry value is normalized into this convention at the read boundary
+    /// (see <see cref="EnergySourcesConfig.NormalizeGridPower"/> etc.) so that all
+    /// downstream calculations (dispatch, surplus, residual load, energy integration)
+    /// operate on a single, unambiguous sign rule.
+    /// </para>
+    /// </summary>
+    public static class PowerSignConvention
+    {
+        /// <summary>
+        /// The single unifying rule: positive = into the pool (supply), negative = out of the pool (sink).
+        /// </summary>
+        public const string Pool = "+ = into pool, - = out of pool";
+
+        /// <summary>True when the value represents power flowing into the pool (supply).</summary>
+        public static bool IsSupply(double normalizedKw) => normalizedKw > 0.0;
+
+        /// <summary>True when the value represents power flowing out of the pool (sink).</summary>
+        public static bool IsSink(double normalizedKw) => normalizedKw < 0.0;
+
+        /// <summary>
+        /// Returns the supply (into-pool) portion of a normalized value, or 0.
+        /// Values below <paramref name="deadbandKw"/> are treated as zero to suppress sensor noise.
+        /// </summary>
+        public static double SupplyPart(double normalizedKw, double deadbandKw = 0.0)
+            => normalizedKw > deadbandKw ? normalizedKw : 0.0;
+
+        /// <summary>
+        /// Returns the sink (out-of-pool) portion of a normalized value as a positive magnitude, or 0.
+        /// Values below <paramref name="deadbandKw"/> are treated as zero to suppress sensor noise.
+        /// </summary>
+        public static double SinkPart(double normalizedKw, double deadbandKw = 0.0)
+            => normalizedKw < -deadbandKw ? -normalizedKw : 0.0;
+    }
+
     public class EnergySourcesConfig
     {
         public string GridMeterKey { get; set; } = "meter-main-a_power";
@@ -22,6 +64,41 @@ namespace Pulswerk.Ems
         public bool HasBattery { get; set; } = true;
         public string BatteryPowerKey { get; set; } = "solis-battery_power";
         public string BatterySocKey { get; set; } = "solis-battery_battery_soc";
+
+        // ── Sign Convention Rules ─────────────────────────────────────────────
+        // One rule (see PowerSignConvention.Pool): + = into pool, - = out of pool.
+        // If a meter reports the opposite direction, set the matching Invert* flag.
+        // All EMS calculations consume normalized values only.
+
+        /// <summary>
+        /// Negates the pool rule for the grid key. Enable when the meter reports export as
+        /// positive and import as negative (i.e. the meter's sign points out of the pool).
+        /// </summary>
+        public bool InvertGridPowerSign { get; set; } = false;
+
+        /// <summary>
+        /// Negates the pool rule for the PV key. Enable when the meter reports generation as
+        /// negative (e.g. feed-in meter convention) instead of feeding the pool positively.
+        /// </summary>
+        public bool InvertPvPowerSign { get; set; } = false;
+
+        /// <summary>
+        /// Negates the pool rule for the battery key. Enable when the meter reports charging as
+        /// positive and discharging as negative (i.e. the meter's sign points out of the pool).
+        /// </summary>
+        public bool InvertBatteryPowerSign { get; set; } = false;
+
+        /// <summary>Applies the pool sign rule to a raw value, optionally negating it.</summary>
+        private static double Normalize(double raw, bool invert) => invert ? -raw : raw;
+
+        /// <summary>Applies the pool sign rule to a raw grid telemetry value.</summary>
+        public double NormalizeGridPower(double raw) => Normalize(raw, InvertGridPowerSign);
+
+        /// <summary>Applies the pool sign rule to a raw PV telemetry value.</summary>
+        public double NormalizePvPower(double raw) => Normalize(raw, InvertPvPowerSign);
+
+        /// <summary>Applies the pool sign rule to a raw battery telemetry value.</summary>
+        public double NormalizeBatteryPower(double raw) => Normalize(raw, InvertBatteryPowerSign);
 
         private double _batteryMaxChargeKw = 10.0;
         private double _batteryMaxDischargeKw = 10.0;
@@ -185,6 +262,16 @@ namespace Pulswerk.Ems
         public double UncontrollableLoadKw { get; set; }
         public double TotalControllableLoadKw { get; set; }
 
+        /// <summary>
+        /// Total site consumption (sink side of the pool balance) in kW.
+        /// </summary>
+        public double TotalConsumptionKw { get; set; }
+
+        /// <summary>
+        /// Autarky / self-sufficiency: share of consumption not covered by grid import, in percent (0-100).
+        /// </summary>
+        public double AutarkyPct { get; set; }
+
         // ── Rolling 24-Hour Calculated Energy (kWh) ───────────────────────────
         public double GridImport24hKwh { get; set; }
         public double GridExport24hKwh { get; set; }
@@ -194,6 +281,16 @@ namespace Pulswerk.Ems
         public double Uncontrollable24hKwh { get; set; }
         public double TotalSurplus24hKwh { get; set; }
         public double TotalControllable24hKwh { get; set; }
+
+        /// <summary>
+        /// Total site consumption over the rolling 24-hour window in kWh.
+        /// </summary>
+        public double TotalConsumption24hKwh { get; set; }
+
+        /// <summary>
+        /// Autarky / self-sufficiency over the rolling 24-hour window, in percent (0-100).
+        /// </summary>
+        public double Autarky24hPct { get; set; }
 
         public List<EnergyConsumer> Consumers { get; set; } = new();
         public List<EmsLogEntry> Logs { get; set; } = new();
@@ -205,8 +302,21 @@ namespace Pulswerk.Ems
     public static class EnergyDispatchEngine
     {
         /// <summary>
-        /// Pure allocation algorithm for two-sided energy management with two-tier consumers
-        /// and dynamic idle / underutilization power redistribution.
+        /// Grid-import deadband in kW. Imports below this are treated as zero
+        /// (measurement noise / rounding) and do not trigger curtailment.
+        /// </summary>
+        public const double GridImportDeadbandKw = 0.2;
+
+        /// <summary>
+        /// Autarky dispatch: consumers may draw unlimited power as long as the site does
+        /// not import from the grid. As soon as a grid import is measured, ALL controllable
+        /// consumers are curtailed to 0 (their uncontrollable base tier keeps running).
+        /// <para>
+        /// All power arguments are expected to be <b>already normalized</b> to the pool sign
+        /// rule (see <see cref="PowerSignConvention"/>): positive = into the pool (supply),
+        /// negative = out of the pool (sink). PV/battery only matter insofar as they keep
+        /// the grid import at zero — no explicit surplus calculation is needed.
+        /// </para>
         /// </summary>
         public static void Dispatch(
             EnergySourcesConfig sources,
@@ -218,168 +328,64 @@ namespace Pulswerk.Ems
         {
             if (consumers == null || consumers.Count == 0) return;
 
-            // 1. Inverter / Battery Surplus Calculation
-            // Negative power = Charging (absorbing surplus), Positive power = Discharging.
-            double rawCharge = (sources.HasBattery && batteryPowerKw < -0.2) ? Math.Abs(batteryPowerKw) : 0.0;
-            double maxCharge = sources.BatteryMaxChargeKw > 0 ? sources.BatteryMaxChargeKw : 5.0;
-            double battChargeKw = Math.Min(rawCharge, maxCharge);
+            // Pool rule: grid positive = import (into pool).
+            double gridImportKw = PowerSignConvention.SupplyPart(gridPowerKw);
+            bool curtail = gridImportKw > GridImportDeadbandKw;
 
-            bool isCharging = sources.HasBattery 
-                && battChargeKw > 0.3 
-                && batterySocPct >= sources.BatteryMinSocPct 
-                && batterySocPct < sources.BatteryFullSocPct;
-
-            // Surplus power divertible from battery charging into controllable loads:
-            double battSurplus = isCharging 
-                ? Math.Max(0.0, battChargeKw - sources.BatteryMinReserveKw) 
-                : 0.0;
-
-            // Additional surplus: solar power exported to grid (e.g. PV generation exceeding battery charge capacity or without battery):
-            double gridExportKw = gridPowerKw < -0.2 ? Math.Abs(gridPowerKw) : 0.0;
-
-            double availableSurplus = battSurplus + gridExportKw;
-
-            // 2. Classify Consumers into Uncontrollable vs Controllable
+            // Classify consumers.
+            var controllable = new List<EnergyConsumer>();
             foreach (var consumer in consumers)
             {
                 if (!consumer.HasOptionalTier || consumer.MaxOptionalKw <= 0.0)
                 {
+                    // Uncontrollable loads cannot be dispatched; report measured/base draw.
                     consumer.AllocatedOptionalKw = 0.0;
-                    double allocatedBase = Math.Max(consumer.BasePowerKw, consumer.ActualPowerKw);
-                    consumer.AllocatedPowerKw = Math.Round(allocatedBase, 2);
+                    consumer.AllocatedPowerKw = Math.Max(consumer.BasePowerKw, consumer.ActualPowerKw);
                     consumer.UnusedPowerKw = 0.0;
                     consumer.IsActivelyDemanding = false;
                     consumer.Status = "Uncontrollable Load";
                 }
+                else
+                {
+                    controllable.Add(consumer);
+                }
             }
-
-            // 3. Assess Active Demand vs Idle State for Controllable Consumers
-            var controllable = consumers
-                .Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0)
-                .OrderBy(c => c.Priority)
-                .ToList();
 
             foreach (var consumer in controllable)
             {
                 double actualOpt = Math.Max(0.0, consumer.ActualPowerKw - consumer.BasePowerKw);
-                // Demand is determined solely and exclusively by currently drawn power
-                double threshold = Math.Max(0.1, consumer.StandbyOptionalKw);
-                consumer.IsActivelyDemanding = actualOpt > threshold;
-            }
+                consumer.IsActivelyDemanding = actualOpt > Math.Max(0.1, consumer.StandbyOptionalKw);
 
-            // 4. Calculate Available Optional Pool
-            // Base budget is strictly the site's GridMaxImportKw + any available solar surplus
-            double availablePool = Math.Max(0.0, sources.GridMaxImportKw + availableSurplus);
+                // Guaranteed minimum optional tier (e.g. 1.38 kW = 6A 1-phase EV charging).
+                // Kept alive even during grid-import curtailment so consumers do not drop
+                // out entirely; only consumers without a minimum fall to zero.
+                double guaranteedOpt = Math.Min(
+                    Math.Max(0.0, consumer.MinOptionalKw),
+                    Math.Max(0.0, consumer.MaxOptionalKw));
 
-            var activeConsumers = controllable.Where(c => c.IsActivelyDemanding).ToList();
-            var idleConsumers = controllable.Where(c => !c.IsActivelyDemanding).ToList();
-
-            if (activeConsumers.Count > 0)
-            {
-                // 5. Detect Idle Consumers & Reclaim Unused Capacity
-                // Idle consumers drop to standby, freeing up the rest of their MaxOptionalKw for active loads
-                foreach (var consumer in idleConsumers)
+                if (curtail)
                 {
-                    double standby = Math.Min(consumer.StandbyOptionalKw, consumer.MaxOptionalKw);
-                    consumer.AllocatedOptionalKw = Math.Round(standby, 2);
-                    consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + standby, 2);
-                    consumer.UnusedPowerKw = Math.Round(Math.Max(0.0, consumer.MaxOptionalKw - standby), 2);
-                    consumer.Status = consumer.UnusedPowerKw > 0.1 
-                        ? $"Idle ({consumer.UnusedPowerKw:F1} kW redistributed)" 
-                        : "Idle";
-
-                    // Deduct standby from pool
-                    availablePool = Math.Max(0.0, availablePool - standby);
+                    // Grid import: controllable consumers drop to their guaranteed minimum
+                    // tier (0 if none configured). The uncontrollable base tier keeps running.
+                    consumer.AllocatedOptionalKw = Math.Round(guaranteedOpt, 2);
+                    consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + guaranteedOpt, 2);
+                    consumer.UnusedPowerKw = 0.0;
+                    consumer.Status = guaranteedOpt > 0.0
+                        ? $"Grid Import Curtailment (Min {guaranteedOpt:F2} kW)"
+                        : "Grid Import Curtailment";
                 }
-
-                // 6. Water-Filling Allocation to Actively Demanding Consumers by Priority
-                double totalActiveDesired = activeConsumers.Sum(c => c.MaxOptionalKw);
-                bool isConstrained = activeConsumers.Count > 1 && availablePool < totalActiveDesired;
-
-                foreach (var consumer in activeConsumers)
+                else
                 {
-                    double actualOpt = Math.Max(0.0, consumer.ActualPowerKw - consumer.BasePowerKw);
-
-                    double targetOpt = consumer.MaxOptionalKw;
-                    if (availableSurplus > 0.1)
-                    {
-                        // Closed-loop virtual pool: actual consumption + surplus entering battery or exported to grid
-                        double poolForThis = actualOpt + availableSurplus;
-                        targetOpt = Math.Max(consumer.MaxOptionalKw, poolForThis);
-                        targetOpt = Math.Min(targetOpt, consumer.MaxPowerKw - consumer.BasePowerKw);
-                    }
-                    else if (isConstrained && actualOpt > 0.2)
-                    {
-                        // Detect underutilization: competing consumers with constrained pool.
-                        // Grant actual draw + 1.5 kW ramping headroom, freeing the unused capacity for other consumers.
-                        double practicalDemand = actualOpt + 1.5;
-                        if (practicalDemand < targetOpt)
-                        {
-                            targetOpt = Math.Max(consumer.MinOptionalKw, practicalDemand);
-                        }
-                    }
-
-                    // Clamp to available pool and min threshold
-                    double allocatedOpt = Math.Min(targetOpt, availablePool);
-                    if (allocatedOpt < consumer.MinOptionalKw && availablePool < consumer.MinOptionalKw)
-                    {
-                        allocatedOpt = 0.0;
-                    }
-
-                    allocatedOpt = Math.Round(allocatedOpt, 1);
-                    consumer.AllocatedOptionalKw = allocatedOpt;
-                    consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + allocatedOpt, 1);
-                    consumer.UnusedPowerKw = Math.Round(Math.Max(0.0, consumer.MaxOptionalKw - allocatedOpt), 1);
-
-                    // Deduct from available pool
-                    availablePool = Math.Max(0.0, availablePool - allocatedOpt);
-
-                    // Deduct surplus used above MaxOptionalKw
-                    if (allocatedOpt > consumer.MaxOptionalKw)
-                    {
-                        double surplusUsed = allocatedOpt - consumer.MaxOptionalKw;
-                        availableSurplus = Math.Max(0.0, availableSurplus - surplusUsed);
-                    }
-
-                    // Update consumer Status
-                    if (allocatedOpt > consumer.MaxOptionalKw + 0.1)
-                    {
-                        consumer.Status = $"Surplus Boost (+{Math.Round(allocatedOpt - consumer.MaxOptionalKw, 1)} kW)";
-                    }
-                    else if (consumer.UnusedPowerKw > 0.1)
-                    {
-                        consumer.Status = $"Active ({consumer.AllocatedPowerKw:F1} kW, {consumer.UnusedPowerKw:F1} kW redistributed)";
-                    }
-                    else
-                    {
-                        consumer.Status = consumer.BasePowerKw > 0
-                            ? $"Active ({consumer.BasePowerKw:F1} kW base + {allocatedOpt:F1} kW opt)"
-                            : $"Base Limit ({consumer.MaxOptionalKw:F1} kW)";
-                    }
-                }
-            }
-            else
-            {
-                // When ALL consumers are idle (no consumer currently drawing power),
-                // allocate available pool by Priority so devices have readiness to start drawing.
-                foreach (var consumer in controllable)
-                {
-                    double allocatedOpt = Math.Min(consumer.MaxOptionalKw, availablePool);
-                    if (allocatedOpt < consumer.MinOptionalKw && availablePool < consumer.MinOptionalKw)
-                    {
-                        allocatedOpt = 0.0;
-                    }
-
-                    allocatedOpt = Math.Round(allocatedOpt, 1);
-                    consumer.AllocatedOptionalKw = allocatedOpt;
-                    consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + allocatedOpt, 1);
-                    consumer.UnusedPowerKw = Math.Round(Math.Max(0.0, consumer.MaxOptionalKw - allocatedOpt), 1);
-
-                    availablePool = Math.Max(0.0, availablePool - allocatedOpt);
-
-                    consumer.Status = consumer.AllocatedPowerKw > 0.0
-                        ? $"Ready ({consumer.AllocatedPowerKw:F1} kW)"
-                        : "Idle";
+                    // Autarky: unlimited draw up to the physical ceiling of the consumer.
+                    double maxOpt = Math.Min(
+                        consumer.MaxOptionalKw,
+                        Math.Max(0.0, consumer.MaxPowerKw - consumer.BasePowerKw));
+                    consumer.AllocatedOptionalKw = Math.Round(maxOpt, 2);
+                    consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + maxOpt, 2);
+                    consumer.UnusedPowerKw = 0.0;
+                    consumer.Status = consumer.IsActivelyDemanding
+                        ? "Autarky (Unrestricted)"
+                        : "Ready (Autarky)";
                 }
             }
         }
@@ -454,11 +460,17 @@ namespace Pulswerk.Ems
 
         public void SetLiveTelemetryForTesting(double gridKw, double pvKw, double batteryKw = 0.0, double batterySocPct = 100.0)
         {
-            LiveGridKw = Math.Round(gridKw, 2);
-            LivePvKw = Math.Round(pvKw, 2);
-            LiveBatteryKw = SourcesConfig.HasBattery ? Math.Round(batteryKw, 2) : 0.0;
+            // Raw values are normalized through the configured sign rules, exactly like the live read boundary.
+            double gridNorm = SourcesConfig.NormalizeGridPower(gridKw);
+            double pvNorm = SourcesConfig.NormalizePvPower(pvKw);
+            double battNorm = SourcesConfig.NormalizeBatteryPower(batteryKw);
+
+            LiveGridKw = Math.Round(gridNorm, 2);
+            LivePvKw = Math.Round(pvNorm, 2);
+            LiveBatteryKw = SourcesConfig.HasBattery ? Math.Round(battNorm, 2) : 0.0;
             LiveBatterySocPct = SourcesConfig.HasBattery ? Math.Round(batterySocPct, 1) : 0.0;
-            double battCharge = (SourcesConfig.HasBattery && batteryKw < -0.2) ? Math.Abs(batteryKw) : 0.0;
+            // Pool rule: battery charging is the sink (out-of-pool) portion of the battery value.
+            double battCharge = SourcesConfig.HasBattery ? PowerSignConvention.SinkPart(battNorm, 0.2) : 0.0;
             LiveBatteryChargeKw = Math.Round(battCharge, 2);
             IsBatteryCharging = SourcesConfig.HasBattery && battCharge > 0.3 && batterySocPct < SourcesConfig.BatteryFullSocPct;
         }
@@ -704,9 +716,14 @@ namespace Pulswerk.Ems
             double totalOptional = Consumers.Sum(c => c.AllocatedOptionalKw);
             double totalReclaimed = Consumers.Sum(c => c.UnusedPowerKw);
 
-            // Uncontrollable base load is calculated dynamically from the site energy balance by default:
-            // Residual Uncontrollable Base Load = (Grid + PV + Battery) - Total Controllable
-            double effectivePv = Math.Abs(LivePvKw);
+            // Uncontrollable base load is calculated dynamically from the site energy balance by default.
+            // Pool balance: everything flowing into the pool (supply) minus everything drawn from it (sink).
+            //   Supply = Grid import + PV generation + Battery discharge
+            //   Sink   = Grid export + Battery charge + Controllable consumers + Uncontrollable base load
+            // Solving for the residual uncontrollable base load:
+            //   Residual = (Grid + PV + Battery) - Controllable
+            // All values already follow the pool sign rule (positive = into the pool).
+            double effectivePv = LivePvKw;
             double effectiveBatt = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0;
             double balanceLoad = (LiveGridKw + effectivePv + effectiveBatt) - totalControllable;
             double calculatedBaseLoad = Math.Max(0.0, Math.Round(balanceLoad, 2));
@@ -716,13 +733,23 @@ namespace Pulswerk.Ems
                 ? Math.Max(totalUncontrollable, calculatedBaseLoad)
                 : calculatedBaseLoad;
 
-            double rawCharge = (SourcesConfig.HasBattery && LiveBatteryKw < -0.2) ? Math.Abs(LiveBatteryKw) : 0.0;
+            double rawCharge = SourcesConfig.HasBattery ? PowerSignConvention.SinkPart(LiveBatteryKw, 0.2) : 0.0;
             double battCharge = Math.Min(rawCharge, SourcesConfig.BatteryMaxChargeKw);
             double battSurplus = (SourcesConfig.HasBattery && IsBatteryCharging) 
                 ? Math.Max(0.0, battCharge - SourcesConfig.BatteryMinReserveKw) 
                 : 0.0;
-            double exportSurplus = LiveGridKw < -0.2 ? Math.Abs(LiveGridKw) : 0.0;
+            double exportSurplus = PowerSignConvention.SinkPart(LiveGridKw, 0.2);
             double totalSurplus = battSurplus + exportSurplus;
+
+            // ── Consumption & Autarky ─────────────────────────────────────────
+            // Consumption is the site's own load: controllable + uncontrollable consumers.
+            double gridImportKw = PowerSignConvention.SupplyPart(LiveGridKw);
+            double totalConsumption = totalControllable + totalUncontrollable;
+
+            // Autarky = 1 - (grid import / consumption), i.e. the share of consumption not covered by the grid.
+            double autarkyPct = totalConsumption > 0.01
+                ? Math.Round(Math.Clamp((1.0 - gridImportKw / totalConsumption) * 100.0, 0.0, 100.0), 1)
+                : 0.0;
 
             // Compute rolling 24-hour energy totals
             var energyTotals = _energyCalc.Get24hTotals(DateTime.UtcNow);
@@ -734,13 +761,20 @@ namespace Pulswerk.Ems
                     consumer.Energy24hKwh = 0.0;
             }
 
+            // 24h consumption = controllable + uncontrollable
+            double consumption24h = energyTotals.ConsumerKwh.Values.Sum() + energyTotals.UncontrollableKwh;
+            double autarky24hPct = consumption24h > 0.01
+                ? Math.Round(Math.Clamp((1.0 - energyTotals.GridImportKwh / consumption24h) * 100.0, 0.0, 100.0), 1)
+                : 0.0;
+
             return new EnergySystemSnapshot
             {
                 Enabled = Enabled,
                 GridImportKw = LiveGridKw,
                 GridMaxImportKw = SourcesConfig.GridMaxImportKw,
                 PvPowerKw = LivePvKw,
-                PvGenerationKw = Math.Abs(LivePvKw),
+                // Pool rule: generation is the into-pool (positive) part.
+                PvGenerationKw = PowerSignConvention.SupplyPart(LivePvKw),
                 BatteryPowerKw = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0,
                 BatteryChargeKw = SourcesConfig.HasBattery ? LiveBatteryChargeKw : 0.0,
                 BatterySocPct = SourcesConfig.HasBattery ? LiveBatterySocPct : 0.0,
@@ -754,6 +788,8 @@ namespace Pulswerk.Ems
                 TotalReclaimedPowerKw = Math.Round(totalReclaimed, 2),
                 UncontrollableLoadKw = Math.Round(totalUncontrollable, 2),
                 TotalControllableLoadKw = Math.Round(totalControllable, 2),
+                TotalConsumptionKw = Math.Round(totalConsumption, 2),
+                AutarkyPct = autarkyPct,
 
                 // 24h Rolling Day Calculated Energy (in kWh)
                 GridImport24hKwh = energyTotals.GridImportKwh,
@@ -764,6 +800,8 @@ namespace Pulswerk.Ems
                 Uncontrollable24hKwh = energyTotals.UncontrollableKwh,
                 TotalSurplus24hKwh = energyTotals.TotalSurplusKwh,
                 TotalControllable24hKwh = Math.Round(energyTotals.ConsumerKwh.Values.Sum(), 2),
+                TotalConsumption24hKwh = Math.Round(consumption24h, 2),
+                Autarky24hPct = autarky24hPct,
 
                 Consumers = Consumers.ToList(),
                 Logs = GetLogs(),
@@ -784,6 +822,8 @@ namespace Pulswerk.Ems
             "surplus_power",
             "uncontrollable_load",
             "controllable_load",
+            "total_consumption",
+            "autarky",
             "total_base_load",
             "total_optional_load",
             "reclaimed_power",
@@ -797,7 +837,9 @@ namespace Pulswerk.Ems
             "battery_discharged_24h",
             "uncontrollable_24h",
             "controllable_24h",
-            "total_surplus_24h"
+            "total_surplus_24h",
+            "total_consumption_24h",
+            "autarky_24h"
         };
 
         public Dictionary<string, object> GetTelemetryValues()
@@ -805,8 +847,8 @@ namespace Pulswerk.Ems
             var snap = GetSnapshot();
             var dict = new Dictionary<string, object>
             {
-                ["grid_import"] = snap.GridImportKw >= 0 ? snap.GridImportKw : 0.0,
-                ["grid_export"] = snap.GridImportKw < 0 ? Math.Abs(snap.GridImportKw) : 0.0,
+                ["grid_import"] = PowerSignConvention.SupplyPart(snap.GridImportKw),
+                ["grid_export"] = PowerSignConvention.SinkPart(snap.GridImportKw),
                 ["grid_power"] = snap.GridImportKw,
                 ["pv_power"] = snap.PvPowerKw,
                 ["pv_generation"] = snap.PvGenerationKw,
@@ -816,6 +858,8 @@ namespace Pulswerk.Ems
                 ["surplus_power"] = snap.TotalSurplusAvailableKw,
                 ["uncontrollable_load"] = snap.UncontrollableLoadKw,
                 ["controllable_load"] = snap.TotalControllableLoadKw,
+                ["total_consumption"] = snap.TotalConsumptionKw,
+                ["autarky"] = snap.AutarkyPct,
                 ["total_base_load"] = snap.TotalBaseLoadKw,
                 ["total_optional_load"] = snap.TotalOptionalLoadKw,
                 ["reclaimed_power"] = snap.TotalReclaimedPowerKw,
@@ -829,7 +873,9 @@ namespace Pulswerk.Ems
                 ["battery_discharged_24h"] = snap.BatteryDischarged24hKwh,
                 ["uncontrollable_24h"] = snap.Uncontrollable24hKwh,
                 ["controllable_24h"] = snap.TotalControllable24hKwh,
-                ["total_surplus_24h"] = snap.TotalSurplus24hKwh
+                ["total_surplus_24h"] = snap.TotalSurplus24hKwh,
+                ["total_consumption_24h"] = snap.TotalConsumption24hKwh,
+                ["autarky_24h"] = snap.Autarky24hPct
             };
 
             foreach (var consumer in snap.Consumers)
@@ -875,6 +921,8 @@ namespace Pulswerk.Ems
                 ["surplus_power"] = Units.Kilowatt,
                 ["uncontrollable_load"] = Units.Kilowatt,
                 ["controllable_load"] = Units.Kilowatt,
+                ["total_consumption"] = Units.Kilowatt,
+                ["autarky"] = Units.Percent,
                 ["total_base_load"] = Units.Kilowatt,
                 ["total_optional_load"] = Units.Kilowatt,
                 ["reclaimed_power"] = Units.Kilowatt,
@@ -888,7 +936,9 @@ namespace Pulswerk.Ems
                 ["battery_discharged_24h"] = Units.KilowattHour,
                 ["uncontrollable_24h"] = Units.KilowattHour,
                 ["controllable_24h"] = Units.KilowattHour,
-                ["total_surplus_24h"] = Units.KilowattHour
+                ["total_surplus_24h"] = Units.KilowattHour,
+                ["total_consumption_24h"] = Units.KilowattHour,
+                ["autarky_24h"] = Units.Percent
             };
 
             foreach (var c in Consumers)
@@ -919,6 +969,8 @@ namespace Pulswerk.Ems
                 "surplus_power" => "Available Solar Surplus Pool",
                 "uncontrollable_load" => "Uncontrollable Base Load",
                 "controllable_load" => "Total Controllable Consumers Load",
+                "total_consumption" => "Total Site Consumption",
+                "autarky" => "Autarky (Self-Sufficiency)",
                 "total_base_load" => "Total Base Tier Quota",
                 "total_optional_load" => "Allocated Optional Load",
                 "reclaimed_power" => "Reclaimed Idle Power",
@@ -933,6 +985,8 @@ namespace Pulswerk.Ems
                 "uncontrollable_24h" => "Rolling 24h Uncontrollable Base Energy",
                 "controllable_24h" => "Rolling 24h Controllable Load Energy",
                 "total_surplus_24h" => "Rolling 24h Solar Surplus Energy",
+                "total_consumption_24h" => "Rolling 24h Total Consumption",
+                "autarky_24h" => "Rolling 24h Autarky (Self-Sufficiency)",
                 _ => FormatConsumerKeyName(key)
             };
         }
@@ -1014,20 +1068,21 @@ namespace Pulswerk.Ems
             {
                 gridValNullable = _liveValueReader("meter-main-a_power") ?? _liveValueReader("meter-main_power");
             }
-            double gridVal = gridValNullable ?? 0.0;
+            // Normalize raw values into the pool rule.
+            double gridVal = SourcesConfig.NormalizeGridPower(gridValNullable ?? 0.0);
 
             double? pvValNullable = _liveValueReader(SourcesConfig.PvMeterKey);
             if (!pvValNullable.HasValue)
             {
                 pvValNullable = _liveValueReader("pv-rooftop_power") ?? _liveValueReader("glueck-pv_power") ?? _liveValueReader("solis-pv_power");
             }
-            double pvVal = pvValNullable ?? 0.0;
+            double pvVal = SourcesConfig.NormalizePvPower(pvValNullable ?? 0.0);
 
             double battPowerVal = 0.0;
             double battSocVal = 0.0;
             if (SourcesConfig.HasBattery && !string.IsNullOrWhiteSpace(SourcesConfig.BatteryPowerKey))
             {
-                battPowerVal = _liveValueReader(SourcesConfig.BatteryPowerKey) ?? 0.0;
+                battPowerVal = SourcesConfig.NormalizeBatteryPower(_liveValueReader(SourcesConfig.BatteryPowerKey) ?? 0.0);
                 battSocVal = _liveValueReader(SourcesConfig.BatterySocKey) ?? 100.0;
             }
 
@@ -1036,7 +1091,7 @@ namespace Pulswerk.Ems
             LiveBatteryKw = Math.Round(battPowerVal, 2);
             LiveBatterySocPct = Math.Round(battSocVal, 1);
 
-            double battCharge = (SourcesConfig.HasBattery && battPowerVal < -0.2) ? Math.Abs(battPowerVal) : 0.0;
+            double battCharge = SourcesConfig.HasBattery ? PowerSignConvention.SinkPart(battPowerVal, 0.2) : 0.0;
             LiveBatteryChargeKw = Math.Round(battCharge, 2);
             IsBatteryCharging = SourcesConfig.HasBattery && battCharge > 0.3 && battSocVal < SourcesConfig.BatteryFullSocPct;
 
@@ -1061,36 +1116,41 @@ namespace Pulswerk.Ems
                 Consumers);
 
             // 4. Actuate controllable consumers
+            // Note: the OCPP master interprets force_power <= 0 as UNRESTRICTED. To switch a
+            // consumer OFF we therefore send the smallest sub-minimum value (0.1 kW), which
+            // resolves to 0A per ResolveForcePower. Unrestricted mode is signaled by 0.
+            const double offSetpointKw = 0.1;
             var now = DateTime.UtcNow;
             foreach (var consumer in Consumers.Where(c => c.IsControllable && !string.IsNullOrWhiteSpace(c.ForcePowerKey)))
             {
-                bool setpointChanged = Math.Abs(consumer.AllocatedPowerKw - consumer.LastWrittenSetpointKw) >= 0.3;
+                // Consumers in "Grid Import Curtailment" are off; in autarky they are unrestricted.
+                bool isCurtailed = consumer.Status == "Grid Import Curtailment";
+                bool isDisabled = !Enabled;
+                double writeValue = (isCurtailed || isDisabled) ? offSetpointKw : 0.0;
+
+                bool setpointChanged = Math.Abs(writeValue - consumer.LastWrittenSetpointKw) >= 0.3;
                 bool refreshHeartbeat = (now - consumer.LastWrittenUtc).TotalSeconds >= 60;
 
                 if (setpointChanged || refreshHeartbeat)
                 {
-                    consumer.LastWrittenSetpointKw = consumer.AllocatedPowerKw;
+                    consumer.LastWrittenSetpointKw = writeValue;
                     consumer.LastWrittenUtc = now;
 
                     try
                     {
-                        bool ok = await _telemetryWriter(consumer.ForcePowerKey, consumer.AllocatedPowerKw);
+                        bool ok = await _telemetryWriter(consumer.ForcePowerKey, writeValue);
                         if (ok)
                         {
-                            string reason = consumer.AllocatedPowerKw > consumer.MaxOptionalKw
-                                ? (IsBatteryCharging 
-                                    ? $"Battery charging at {LiveBatteryChargeKw:F1} kW (SoC {LiveBatterySocPct}%). Setpoint boosted to {consumer.AllocatedPowerKw:F1} kW."
-                                    : $"Solar surplus export at {Math.Abs(LiveGridKw):F1} kW. Setpoint boosted to {consumer.AllocatedPowerKw:F1} kW.")
-                                : consumer.UnusedPowerKw > 0.1
-                                    ? $"{consumer.Status}. Actual draw: {consumer.ActualPowerKw:F1} kW."
-                                    : $"Setpoint {consumer.AllocatedPowerKw:F1} kW allocated. Actual draw: {consumer.ActualPowerKw:F1} kW.";
+                            string reason = writeValue <= offSetpointKw
+                                ? $"Grid import at {PowerSignConvention.SupplyPart(LiveGridKw):F1} kW. Consumer curtailed to 0 kW."
+                                : $"Autarky: no grid import. Unrestricted up to {consumer.MaxPowerKw:F1} kW.";
 
-                            AddLog($"[{consumer.Name}] Set force_power = {consumer.AllocatedPowerKw:F1} kW. {reason}", consumer.Status);
-                            Log.Info($"[EnergyControl] [{consumer.Name}] Set {consumer.ForcePowerKey} = {consumer.AllocatedPowerKw:F1} kW ({consumer.Status})");
+                            AddLog($"[{consumer.Name}] Set force_power = {(writeValue <= offSetpointKw ? "OFF" : "UNRESTRICTED")}. {reason}", consumer.Status);
+                            Log.Info($"[EnergyControl] [{consumer.Name}] Set {consumer.ForcePowerKey} = {writeValue} kW ({consumer.Status})");
                         }
                         else
                         {
-                            AddLog($"[{consumer.Name}] Failed writing {consumer.AllocatedPowerKw:F1} kW to '{consumer.ForcePowerKey}'.", "Write Error");
+                            AddLog($"[{consumer.Name}] Failed writing {writeValue} kW to '{consumer.ForcePowerKey}'.", "Write Error");
                         }
                     }
                     catch (Exception ex)
@@ -1103,16 +1163,17 @@ namespace Pulswerk.Ems
             // 5. Update Rolling 24-hour Energy Calculation
             double totalControllablePower = Consumers.Where(c => c.IsControllable).Sum(c => c.ActualPowerKw);
             double uncPower = Consumers.Where(c => !c.IsControllable).Sum(c => c.ActualPowerKw);
-            double effectivePv = Math.Abs(LivePvKw);
+            // Pool balance: supply (Grid + PV + Battery, all positive = into the pool) minus controllable draw.
+            double effectivePv = LivePvKw;
             double effectiveBatt = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0;
             double bal = (LiveGridKw + effectivePv + effectiveBatt) - totalControllablePower;
             double calculatedBal = Math.Max(0.0, Math.Round(bal, 2));
             uncPower = uncPower > 0.0 ? Math.Max(uncPower, calculatedBal) : calculatedBal;
 
-            double rawBattCharge = (SourcesConfig.HasBattery && LiveBatteryKw < -0.2) ? Math.Abs(LiveBatteryKw) : 0.0;
+            double rawBattCharge = SourcesConfig.HasBattery ? PowerSignConvention.SinkPart(LiveBatteryKw, 0.2) : 0.0;
             double clampedCharge = Math.Min(rawBattCharge, SourcesConfig.BatteryMaxChargeKw);
             double surplusBatt = (SourcesConfig.HasBattery && IsBatteryCharging) ? Math.Max(0.0, clampedCharge - SourcesConfig.BatteryMinReserveKw) : 0.0;
-            double expSurplus = LiveGridKw < -0.2 ? Math.Abs(LiveGridKw) : 0.0;
+            double expSurplus = PowerSignConvention.SinkPart(LiveGridKw, 0.2);
             double totalLiveSurplus = surplusBatt + expSurplus;
 
             _energyCalc.RecordSample(
@@ -1176,19 +1237,25 @@ namespace Pulswerk.Ems
 
                             if (key == SourcesConfig.GridMeterKey)
                             {
-                                double imp = Math.Max(0.0, (Math.Max(0.0, vPrev) + Math.Max(0.0, vCurr)) * 0.5 * dtHours);
-                                double exp = Math.Max(0.0, (Math.Max(0.0, -vPrev) + Math.Max(0.0, -vCurr)) * 0.5 * dtHours);
+                                double vPrevN = SourcesConfig.NormalizeGridPower(vPrev);
+                                double vCurrN = SourcesConfig.NormalizeGridPower(vCurr);
+                                double imp = Math.Max(0.0, (Math.Max(0.0, vPrevN) + Math.Max(0.0, vCurrN)) * 0.5 * dtHours);
+                                double exp = Math.Max(0.0, (Math.Max(0.0, -vPrevN) + Math.Max(0.0, -vCurrN)) * 0.5 * dtHours);
                                 _energyCalc.AddEnergy(minKey, gridImportKwh: imp, gridExportKwh: exp);
                             }
                             else if (key == SourcesConfig.PvMeterKey)
                             {
-                                double pv = (Math.Abs(vPrev) + Math.Abs(vCurr)) * 0.5 * dtHours;
+                                double vPrevN = SourcesConfig.NormalizePvPower(vPrev);
+                                double vCurrN = SourcesConfig.NormalizePvPower(vCurr);
+                                double pv = Math.Max(0.0, (vPrevN + vCurrN) * 0.5 * dtHours);
                                 _energyCalc.AddEnergy(minKey, pvGenKwh: pv);
                             }
                             else if (key == SourcesConfig.BatteryPowerKey)
                             {
-                                double chg = Math.Max(0.0, (Math.Max(0.0, -vPrev) + Math.Max(0.0, -vCurr)) * 0.5 * dtHours);
-                                double dch = Math.Max(0.0, (Math.Max(0.0, vPrev) + Math.Max(0.0, vCurr)) * 0.5 * dtHours);
+                                double vPrevN = SourcesConfig.NormalizeBatteryPower(vPrev);
+                                double vCurrN = SourcesConfig.NormalizeBatteryPower(vCurr);
+                                double chg = Math.Max(0.0, (Math.Max(0.0, -vPrevN) + Math.Max(0.0, -vCurrN)) * 0.5 * dtHours);
+                                double dch = Math.Max(0.0, (Math.Max(0.0, vPrevN) + Math.Max(0.0, vCurrN)) * 0.5 * dtHours);
                                 _energyCalc.AddEnergy(minKey, battChargeKwh: chg, battDischargeKwh: dch);
                             }
                             else

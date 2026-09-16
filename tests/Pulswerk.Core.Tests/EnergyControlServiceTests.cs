@@ -16,8 +16,12 @@ namespace Pulswerk.Core.Tests
                 BatteryFullSocPct = 98.0
             };
 
+        // ── Autarky Dispatch Tests ────────────────────────────────────────────
+        // Rule: consumers may draw unlimited power while no grid import occurs.
+        // On grid import, ALL controllable consumers are curtailed to 0.
+
         [Fact]
-        public void Dispatch_WhenBatteryIdleOrDischarging_EnforcesStrictBaseLimit8Kw()
+        public void Dispatch_NoGridImport_ConsumersAreUnrestricted()
         {
             var sources = CreateDefaultSources(8.0);
             var wallbox = new EnergyConsumer
@@ -31,42 +35,101 @@ namespace Pulswerk.Core.Tests
                 MaxPowerKw = 22.0
             };
 
-            // Idle battery (0 kW)
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 4.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
-            Assert.Equal("Base Limit (8.0 kW)", wallbox.Status);
+            // Grid idle, PV covers everything -> no curtailment.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
 
-            // Discharging battery (+4 kW)
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 2.0, pvPowerKw: 0.0, batteryPowerKw: 4.0, batterySocPct: 45.0, new[] { wallbox });
+            // Unrestricted up to the physical ceiling: min(MaxOptionalKw=8, MaxPowerKw-Base=22).
+            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
             Assert.Equal(8.0, wallbox.AllocatedPowerKw);
-            Assert.Equal("Base Limit (8.0 kW)", wallbox.Status);
+            Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
         [Fact]
-        public void Dispatch_WhenBatteryChargingWithSurplus_ExpandsAboveBaseLimit()
+        public void Dispatch_GridImport_AllControllableConsumersCurtailedToMinimum()
         {
-            var sources = CreateDefaultSources(8.0, reserve: 1.0);
+            var sources = CreateDefaultSources(8.0);
+
             var wallbox = new EnergyConsumer
             {
                 Id = "wb",
                 Name = "Wallboxes",
                 IsControllable = true,
                 BaseLimitKw = 8.0,
-                ActualPowerKw = 7.0, // drawing 7 kW
-                MinPowerKw = 1.38,
+                ActualPowerKw = 6.5,
+                MinPowerKw = 1.38, // guaranteed minimum (6A 1-phase)
                 MaxPowerKw = 22.0
             };
 
-            // Battery absorbing 4.5 kW surplus (-4.5 kW)
-            // Available surplus headroom = 4.5 - 1.0 = 3.5 kW
-            // Pool = 7.0 + 3.5 = 10.5 kW
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 12.0, batteryPowerKw: -4.5, batterySocPct: 60.0, new[] { wallbox });
-            Assert.Equal(10.5, wallbox.AllocatedPowerKw);
-            Assert.Contains("Surplus Boost", wallbox.Status);
+            var heatPump = new EnergyConsumer
+            {
+                Id = "hp",
+                Name = "Heat Pump",
+                IsControllable = true,
+                BasePowerKw = 2.0,
+                MaxOptionalKw = 5.0,
+                MinPowerKw = 0.5,
+                ActualPowerKw = 4.0,
+                MaxPowerKw = 7.5
+            };
+
+            var noMinimum = new EnergyConsumer
+            {
+                Id = "booster",
+                Name = "Booster (no guaranteed minimum)",
+                IsControllable = true,
+                BasePowerKw = 0.0,
+                MaxOptionalKw = 3.0,
+                MinPowerKw = 0.0,
+                ActualPowerKw = 1.0,
+                MaxPowerKw = 5.0
+            };
+
+            var consumers = new List<EnergyConsumer> { wallbox, heatPump, noMinimum };
+
+            // Grid imports 3 kW -> all controllable consumers drop to their guaranteed minimum.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, consumers);
+
+            // Wallbox: base 0 + guaranteed minimum 1.38 kW.
+            Assert.Equal(1.38, wallbox.AllocatedOptionalKw);
+            Assert.Equal(1.38, wallbox.AllocatedPowerKw);
+            Assert.Equal("Grid Import Curtailment (Min 1.38 kW)", wallbox.Status);
+
+            // Heat pump: base 2.0 + guaranteed minimum 0.5 kW.
+            Assert.Equal(0.5, heatPump.AllocatedOptionalKw);
+            Assert.Equal(2.5, heatPump.AllocatedPowerKw);
+            Assert.Equal("Grid Import Curtailment (Min 0.50 kW)", heatPump.Status);
+
+            // Consumer without a minimum falls to 0 (off).
+            Assert.Equal(0.0, noMinimum.AllocatedOptionalKw);
+            Assert.Equal(0.0, noMinimum.AllocatedPowerKw);
+            Assert.Equal("Grid Import Curtailment", noMinimum.Status);
         }
 
         [Fact]
-        public void Dispatch_WhenBatteryIsFull_DoesNotBoostAboveBase()
+        public void Dispatch_GridImport_MinimumNeverExceedsOptionalTier()
+        {
+            var sources = CreateDefaultSources(8.0);
+            var consumer = new EnergyConsumer
+            {
+                Id = "odd",
+                Name = "Consumer with minimum above optional tier",
+                IsControllable = true,
+                BasePowerKw = 0.0,
+                MaxOptionalKw = 2.0,
+                MinPowerKw = 3.0, // misconfiguration: minimum above the tier
+                ActualPowerKw = 1.0,
+                MaxPowerKw = 10.0
+            };
+
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { consumer });
+
+            // Clamped to MaxOptionalKw, never above it.
+            Assert.Equal(2.0, consumer.AllocatedOptionalKw);
+            Assert.Equal(2.0, consumer.AllocatedPowerKw);
+        }
+
+        [Fact]
+        public void Dispatch_GridImportDeadband_DoesNotTriggerCurtailment()
         {
             var sources = CreateDefaultSources(8.0);
             var wallbox = new EnergyConsumer
@@ -75,26 +138,21 @@ namespace Pulswerk.Core.Tests
                 Name = "Wallboxes",
                 IsControllable = true,
                 BaseLimitKw = 8.0,
-                ActualPowerKw = 7.5,
-                MinPowerKw = 1.38,
+                ActualPowerKw = 6.5,
                 MaxPowerKw = 22.0
             };
 
-            // Battery at 99% SoC (exceeds 98% full threshold)
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 5.0, batteryPowerKw: -2.0, batterySocPct: 99.0, new[] { wallbox });
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
-            Assert.Equal("Base Limit (8.0 kW)", wallbox.Status);
+            // Import below the 0.2 kW deadband -> no curtailment.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.15, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
+
+            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
         [Fact]
-        public void Dispatch_WithoutBattery_ExpandsAboveBaseLimitFromGridExport()
+        public void Dispatch_GridExport_ConsumersAreUnrestricted()
         {
-            var sources = new EnergySourcesConfig
-            {
-                HasBattery = false,
-                GridMaxImportKw = 8.0,
-                BatteryMinReserveKw = 1.0
-            };
+            var sources = CreateDefaultSources(8.0);
             var wallbox = new EnergyConsumer
             {
                 Id = "wb",
@@ -102,353 +160,104 @@ namespace Pulswerk.Core.Tests
                 IsControllable = true,
                 BaseLimitKw = 8.0,
                 ActualPowerKw = 7.0,
-                MinPowerKw = 1.38,
                 MaxPowerKw = 22.0
             };
 
-            // Grid export is 3.5 kW (-3.5 kW). No battery present.
-            // Available surplus should be 3.5 kW.
-            // Wallbox pool = 7.0 + 3.5 = 10.5 kW.
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: -3.5, pvPowerKw: -10.0, batteryPowerKw: 0.0, batterySocPct: 0.0, new[] { wallbox });
-            Assert.Equal(10.5, wallbox.AllocatedPowerKw);
-            Assert.Contains("Surplus Boost", wallbox.Status);
+            // Grid export (negative = out of pool) -> autarky, unlimited draw.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: -3.5, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 0.0, new[] { wallbox });
+
+            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
         [Fact]
-        public void Dispatch_WithoutBattery_IgnoresBatteryValues()
+        public void Dispatch_Curtailment_RecoversWhenImportStops()
         {
-            var sources = new EnergySourcesConfig
-            {
-                HasBattery = false,
-                GridMaxImportKw = 8.0,
-                BatteryMinReserveKw = 1.0
-            };
+            var sources = CreateDefaultSources(8.0);
             var wallbox = new EnergyConsumer
             {
                 Id = "wb",
                 Name = "Wallboxes",
                 IsControllable = true,
                 BaseLimitKw = 8.0,
-                ActualPowerKw = 7.0,
-                MinPowerKw = 1.38,
+                ActualPowerKw = 6.5,
                 MaxPowerKw = 22.0
             };
 
-            // Even if battery telemetry passes non-zero charge and high SoC, HasBattery = false ignores it.
-            // Grid is importing 2 kW (no export surplus).
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 2.0, pvPowerKw: -5.0, batteryPowerKw: -4.0, batterySocPct: 50.0, new[] { wallbox });
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
-            Assert.Equal("Base Limit (8.0 kW)", wallbox.Status);
+            // Phase 1: grid import -> curtailed.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
+            Assert.Equal(0.0, wallbox.AllocatedOptionalKw);
+
+            // Phase 2: import stops -> immediately unrestricted again.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
+            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
         [Fact]
-        public void Dispatch_MultiConsumer_PrioritizesConsumersCorrectly()
+        public void Dispatch_UncontrollableLoads_AreNeverCurtailed()
         {
-            var sources = CreateDefaultSources(12.0, reserve: 1.0);
-
-            // Wallbox (Priority 1) with 8 kW base
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallboxes",
-                IsControllable = true,
-                Priority = 1,
-                BaseLimitKw = 8.0,
-                ActualPowerKw = 7.0,
-                MinPowerKw = 1.38,
-                MaxPowerKw = 11.0
-            };
-
-            // Heat Pump (Priority 2) with 3 kW base
-            var heatPump = new EnergyConsumer
-            {
-                Id = "hp",
-                Name = "Heat Pump",
-                IsControllable = true,
-                Priority = 2,
-                BaseLimitKw = 3.0,
-                ActualPowerKw = 2.0,
-                MinPowerKw = 0.5,
-                MaxPowerKw = 6.0
-            };
-
-            // Uncontrollable base load
+            var sources = CreateDefaultSources(8.0);
             var baseLoad = new EnergyConsumer
             {
                 Id = "house",
                 Name = "House Lights & Sockets",
                 IsControllable = false,
-                ActualPowerKw = 1.5
+                ActualPowerKw = 1.5,
+                BasePowerKw = 1.0
             };
 
-            var consumers = new List<EnergyConsumer> { heatPump, wallbox, baseLoad };
+            // Grid import: uncontrollable load keeps reporting its measured/base draw.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { baseLoad });
 
-            // Battery absorbing 6.0 kW surplus (-6.0 kW) -> available surplus = 6.0 - 1.0 = 5.0 kW
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 15.0, batteryPowerKw: -6.0, batterySocPct: 50.0, consumers);
-
-            // Wallbox wants 7.0 + 5.0 = 12.0 kW, but MaxPowerKw is 11.0 kW.
-            // Wallbox takes 11.0 kW (used surplus above base 8.0 kW = 3.0 kW).
-            Assert.Equal(11.0, wallbox.AllocatedPowerKw);
-
-            // Remaining surplus for Heat Pump: 5.0 - 3.0 = 2.0 kW.
-            // Heat Pump gets base 3.0 kW + remaining surplus 2.0 kW = 5.0 kW (or actual 2.0 + 2.0 = 4.0 kW, max(3.0, 4.0) = 4.0 kW)
-            Assert.Equal(4.0, heatPump.AllocatedPowerKw);
-
-            // Uncontrollable consumer unchanged
+            Assert.Equal(0.0, baseLoad.AllocatedOptionalKw);
             Assert.Equal(1.5, baseLoad.AllocatedPowerKw);
             Assert.Equal("Uncontrollable Load", baseLoad.Status);
         }
 
         [Fact]
-        public void Dispatch_TwoTierConsumer_AllocatesBasePlusOptional()
+        public void Dispatch_Unrestricted_CapsAtPhysicalMaxPower()
+        {
+            var sources = CreateDefaultSources(8.0);
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallboxes",
+                IsControllable = true,
+                BaseLimitKw = 8.0, // MaxOptionalKw 8
+                ActualPowerKw = 6.0,
+                MinPowerKw = 1.38,
+                MaxPowerKw = 11.0 // physical ceiling below MaxOptionalKw
+            };
+
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
+
+            // min(MaxOptionalKw=8, MaxPowerKw-Base=11) = 8.
+            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
+        }
+
+        [Fact]
+        public void Dispatch_TwoTierConsumer_UnrestrictedKeepsBasePlusOptional()
         {
             var sources = CreateDefaultSources(10.0);
             var heatPump = new EnergyConsumer
             {
                 Id = "hp-twotier",
                 Name = "Heat Pump with Compressor Base and Booster Optional",
-                BasePowerKw = 2.0,      // 2 kW uncontrollable compressor/pump load
+                BasePowerKw = 2.0,
                 HasOptionalTier = true,
-                MaxOptionalKw = 4.0,    // up to 4 kW optional booster
-                ActualPowerKw = 3.5,    // currently drawing 3.5 kW (2 base + 1.5 optional)
+                MaxOptionalKw = 4.0,
+                ActualPowerKw = 3.5,
                 Priority = 1
             };
 
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 5.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { heatPump });
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 8.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { heatPump });
 
-            // Base 2.0 + Optional 4.0 = 6.0 kW total setpoint
+            // Autarky: base 2.0 + full optional 4.0 = 6.0 kW total setpoint.
             Assert.Equal(4.0, heatPump.AllocatedOptionalKw);
             Assert.Equal(6.0, heatPump.AllocatedPowerKw);
-            Assert.Equal(0.0, heatPump.UnusedPowerKw);
-            Assert.Contains("2.0 kW base + 4.0 kW opt", heatPump.Status);
-        }
-
-        [Fact]
-        public void Dispatch_IdleConsumer_ReclaimsPowerAndRedistributes()
-        {
-            var sources = CreateDefaultSources(8.0); // 8 kW max import limit
-
-            // Consumer 1: Wallbox Fleet (Priority 1), drawing 0.0 kW (idle)
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallbox Fleet",
-                Priority = 1,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 8.0,
-                StandbyOptionalKw = 0.0,
-                ActualPowerKw = 0.0 // 0 kW drawn - detected as idle purely from drawn power
-            };
-
-            // Consumer 2: Heat Pump (Priority 2), actively requesting power
-            var heatPump = new EnergyConsumer
-            {
-                Id = "hp",
-                Name = "Heat Pump",
-                Priority = 2,
-                BasePowerKw = 1.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 5.0,
-                ActualPowerKw = 3.0 // actively drawing
-            };
-
-            var consumers = new List<EnergyConsumer> { wallbox, heatPump };
-
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, consumers);
-
-            // Wallbox should be detected as idle:
-            Assert.False(wallbox.IsActivelyDemanding);
-            Assert.Equal(0.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(0.0, wallbox.AllocatedPowerKw);
-            Assert.Equal(8.0, wallbox.UnusedPowerKw);
-            Assert.Contains("Idle (8.0 kW redistributed)", wallbox.Status);
-
-            // Heat Pump (Priority 2) gets the reclaimed power! Full 5.0 kW optional granted!
-            Assert.True(heatPump.IsActivelyDemanding);
-            Assert.Equal(5.0, heatPump.AllocatedOptionalKw);
-            Assert.Equal(6.0, heatPump.AllocatedPowerKw); // 1.0 base + 5.0 optional
-        }
-
-        [Fact]
-        public void Dispatch_WhenConsumerStartsDrawing_ImmediatelyRestoresPriorityAllocation()
-        {
-            var sources = CreateDefaultSources(8.0);
-
-            // Wallbox Fleet begins drawing power
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallbox Fleet",
-                Priority = 1,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 8.0,
-                ActualPowerKw = 7.5 // Car is actively drawing 7.5 kW (near full capacity)!
-            };
-
-            var heatPump = new EnergyConsumer
-            {
-                Id = "hp",
-                Name = "Heat Pump",
-                Priority = 2,
-                BasePowerKw = 1.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 5.0,
-                ActualPowerKw = 3.0
-            };
-
-            var consumers = new List<EnergyConsumer> { wallbox, heatPump };
-
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, consumers);
-
-            // Wallbox immediately detected as actively demanding based purely on drawn power!
-            Assert.True(wallbox.IsActivelyDemanding);
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
-            Assert.Equal(0.0, wallbox.UnusedPowerKw);
-        }
-
-        [Fact]
-        public void Dispatch_WhenAllConsumersAreIdle_ArmsConsumersWithReadiness()
-        {
-            var sources = CreateDefaultSources(8.0);
-
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallbox Fleet",
-                Priority = 1,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 8.0,
-                ActualPowerKw = 0.0
-            };
-
-            var heatPump = new EnergyConsumer
-            {
-                Id = "hp",
-                Name = "Heat Pump",
-                Priority = 2,
-                BasePowerKw = 1.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 5.0,
-                ActualPowerKw = 0.0
-            };
-
-            var consumers = new List<EnergyConsumer> { wallbox, heatPump };
-
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 1.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, consumers);
-
-            // Wallbox is armed with 8.0 kW ready so EV can charge immediately upon plugging in
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
-            Assert.Contains("Ready (8.0 kW)", wallbox.Status);
-        }
-
-        [Fact]
-        public void Dispatch_ConsumerUnderutilizingCapacity_RedistributesExcessToOthers()
-        {
-            var sources = CreateDefaultSources(8.0);
-
-            // Wallbox Fleet allocated 8.0 kW, but only 1 single-phase car drawing 3.5 kW
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallbox Fleet",
-                Priority = 1,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 8.0,
-                ActualPowerKw = 3.5 // draws only 3.5 kW out of 8.0 kW
-            };
-
-            // Second consumer wants 4 kW optional
-            var heatPump = new EnergyConsumer
-            {
-                Id = "hp",
-                Name = "Heat Pump",
-                Priority = 2,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 4.0,
-                ActualPowerKw = 2.0
-            };
-
-            var consumers = new List<EnergyConsumer> { wallbox, heatPump };
-
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 5.5, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, consumers);
-
-            // Wallbox receives its actual draw 3.5 + 1.5 headroom = 5.0 kW
-            Assert.Equal(5.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(3.0, wallbox.UnusedPowerKw);
-            Assert.Contains("3.0 kW redistributed", wallbox.Status);
-
-            // Heat Pump receives remaining 3.0 kW from the 8.0 kW pool!
-            Assert.Equal(3.0, heatPump.AllocatedOptionalKw);
-            Assert.Equal(1.0, heatPump.UnusedPowerKw);
-        }
-
-        [Fact]
-        public void Dispatch_BatteryMaxPowerLimit_ClampsSurplusToBatteryRating()
-        {
-            var sources = CreateDefaultSources(8.0);
-            sources.BatteryMaxPowerKw = 5.0; // Battery physically limited to 5.0 kW
-            sources.BatteryMinReserveKw = 1.0;
-
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallbox Fleet",
-                Priority = 1,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 8.0,
-                MaxPowerKw = 22.0,
-                ActualPowerKw = 8.0
-            };
-
-            var consumers = new List<EnergyConsumer> { wallbox };
-
-            // Sensor reports anomalous -12.0 kW charging (beyond 5 kW hardware limit)
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 15.0, batteryPowerKw: -12.0, batterySocPct: 50.0, consumers);
-
-            // Charge clamped to BatteryMaxChargeKw (5.0 kW) -> surplus = 5.0 - 1.0 = 4.0 kW
-            // Allocation = 8.0 + 4.0 = 12.0 kW (clamped to physical rating)
-            Assert.Equal(12.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(12.0, wallbox.AllocatedPowerKw);
-            Assert.Contains("Surplus Boost (+4 kW)", wallbox.Status);
-        }
-
-        [Fact]
-        public void Dispatch_WhenSolarExceedsBatteryMaxCharge_AccountsForGridExportSurplus()
-        {
-            var sources = CreateDefaultSources(8.0);
-            sources.BatteryMaxPowerKw = 5.0;
-            sources.BatteryMinReserveKw = 1.0;
-
-            var wallbox = new EnergyConsumer
-            {
-                Id = "wb",
-                Name = "Wallbox Fleet",
-                Priority = 1,
-                BasePowerKw = 0.0,
-                HasOptionalTier = true,
-                MaxOptionalKw = 8.0,
-                MaxPowerKw = 22.0,
-                ActualPowerKw = 8.0
-            };
-
-            var consumers = new List<EnergyConsumer> { wallbox };
-
-            // Battery charging at 5.0 kW (yielding 4.0 kW surplus) + 3.5 kW exported to grid (-3.5 kW)
-            // Total surplus = 4.0 + 3.5 = 7.5 kW
-            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: -3.5, pvPowerKw: 10.0, batteryPowerKw: -5.0, batterySocPct: 60.0, consumers);
-
-            // Allocation = 8.0 base + 7.5 surplus = 15.5 kW
-            Assert.Equal(15.5, wallbox.AllocatedOptionalKw);
-            Assert.Equal(15.5, wallbox.AllocatedPowerKw);
-            Assert.Contains("Surplus Boost (+7.5 kW)", wallbox.Status);
+            Assert.Equal("Autarky (Unrestricted)", heatPump.Status);
         }
 
         // ── Rolling 24-Hour Energy Calculation Tests ─────────────────────────
@@ -499,14 +308,15 @@ namespace Pulswerk.Core.Tests
             var calc = new EmsRollingEnergyCalculator();
             var startTime = new DateTime(2026, 9, 13, 10, 0, 0, DateTimeKind.Utc);
 
-            // Feed 1 hour of constant negative PV power (-8.0 kW) from a feed-in meter convention
+            // The calculator consumes pre-normalized values (canonical: + = generation).
+            // Feed 1 hour of constant PV generation of +8.0 kW.
             for (int minute = 0; minute <= 60; minute++)
             {
                 var time = startTime.AddMinutes(minute);
                 calc.RecordSample(
                     time,
                     gridKw: 0.0,
-                    pvKw: -8.0,
+                    pvKw: 8.0,
                     battKw: 0.0,
                     uncontrollableKw: 2.0,
                     surplusKw: 6.0,
@@ -515,6 +325,29 @@ namespace Pulswerk.Core.Tests
 
             var totals = calc.Get24hTotals(startTime.AddMinutes(60));
             Assert.Equal(8.0, totals.PvGenerationKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_NegativePvPower_IsNotCountedAsGeneration()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var startTime = new DateTime(2026, 9, 13, 10, 0, 0, DateTimeKind.Utc);
+
+            // Negative PV power violates the canonical rule and must not be integrated as generation.
+            for (int minute = 0; minute <= 60; minute++)
+            {
+                calc.RecordSample(
+                    startTime.AddMinutes(minute),
+                    gridKw: 0.0,
+                    pvKw: -8.0,
+                    battKw: 0.0,
+                    uncontrollableKw: 0.0,
+                    surplusKw: 0.0,
+                    Array.Empty<(string, double)>());
+            }
+
+            var totals = calc.Get24hTotals(startTime.AddMinutes(60));
+            Assert.Equal(0.0, totals.PvGenerationKwh);
         }
 
         [Fact]
@@ -673,12 +506,13 @@ namespace Pulswerk.Core.Tests
                     PvMeterKey = "pv_test"
                 });
 
-                // Simulate live readings: Grid -3.0 (exporting 3 kW), PV -7.0 (generating 7 kW)
-                svc.SetLiveTelemetryForTesting(gridKw: -3.0, pvKw: -7.0, batteryKw: -2.0, batterySocPct: 80.0);
+                // Simulate live readings in the canonical convention:
+                // Grid -3.0 (exporting 3 kW), PV +7.0 (generating 7 kW)
+                svc.SetLiveTelemetryForTesting(gridKw: -3.0, pvKw: 7.0, batteryKw: -2.0, batterySocPct: 80.0);
 
                 var snap = svc.GetSnapshot();
                 Assert.False(snap.Sources.HasBattery);
-                Assert.Equal(-7.0, snap.PvPowerKw);
+                Assert.Equal(7.0, snap.PvPowerKw);
                 Assert.Equal(7.0, snap.PvGenerationKw);
                 Assert.Equal(0.0, snap.BatteryPowerKw);
                 Assert.Equal(0.0, snap.BatteryChargeKw);
@@ -686,7 +520,7 @@ namespace Pulswerk.Core.Tests
                 Assert.False(snap.IsBatteryCharging);
 
                 // Residual base load balance without battery:
-                // Grid + Abs(PV) - Controllable = -3.0 + 7.0 - Controllable
+                // Grid + PV - Controllable = -3.0 + 7.0 - Controllable
                 // With controllable = 0, balanceLoad = 4.0 kW
                 Assert.Equal(4.0, snap.UncontrollableLoadKw);
             }
@@ -697,9 +531,201 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
-        public void EmsDriver_GetAssetHierarchy_ExposesAllTelemetryPoints()
+        public void EmsService_Snapshot_WithInvertedPvSign_NormalizesToCanonicalConvention()
         {
-            var driver = new EmsDriver();
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig
+                {
+                    HasBattery = false,
+                    GridMaxImportKw = 10.0,
+                    PvMeterKey = "pv_test",
+                    InvertPvPowerSign = true
+                });
+
+                // Raw meter reports generation as negative (-7.0 kW); the invert rule normalizes it to +7.0.
+                svc.SetLiveTelemetryForTesting(gridKw: -3.0, pvKw: -7.0, batteryKw: 0.0, batterySocPct: 80.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(7.0, snap.PvPowerKw);
+                Assert.Equal(7.0, snap.PvGenerationKw);
+                Assert.Equal(4.0, snap.UncontrollableLoadKw);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_WithInvertedGridSign_NormalizesToCanonicalConvention()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig
+                {
+                    HasBattery = false,
+                    GridMaxImportKw = 10.0,
+                    PvMeterKey = "pv_test",
+                    InvertGridPowerSign = true
+                });
+
+                // Raw meter reports import as negative (-3.0 kW); the invert rule normalizes it to +3.0 import.
+                svc.SetLiveTelemetryForTesting(gridKw: -3.0, pvKw: 0.0, batteryKw: 0.0, batterySocPct: 80.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(3.0, snap.GridImportKw);
+                Assert.Equal(3.0, snap.UncontrollableLoadKw);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_Autarky_IsZeroWhenAllPowerComesFromGrid()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig { HasBattery = false, GridMaxImportKw = 10.0, PvMeterKey = "pv_test" });
+
+                // Grid imports 5 kW, no PV, no battery -> consumption 5 kW, all from grid -> 0% autarky.
+                svc.SetLiveTelemetryForTesting(gridKw: 5.0, pvKw: 0.0, batteryKw: 0.0, batterySocPct: 50.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(5.0, snap.TotalConsumptionKw);
+                Assert.Equal(0.0, snap.AutarkyPct);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_Autarky_IsFullWhenGridIsIdle()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig { HasBattery = false, GridMaxImportKw = 10.0, PvMeterKey = "pv_test" });
+
+                // PV generates 6 kW, grid idle -> consumption 6 kW, no grid import -> 100% autarky.
+                svc.SetLiveTelemetryForTesting(gridKw: 0.0, pvKw: 6.0, batteryKw: 0.0, batterySocPct: 50.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(6.0, snap.TotalConsumptionKw);
+                Assert.Equal(100.0, snap.AutarkyPct);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_Autarky_IsPartialWithMixedSupply()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig { HasBattery = false, GridMaxImportKw = 10.0, PvMeterKey = "pv_test" });
+
+                // PV 6 kW + grid import 2 kW -> consumption 8 kW.
+                // Autarky = 1 - (2 / 8) = 75%.
+                svc.SetLiveTelemetryForTesting(gridKw: 2.0, pvKw: 6.0, batteryKw: 0.0, batterySocPct: 50.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(8.0, snap.TotalConsumptionKw);
+                Assert.Equal(75.0, snap.AutarkyPct);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_Autarky_IsClampedToZeroWhenGridExceedsConsumption()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig
+                {
+                    HasBattery = true,
+                    GridMaxImportKw = 10.0,
+                    PvMeterKey = "pv_test",
+                    BatteryPowerKey = "batt_test",
+                    BatterySocKey = "batt_soc_test"
+                });
+
+                // Grid imports 5 kW, of which 3 kW charges the battery -> only 2 kW reach the loads.
+                // Autarky = 1 - (5 / 2) = -150% -> clamped to 0%.
+                svc.SetLiveTelemetryForTesting(gridKw: 5.0, pvKw: 0.0, batteryKw: -3.0, batterySocPct: 50.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(2.0, snap.TotalConsumptionKw);
+                Assert.Equal(0.0, snap.AutarkyPct);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_Snapshot_Autarky_IsZeroWhenNoConsumption()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            try
+            {
+                svc.Configure(new EnergySourcesConfig { HasBattery = false, GridMaxImportKw = 10.0, PvMeterKey = "pv_test" });
+
+                svc.SetLiveTelemetryForTesting(gridKw: 0.0, pvKw: 0.0, batteryKw: 0.0, batterySocPct: 50.0);
+
+                var snap = svc.GetSnapshot();
+                Assert.Equal(0.0, snap.TotalConsumptionKw);
+                Assert.Equal(0.0, snap.AutarkyPct);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+            }
+        }
+
+        [Fact]
+        public void EmsService_GetTelemetryValues_PublishesAutarkyKeys()
+        {
+            var svc = EmsService.Instance;
+            var values = svc.GetTelemetryValues();
+
+            Assert.True(values.ContainsKey("total_consumption"));
+            Assert.True(values.ContainsKey("autarky"));
+            Assert.True(values.ContainsKey("total_consumption_24h"));
+            Assert.True(values.ContainsKey("autarky_24h"));
+
+            var units = svc.GetTelemetryUnits();
+            Assert.Equal(Pulswerk.Core.Units.Percent, units["autarky"]);
+            Assert.Equal(Pulswerk.Core.Units.Percent, units["autarky_24h"]);
+            Assert.Equal(Pulswerk.Core.Units.Kilowatt, units["total_consumption"]);
+            Assert.Equal(Pulswerk.Core.Units.KilowattHour, units["total_consumption_24h"]);
+        }
+
+        [Fact]
+        public void EmsDriver_GetAssetHierarchy_ExposesAllTelemetryPoints()
+        {            var driver = new EmsDriver();
             Assert.Equal("ems", driver.DriverName);
 
             var dev = new Pulswerk.Core.DeviceConfig(

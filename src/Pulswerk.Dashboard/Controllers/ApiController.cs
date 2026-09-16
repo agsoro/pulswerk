@@ -1625,6 +1625,7 @@ namespace Pulswerk.Dashboard.Controllers
                 enabled = snapshot.Enabled,
                 gridImportKw = snapshot.GridImportKw,
                 gridMaxImportKw = snapshot.GridMaxImportKw,
+                pvPowerKw = snapshot.PvPowerKw,
                 pvGenerationKw = snapshot.PvGenerationKw,
                 batteryPowerKw = snapshot.BatteryPowerKw,
                 batteryChargeKw = snapshot.BatteryChargeKw,
@@ -1639,6 +1640,8 @@ namespace Pulswerk.Dashboard.Controllers
                 totalReclaimedPowerKw = snapshot.TotalReclaimedPowerKw,
                 uncontrollableLoadKw = snapshot.UncontrollableLoadKw,
                 totalControllableLoadKw = snapshot.TotalControllableLoadKw,
+                totalConsumptionKw = snapshot.TotalConsumptionKw,
+                autarkyPct = snapshot.AutarkyPct,
 
                 // Rolling 24-hour calculated energy
                 gridImport24hKwh = snapshot.GridImport24hKwh,
@@ -1649,6 +1652,8 @@ namespace Pulswerk.Dashboard.Controllers
                 uncontrollable24hKwh = snapshot.Uncontrollable24hKwh,
                 totalSurplus24hKwh = snapshot.TotalSurplus24hKwh,
                 totalControllable24hKwh = snapshot.TotalControllable24hKwh,
+                totalConsumption24hKwh = snapshot.TotalConsumption24hKwh,
+                autarky24hPct = snapshot.Autarky24hPct,
 
                 consumers = snapshot.Consumers.Select(c => new {
                     id = c.Id,
