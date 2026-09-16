@@ -4,7 +4,7 @@ export function PointCard({ point, variant = 'favorites' }) {
         ? window.getPointIcon(point.type || '')
         : '<i class="fas fa-microchip"></i>';
     const pathHtml = point.parentPath.map((p, index) => {
-        return (_jsxs("span", { children: [_jsx("a", { href: `/plswk/Assets?node=${p.id}`, class: "text-sky-400 no-underline hover:underline", children: p.name }), index < point.parentPath.length - 1 && (_jsx("i", { class: "fas fa-chevron-right mx-2 text-[0.7rem] opacity-50" }))] }, p.id));
+        return (_jsxs("span", { children: [_jsx("a", { href: `/plswk/assets?node=${p.id}`, class: "text-sky-400 no-underline hover:underline", children: p.name }), index < point.parentPath.length - 1 && (_jsx("i", { class: "fas fa-chevron-right mx-2 text-[0.7rem] opacity-50" }))] }, p.id));
     });
     const isSchedule = point.type === 'OBJECT_SCHEDULE';
     const displayValue = window.PulswerkValue?.formatDisplay(point.value, point.type) || point.value;

@@ -13,7 +13,7 @@ export function PointCard({ point, variant = 'favorites' }: PointCardProps) {
     const pathHtml = point.parentPath.map((p: any, index: number) => {
         return (
             <span key={p.id}>
-                <a href={`/plswk/Assets?node=${p.id}`} class="text-sky-400 no-underline hover:underline">
+                <a href={`/plswk/assets?node=${p.id}`} class="text-sky-400 no-underline hover:underline">
                     {p.name}
                 </a>
                 {index < point.parentPath.length - 1 && (

@@ -3,16 +3,16 @@ import { test, expect, Page } from './fixtures';
 // The list of pages to audit in the dashboard interface
 const PAGES = [
   { name: 'dashboard-home', path: '/plswk/' },
-  { name: 'dashboards-list', path: '/plswk/Dashboards' },
-  { name: 'assets', path: '/plswk/Assets' },
-  { name: 'inventory', path: '/plswk/TelemetryList' },
-  { name: 'connections', path: '/plswk/Connections' },
-  { name: 'alarms', path: '/plswk/Alarms' },
-  { name: 'logs', path: '/plswk/Logs' },
-  { name: 'heartbeat', path: '/plswk/Heartbeat' },
-  { name: 'billing', path: '/plswk/Billing' },
-  { name: 'wallboxes', path: '/plswk/Wallboxes' },
-  { name: 'trajectory', path: '/plswk/Trajectory' }
+  { name: 'dashboards-list', path: '/plswk/dashboards' },
+  { name: 'assets', path: '/plswk/assets' },
+  { name: 'inventory', path: '/plswk/telemetrylist' },
+  { name: 'connections', path: '/plswk/connections' },
+  { name: 'alarms', path: '/plswk/alarms' },
+  { name: 'logs', path: '/plswk/logs' },
+  { name: 'heartbeat', path: '/plswk/heartbeat' },
+  { name: 'billing', path: '/plswk/billing' },
+  { name: 'wallboxes', path: '/plswk/wallboxes' },
+  { name: 'ems', path: '/plswk/ems' }
 ];
 
 // Helper: Disable CSS animations and transitions to stabilize visual testing screenshots
@@ -137,8 +137,8 @@ test.describe('UI Quality and Layout Audits', () => {
       });
     });
 
-    // Mock /api/trajectory/status
-    await page.route('**/api/trajectory/status', async route => {
+    // Mock /api/ems/status
+    await page.route('**/api/ems/status', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -159,8 +159,8 @@ test.describe('UI Quality and Layout Audits', () => {
       });
     });
 
-    // Mock /api/trajectory/targets
-    await page.route('**/api/trajectory/targets', async route => {
+    // Mock /api/ems/targets
+    await page.route('**/api/ems/targets', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -171,8 +171,8 @@ test.describe('UI Quality and Layout Audits', () => {
       });
     });
 
-    // Mock /api/trajectory/targets/15min
-    await page.route('**/api/trajectory/targets/15min', async route => {
+    // Mock /api/ems/targets/15min
+    await page.route('**/api/ems/targets/15min', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

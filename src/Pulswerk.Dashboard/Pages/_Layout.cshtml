@@ -36,7 +36,7 @@
             </li>
             @if (DashboardData.Config.Modules?.Dashboards ?? true) {
             <li>
-                <a href="/plswk/Dashboards"
+                <a href="/plswk/dashboards"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Dashboards" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-dashboards">
                     <i class="fas fa-th-large w-5 text-xl flex-shrink-0 text-center"></i>
@@ -47,7 +47,7 @@
             }
             @if (DashboardData.Config.Modules?.Assets ?? true) {
             <li>
-                <a href="/plswk/Assets"
+                <a href="/plswk/assets"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Assets" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-assets">
                     <i class="fas fa-sitemap w-5 text-xl flex-shrink-0 text-center"></i>
@@ -58,7 +58,7 @@
             }
             @if (DashboardData.Config.Modules?.Telemetry ?? true) {
             <li>
-                <a href="/plswk/TelemetryList"
+                <a href="/plswk/telemetrylist"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Data Points" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-telemetries">
                     <i class="fas fa-table w-5 text-xl flex-shrink-0 text-center"></i>
@@ -69,7 +69,7 @@
             }
             @if (DashboardData.Config.Modules?.Connections ?? true) {
             <li>
-                <a href="/plswk/Connections"
+                <a href="/plswk/connections"
                        class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewData["Title"]?.ToString() == "Connections" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-connections">
                     <i class="fas fa-network-wired w-5 text-xl flex-shrink-0 text-center"></i>
@@ -80,8 +80,8 @@
             }
             @if (DashboardData.Config.Modules?.Alarms ?? true) {
             <li>
-                <a href="/plswk/Alarms"
-                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Alarms" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                <a href="/plswk/alarms"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/alarms" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-alarms">
                     <i class="fas fa-bell w-5 text-xl flex-shrink-0 text-center"></i>
                     <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
@@ -91,8 +91,8 @@
             }
             @if (DashboardData.Config.Modules?.Logs ?? true) {
             <li>
-                <a href="/plswk/Logs"
-                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Logs" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                <a href="/plswk/logs"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/logs" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-logs">
                     <i class="fas fa-terminal w-5 text-xl flex-shrink-0 text-center"></i>
                     <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"
@@ -102,8 +102,8 @@
             }
             @if (DashboardData.Config.Modules?.Heartbeat ?? true) {
             <li>
-                <a href="/plswk/Heartbeat"
-                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/Heartbeat" ? "!bg-sky-400/10 !text-sky-400" : "")"
+                <a href="/plswk/heartbeat"
+                       class="flex items-center py-3 px-[0.85rem] text-slate-400 no-underline rounded-lg transition-all duration-200 font-medium w-full whitespace-nowrap hover:bg-sky-400/10 hover:text-sky-400 @(ViewContext.RouteData.Values["page"]?.ToString() == "/plswk/heartbeat" ? "!bg-sky-400/10 !text-sky-400" : "")"
                        data-testid="nav-heartbeat">
                     <i class="fas fa-heartbeat w-5 text-xl flex-shrink-0 text-center"></i>
                     <span class="nav-label opacity-0 transition-opacity duration-200 ml-4"

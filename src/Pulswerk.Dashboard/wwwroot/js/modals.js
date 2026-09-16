@@ -471,7 +471,7 @@ async function loadPropsForDetails(key) {
     const renderInternalRows = () => {
         if (!body)
             return;
-        const crudUrl = `/plswk/TelemetryCrud?key=${encodeURIComponent(key)}`;
+        const crudUrl = `/plswk/telemetrycrud?key=${encodeURIComponent(key)}`;
         const keyRow = document.createElement('tr');
         keyRow.innerHTML = `<td class="p-2 border-b border-white/5 font-semibold text-slate-400">Internal Key</td><td class="p-2 border-b border-white/5 font-mono text-slate-100 break-all">${escapeHtml(key)}</td>`;
         body.appendChild(keyRow);

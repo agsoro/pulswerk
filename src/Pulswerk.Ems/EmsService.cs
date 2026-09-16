@@ -772,6 +772,7 @@ namespace Pulswerk.Ems
             "grid_import_24h",
             "grid_export_24h",
             "pv_generation_24h",
+            "pv_consumption_24h",
             "battery_charged_24h",
             "battery_discharged_24h",
             "uncontrollable_24h",
@@ -1219,14 +1220,4 @@ namespace Pulswerk.Ems
     }
 
     public record EmsLogEntry(DateTime Timestamp, string Message, string State);
-
-    public record TrajectoryLogEntry(DateTime Timestamp, string Message, string State) : EmsLogEntry(Timestamp, Message, State);
-
-    /// <summary>
-    /// Backward-compatibility shim mapping legacy TrajectoryService calls to EmsService.
-    /// </summary>
-    public static class TrajectoryService
-    {
-        public static EmsService Instance => EmsService.Instance;
-    }
 }

@@ -58,8 +58,8 @@ namespace Pulswerk.Dashboard.Controllers
                 }
             }
 
-            // 3. Gate EMS / Trajectory endpoints
-            if (path.Contains("/api/trajectory", StringComparison.OrdinalIgnoreCase))
+            // 3. Gate EMS endpoints
+            if (path.Contains("/api/ems", StringComparison.OrdinalIgnoreCase))
             {
                 if (!modules.Ems || !DashboardAuth.CanAccessEms(HttpContext, _data.Config.Server))
                 {
@@ -1616,7 +1616,6 @@ namespace Pulswerk.Dashboard.Controllers
         // ── Energy Management System (EMS) Endpoints ─────────────────────────
 
         [HttpGet("ems/status")]
-        [HttpGet("trajectory/status")]
         public IActionResult GetEmsStatus()
         {
             var svc = EmsService.Instance;
@@ -1726,7 +1725,6 @@ namespace Pulswerk.Dashboard.Controllers
         }
 
         [HttpPost("ems/config")]
-        [HttpPost("trajectory/config")]
         public IActionResult UpdateEmsConfig([FromBody] EmsConfigDto req)
         {
             var serverCfg = _data.Config.Server;
@@ -1768,7 +1766,6 @@ namespace Pulswerk.Dashboard.Controllers
         }
 
         [HttpPost("ems/consumers")]
-        [HttpPost("trajectory/consumers")]
         public IActionResult AddOrUpdateConsumer([FromBody] EnergyConsumer consumer)
         {
             var serverCfg = _data.Config.Server;
@@ -1790,7 +1787,6 @@ namespace Pulswerk.Dashboard.Controllers
         }
 
         [HttpDelete("ems/consumers/{id}")]
-        [HttpDelete("trajectory/consumers/{id}")]
         public IActionResult DeleteConsumer(string id)
         {
             var serverCfg = _data.Config.Server;

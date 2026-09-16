@@ -59,6 +59,8 @@ interface EnergySystemSnapshot {
     batteryMaxDischargeKw?: number;
     isBatteryCharging: boolean;
     totalSurplusAvailableKw: number;
+    totalConsumptionKw?: number;
+    autarkyPct?: number;
     totalBaseLoadKw?: number;
     totalOptionalLoadKw?: number;
     totalReclaimedPowerKw?: number;
@@ -74,6 +76,8 @@ interface EnergySystemSnapshot {
     uncontrollable24hKwh?: number;
     totalSurplus24hKwh?: number;
     totalControllable24hKwh?: number;
+    totalConsumption24hKwh?: number;
+    autarky24hPct?: number;
 
     consumers: EnergyConsumer[];
     sources: EnergySourcesConfig;
@@ -113,10 +117,7 @@ export function EmsPage() {
 
     const fetchSnapshot = async () => {
         try {
-            let res = await fetch('/plswk/api/ems/status');
-            if (!res.ok) {
-                res = await fetch('/plswk/api/trajectory/status');
-            }
+            const res = await fetch('/plswk/api/ems/status');
             if (res.ok) {
                 const data: EnergySystemSnapshot = await res.json();
                 if (data) {
@@ -329,6 +330,12 @@ export function EmsPage() {
 
     const isSurplusActive = (snapshot?.totalSurplusAvailableKw ?? 0) > 0.1;
     const hasReclaimedPower = (snapshot?.totalReclaimedPowerKw ?? 0) > 0.1;
+
+    // Autarky color: continuous gradient red (0%) → amber (~50%) → dark green (100%).
+    // HSL hue interpolation 0° (red) → 145° (dark green), lightness 45% for readability.
+    const autarkyPct = Math.min(100, Math.max(0, snapshot?.autarkyPct ?? 0));
+    const autarkyHue = (autarkyPct / 100) * 145;
+    const autarkyColor = `hsl(${autarkyHue.toFixed(0)}, 75%, 45%)`;
 
     return (
         <div class="max-w-7xl mx-auto px-4 py-8 space-y-8">
@@ -698,6 +705,40 @@ export function EmsPage() {
                             <span class="text-slate-400">{t('ems_24h_surplus')}:</span>
                             <span class="font-bold text-cyan-300">{snapshot?.totalSurplus24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
                             <i class="fas fa-arrow-right text-[0.55rem] text-cyan-400"></i>
+                        </div>
+                    </div>
+
+                    {/* Autarky Card — continuous red→dark-green gradient over 0-100% */}
+                    <div class="w-full bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 text-center shadow-lg transition-all">
+                        <div class="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                            {t('ems_autarky')}
+                        </div>
+                        <div
+                            onClick={() => handleOpenTelemetryDetails('ems_autarky')}
+                            class="text-2xl font-black cursor-pointer transition-colors inline-block"
+                            style={{ color: autarkyColor }}
+                            title="View telemetry details: ems_autarky"
+                        >
+                            {(snapshot?.autarkyPct ?? 0).toFixed(0)}%
+                        </div>
+                        {/* Autarky progress bar — gradient track, fill up to current value */}
+                        <div
+                            class="w-full rounded-full h-1.5 mt-2 overflow-hidden"
+                            style={{ background: 'linear-gradient(to right, #ef4444, #f59e0b, #166534)' }}
+                        >
+                            <div
+                                class="h-full rounded-full bg-slate-900/85 transition-all duration-500"
+                                style={{ width: `${100 - Math.min(100, Math.max(0, snapshot?.autarkyPct ?? 0))}%`, marginLeft: 'auto' }}
+                            ></div>
+                        </div>
+                        <div
+                            onClick={() => handleOpenTelemetryDetails('ems_autarky_24h')}
+                            class="text-[0.65rem] text-slate-400 font-mono mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors"
+                            title="View telemetry details: ems_autarky_24h"
+                        >
+                            <span>{t('ems_autarky_24h')}:</span>
+                            <span class="font-bold text-slate-200">{(snapshot?.autarky24hPct ?? 0).toFixed(0)}%</span>
+                            <i class="fas fa-arrow-right text-[0.55rem] text-slate-500"></i>
                         </div>
                     </div>
 

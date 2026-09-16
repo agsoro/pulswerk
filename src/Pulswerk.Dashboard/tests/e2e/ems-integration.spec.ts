@@ -1,10 +1,10 @@
 import { test, expect } from './fixtures';
 
-test.describe('EMS Trajectory E2E Tests', () => {
+test.describe('EMS E2E Tests', () => {
 
     test.beforeEach(async ({ page }) => {
-        // Mock /api/trajectory/status
-        await page.route('**/api/trajectory/status', async route => {
+        // Mock /api/ems/status
+        await page.route('**/api/ems/status', async route => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -25,8 +25,8 @@ test.describe('EMS Trajectory E2E Tests', () => {
             });
         });
 
-        // Mock /api/trajectory/targets
-        await page.route('**/api/trajectory/targets', async route => {
+        // Mock /api/ems/targets
+        await page.route('**/api/ems/targets', async route => {
             if (route.request().method() === 'GET') {
                 await route.fulfill({
                     status: 200,
@@ -41,8 +41,8 @@ test.describe('EMS Trajectory E2E Tests', () => {
             }
         });
 
-        // Mock /api/trajectory/targets/15min
-        await page.route('**/api/trajectory/targets/15min', async route => {
+        // Mock /api/ems/targets/15min
+        await page.route('**/api/ems/targets/15min', async route => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -63,8 +63,8 @@ test.describe('EMS Trajectory E2E Tests', () => {
             });
         });
 
-        // Mock /api/trajectory/config POST
-        await page.route('**/api/trajectory/config', async route => {
+        // Mock /api/ems/config POST
+        await page.route('**/api/ems/config', async route => {
             if (route.request().method() === 'POST') {
                 await route.fulfill({
                     status: 200,
@@ -77,12 +77,12 @@ test.describe('EMS Trajectory E2E Tests', () => {
         });
     });
 
-    test('Trajectory Page Visualizer', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+    test('EMS Page Visualizer', async ({ page }) => {
+        await page.goto('/plswk/ems');
 
         const title = page.locator('[data-testid="page-title"]');
         await expect(title).toBeVisible();
-        await expect(title).toHaveText(/Trajectory|Verbrauchspfad/);
+        await expect(title).toHaveText(/EMS|Verbrauchspfad/);
 
         // Check if main metrics cards are visible
         await expect(page.locator('text=Control Status')).toBeVisible();
@@ -97,7 +97,7 @@ test.describe('EMS Trajectory E2E Tests', () => {
     });
 
     test('Status cards show correct metric values and styling', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
         await expect(page.locator('text=Control Status')).toBeVisible();
 
         // Control State: "Normal" with green styling
@@ -116,13 +116,13 @@ test.describe('EMS Trajectory E2E Tests', () => {
         const actualCard = page.locator('.glass').filter({ hasText: 'Actual Consumption' });
         await expect(actualCard.locator('.text-2xl')).toContainText('232.1 kWh');
 
-        // Target Trajectory: 240.5 kWh
-        const targetCard = page.locator('.glass').filter({ hasText: 'Target Trajectory' });
+        // Target EMS: 240.5 kWh
+        const targetCard = page.locator('.glass').filter({ hasText: 'Target EMS' });
         await expect(targetCard.locator('.text-2xl')).toContainText('240.5 kWh');
     });
 
     test('Curtailment targets table shows all configured targets', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
         await expect(page.locator('text=wallbox-sim-01_max_charge_current')).toBeVisible();
 
         // Both targets should be listed
@@ -146,7 +146,7 @@ test.describe('EMS Trajectory E2E Tests', () => {
     });
 
     test('Add curtailment target form has 4 input fields', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
         await expect(page.locator('text=Control Status')).toBeVisible();
 
         // Find the add form (has a placeholder with "wallbox-01")
@@ -168,7 +168,7 @@ test.describe('EMS Trajectory E2E Tests', () => {
     });
 
     test('Control settings panel shows config form with current values', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
         await expect(page.locator('text=Control Status')).toBeVisible();
 
         // Find the settings section
@@ -192,7 +192,7 @@ test.describe('EMS Trajectory E2E Tests', () => {
     });
 
     test('Intervention logs show entries with color-coded states', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
 
         // Wait for logs to render
         await expect(page.locator('text=Intervention Logs')).toBeVisible();
@@ -216,14 +216,14 @@ test.describe('EMS Trajectory E2E Tests', () => {
     });
 
     test('Chart area and CSV upload button are rendered', async ({ page }) => {
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
         await expect(page.locator('text=Control Status')).toBeVisible();
 
         // The chart section should be visible
-        await expect(page.locator('text=Trajectory Curve (Current Month)')).toBeVisible();
+        await expect(page.locator('text=EMS Curve (Current Month)')).toBeVisible();
 
         // The CSV upload button should be present
-        await expect(page.locator('text=Upload Trajectory Target Profile')).toBeVisible();
+        await expect(page.locator('text=Upload EMS Target Profile')).toBeVisible();
 
         // The file input for CSV is hidden but should exist in the DOM
         const fileInput = page.locator('input[type="file"][accept=".csv"]');

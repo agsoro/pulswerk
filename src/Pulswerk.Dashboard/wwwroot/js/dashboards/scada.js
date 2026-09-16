@@ -451,7 +451,7 @@ async function showScadaPopup(key, triggerEl) {
         }
     }
     const meta = allKeys.find(k => k.key === key) || { key, name: key }, icon = typeof getPointIcon === 'function' ? getPointIcon(meta.type || '') : '<i class="fas fa-microchip"></i>';
-    const pp = meta.parentPath || [], pathHtml = pp.map((p, i) => `<a href="/plswk/Assets?node=${p.id}" style="color:inherit;text-decoration:none">${esc(p.name)}</a>${i < pp.length - 1 ? '<i class="fas fa-chevron-right" style="margin:0 0.4rem;font-size:0.55rem;opacity:0.4"></i>' : ''}`).join('');
+    const pp = meta.parentPath || [], pathHtml = pp.map((p, i) => `<a href="/plswk/assets?node=${p.id}" style="color:inherit;text-decoration:none">${esc(p.name)}</a>${i < pp.length - 1 ? '<i class="fas fa-chevron-right" style="margin:0 0.4rem;font-size:0.55rem;opacity:0.4"></i>' : ''}`).join('');
     let currentVal = '---';
     try {
         const data = await DashboardService.fetchLatestValues(key);

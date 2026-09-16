@@ -119,7 +119,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Billing Page Tabs and Invoices', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         const title = page.locator('[data-testid="page-title"]');
         await expect(title).toBeVisible();
@@ -154,7 +154,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Tariff Pricing tab displays current tariffs with form fields', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         // Switch to Tariff tab
         const tariffTab = page.locator('button:has-text("Tariff")');
@@ -176,7 +176,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Invoice detail modal opens and shows line items', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         // Wait for invoices to load
         await expect(page.locator('text=Alice Miller')).toBeVisible();
@@ -216,7 +216,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Invoice list shows both EV Charging and Tenant Meter types', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         // Wait for both invoice rows
         await expect(page.locator('text=Alice Miller')).toBeVisible();
@@ -236,7 +236,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('RFID tab shows registration form with required fields', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         const rfidTab = page.locator('button:has-text("RFID Cards")');
         await rfidTab.click();
@@ -255,7 +255,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Tenants tab shows add tenant form with 3 required fields', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         const tenantsTab = page.locator('button:has-text("Metered Tenants")');
         await tenantsTab.click();
@@ -275,7 +275,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Invoice list shows replacement badge for meters replaced during period', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         // Wait for invoices to load
         await expect(page.locator('text=Alice Miller')).toBeVisible();
@@ -292,7 +292,7 @@ test.describe('Billing E2E Tests', () => {
     });
 
     test('Tenant meter replacement panel expands and lists recorded events', async ({ page }) => {
-        await page.goto('/plswk/Billing');
+        await page.goto('/plswk/billing');
 
         // Navigate to Tenants tab
         const tenantsTab = page.locator('button:has-text("Metered Tenants")');

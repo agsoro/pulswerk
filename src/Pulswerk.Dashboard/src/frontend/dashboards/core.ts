@@ -49,7 +49,7 @@ export async function loadList(): Promise<void> {
         const wc = d.widgets?.length || 0;
         const ago = timeAgo(d.updatedAt);
         const isFav = favs.includes(d.id);
-        return `<div class="dash-card" onclick="location.href='/plswk/Dashboards/${d.id}/${slugify(d.name)}'">
+        return `<div class="dash-card" onclick="location.href='/plswk/dashboards/${d.id}/${slugify(d.name)}'">
             <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.75rem">
                 <div style="width:36px;height:36px;border-radius:10px;background:rgba(56,189,248,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0">
                     <i class="fas fa-th-large" style="color:#38bdf8;font-size:1rem"></i>
@@ -63,7 +63,7 @@ export async function loadList(): Promise<void> {
             <div class="dash-card-meta">
                 <span><i class="fas fa-puzzle-piece" style="margin-right:0.3rem"></i>${wc} widget${wc !== 1 ? 's' : ''} · ${ago}</span>
                 <div class="dash-card-actions" onclick="event.stopPropagation()" style="display:${(window as any).pwCanEditDashboard ? 'flex' : 'none'}">
-                    <button class="btn-ghost btn-sm" onclick="location.href='/plswk/Dashboards/${d.id}/${slugify(d.name)}?edit=true'"><i class="fas fa-pen"></i></button>
+                    <button class="btn-ghost btn-sm" onclick="location.href='/plswk/dashboards/${d.id}/${slugify(d.name)}?edit=true'"><i class="fas fa-pen"></i></button>
                     <button class="btn-ghost btn-sm btn-danger" onclick="deleteDash('${d.id}')"><i class="fas fa-trash"></i></button>
                 </div>
             </div>
@@ -96,7 +96,7 @@ export async function confirmCreate(): Promise<void> {
     if (!name) return;
     const desc = (document.getElementById('newDashDesc') as HTMLInputElement).value;
     const d = await DashboardService.createDashboard(name, desc);
-    location.href = `/plswk/Dashboards/${d.id}/${slugify(d.name)}?edit=true`;
+    location.href = `/plswk/dashboards/${d.id}/${slugify(d.name)}?edit=true`;
 }
 export async function deleteDash(id: string): Promise<void> {
     if (!await window.pwConfirm('Delete this dashboard?', 'Delete Dashboard')) return;
@@ -221,7 +221,7 @@ export function enterEditMode(): void {
     });
 }
 
-export function cancelEdit(): void { location.href = `/plswk/Dashboards/${DashboardStore.dashboard!.id}/${slugify(DashboardStore.dashboard!.name)}`; }
+export function cancelEdit(): void { location.href = `/plswk/dashboards/${DashboardStore.dashboard!.id}/${slugify(DashboardStore.dashboard!.name)}`; }
 
 export async function saveDashboard(): Promise<void> {
     DashboardStore.dashboard!.name = (document.getElementById('dashTitle') as HTMLInputElement).value.trim() || DashboardStore.dashboard!.name;
@@ -240,7 +240,7 @@ export async function saveDashboard(): Promise<void> {
     });
     // Note: scada-point positions are already synced to config by the drag handler's onUp
     await DashboardService.saveDashboard(DashboardStore.dashboard);
-    location.href = `/plswk/Dashboards/${DashboardStore.dashboard!.id}/${slugify(DashboardStore.dashboard!.name)}`;
+    location.href = `/plswk/dashboards/${DashboardStore.dashboard!.id}/${slugify(DashboardStore.dashboard!.name)}`;
 }
 
 // ── POLLING ──────────────────────────────────────────────────────────────

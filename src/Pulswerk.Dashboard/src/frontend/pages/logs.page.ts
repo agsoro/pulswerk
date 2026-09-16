@@ -11,7 +11,7 @@ export function initLogsPage(): void {
         const savedPref = localStorage.getItem('logLevelPref') || 'all';
 
         if (!urlLevel) {
-            window.location.replace('/plswk/Logs?level=' + savedPref);
+            window.location.replace('/plswk/logs?level=' + savedPref);
             return;
         }
 
@@ -24,7 +24,7 @@ export function initLogsPage(): void {
         select.addEventListener('change', () => {
             const level = select.value;
             localStorage.setItem('logLevelPref', level);
-            window.location.href = '/plswk/Logs?level=' + level;
+            window.location.href = '/plswk/logs?level=' + level;
         });
     }
 }

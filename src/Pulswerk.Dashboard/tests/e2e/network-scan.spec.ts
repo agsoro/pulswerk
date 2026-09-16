@@ -160,7 +160,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
     // ── Scan modal ────────────────────────────────────────────────────────
 
     test('Discover Devices button opens scan modal', async ({ page }) => {
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
 
         // Wait for the config page to render
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
@@ -186,7 +186,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Discover Devices/i }).click();
@@ -216,7 +216,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Discover Devices/i }).click();
@@ -233,7 +233,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Discover Devices/i }).click();
@@ -250,7 +250,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         // Open scan modal and run scan
@@ -278,7 +278,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Discover Devices/i }).click();
@@ -299,7 +299,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
     // ── Per-type connection editor ─────────────────────────────────────────
 
     test('Connection editor renders Modbus TCP fields', async ({ page }) => {
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         // Click the "Add" button in the Connections panel (first one)
@@ -321,7 +321,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
     });
 
     test('Connection editor switches fields when type changes to BACnet/IP', async ({ page }) => {
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Add/i }).first().click();
@@ -340,7 +340,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
     });
 
     test('Connection editor renders KNX secure fields for knx-ip type', async ({ page }) => {
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Add/i }).first().click();
@@ -370,7 +370,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         // Click the "Add Device" button in the Devices panel
@@ -407,7 +407,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Add Device/i }).click();
@@ -442,7 +442,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         await page.getByRole('button', { name: /Add Device/i }).click();
@@ -473,7 +473,7 @@ test.describe('Network Scan & Per-Type Config Editors', () => {
             });
         });
 
-        await page.goto('/plswk/Connections?conn=config');
+        await page.goto('/plswk/connections?conn=config');
         await expect(page.getByText('System Configuration')).toBeVisible({ timeout: 15000 });
 
         // Wait a moment for the fetch to complete

@@ -80,7 +80,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
     });
 
     test('Wallboxes Page UI and Commands', async ({ page }) => {
-        await page.goto('/plswk/Wallboxes');
+        await page.goto('/plswk/wallboxes');
         
         // Wait for page header / title
         const title = page.locator('[data-testid="page-title"]');
@@ -119,7 +119,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
     });
 
     test('Summary cards compute correct aggregate values', async ({ page }) => {
-        await page.goto('/plswk/Wallboxes');
+        await page.goto('/plswk/wallboxes');
         await expect(page.locator('[data-testid="page-title"]')).toBeVisible();
 
         // Wait for cards to render
@@ -141,7 +141,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
     });
 
     test('Force power limit can be edited and persisted', async ({ page }) => {
-        await page.goto('/plswk/Wallboxes');
+        await page.goto('/plswk/wallboxes');
         const fpCard = page.locator('[data-testid="force-power-card"]');
         await expect(fpCard).toBeVisible();
 
@@ -162,7 +162,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
     });
 
     test('Wallbox cards show correct per-unit data and status indicators', async ({ page }) => {
-        await page.goto('/plswk/Wallboxes');
+        await page.goto('/plswk/wallboxes');
         await expect(page.locator('text=Garage Wallbox 1')).toBeVisible();
 
         // Verify the "Available" wallbox card
@@ -186,7 +186,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
     });
 
     test('Disconnected wallbox disables action buttons', async ({ page }) => {
-        await page.goto('/plswk/Wallboxes');
+        await page.goto('/plswk/wallboxes');
         await expect(page.locator('text=Outdoor Charger 3')).toBeVisible();
 
         const offlineCard = page.locator('.bg-slate-800').filter({ hasText: 'Outdoor Charger 3' });
@@ -203,7 +203,7 @@ test.describe('OCPP Wallboxes E2E Tests', () => {
     });
 
     test('Start Charge modal shows RFID dropdown with registered cards', async ({ page }) => {
-        await page.goto('/plswk/Wallboxes');
+        await page.goto('/plswk/wallboxes');
         await expect(page.locator('text=Garage Wallbox 1')).toBeVisible();
 
         // Click Start Charge on the available wallbox

@@ -12,7 +12,7 @@ test.describe('Dashboard Interactions and Component States', () => {
   // 1. Timewindow Selector Mode Switches (Realtime vs History)
   test('Timewindow Dropdown Modes', async ({ page }) => {
     // Navigate to dashboards list
-    await page.goto('/plswk/Dashboards');
+    await page.goto('/plswk/dashboards');
     
     // Check if we need to click a dashboard card first to load the dashboard shell
     const cards = page.locator('.dash-card');
@@ -69,7 +69,7 @@ test.describe('Dashboard Interactions and Component States', () => {
 
   // 2. Edit Modal Dynamic Form Modes (Numeric, Enum, Boolean)
   test('Edit Modal Input Variants', async ({ page }) => {
-    await page.goto(`${ADMIN_PROXY_URL}/plswk/Assets`);
+    await page.goto(`${ADMIN_PROXY_URL}/plswk/assets`);
     await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
 
     // A. Test Numeric Stepper Mode
@@ -196,7 +196,7 @@ test.describe('Dashboard Interactions and Component States', () => {
 
   // 3. Asset Tree Collapsing and Expansion
   test('Asset Tree Expansion', async ({ page }) => {
-    await page.goto('/plswk/Assets');
+    await page.goto('/plswk/assets');
     await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
     await page.waitForTimeout(500); // Wait for tree load
 
@@ -223,7 +223,7 @@ test.describe('Dashboard Interactions and Component States', () => {
 
   // 4. Alarm List Filter Chips
   test('Alarm Filter Chip Selections', async ({ page }) => {
-    await page.goto('/plswk/Alarms');
+    await page.goto('/plswk/alarms');
     await page.waitForSelector('[data-testid="page-title"]', { state: 'visible' });
 
     const filterBar = page.locator('[data-testid="alarm-filters"]');
@@ -258,7 +258,7 @@ test.describe('Dashboard Interactions and Component States', () => {
   // 5. Dashboard List and Create Flow
   test('Dashboard List and Create Flow', async ({ page }) => {
     // Navigate to dashboards list via admin auth proxy to get write permissions
-    await page.goto(`${ADMIN_PROXY_URL}/plswk/Dashboards`);
+    await page.goto(`${ADMIN_PROXY_URL}/plswk/dashboards`);
     await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
 
     // Verify that either the cards or empty state is visible
@@ -362,7 +362,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     });
 
     // Navigate to dashboards list via admin proxy (port 5002 has auth headers)
-    await page.goto(`${ADMIN_PROXY_URL}/plswk/Dashboards`);
+    await page.goto(`${ADMIN_PROXY_URL}/plswk/dashboards`);
     await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
 
     // Assert that no request to the telemetries endpoint was made
@@ -417,7 +417,7 @@ test.describe('Dashboard Interactions and Component States', () => {
   // 7. E2E test for drag, resize, and position persistence of dashboard widgets
   test('Dashboard Widget Drag, Resize, and Position Persistence', async ({ page }) => {
     // Navigate to dashboards list
-    await page.goto(`${ADMIN_PROXY_URL}/plswk/Dashboards`);
+    await page.goto(`${ADMIN_PROXY_URL}/plswk/dashboards`);
     await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
 
     // Open create dashboard modal
@@ -550,7 +550,7 @@ test.describe('Dashboard Interactions and Component States', () => {
 
     // Save dashboard
     await page.locator('#btnSave').click();
-    await page.waitForURL(new RegExp(`/plswk/Dashboards/[^/]+`));
+    await page.waitForURL(new RegExp(`/plswk/dashboards/[^/]+`));
     // Wait for view mode to load
     await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
 
@@ -580,7 +580,7 @@ test.describe('Dashboard Interactions and Component States', () => {
   // 8. E2E test for Telemetry Key Picker Dialog Expansion layout and overlay
   test('Telemetry Key Picker Dialog Expansion layout and overlay', async ({ page }) => {
     // Navigate to dashboards list via admin auth proxy to get write permissions
-    await page.goto(`${ADMIN_PROXY_URL}/plswk/Dashboards`);
+    await page.goto(`${ADMIN_PROXY_URL}/plswk/dashboards`);
     await page.waitForSelector('[data-testid="dash-list-mode"]', { state: 'visible' });
 
     // Open create dashboard modal

@@ -174,6 +174,8 @@ export function App() {
         routePath = routePath.slice('/plswk'.length);
     }
     if (!routePath) routePath = '/';
+    // Routes are lowercase; normalize so legacy capitalized URLs still resolve.
+    routePath = routePath.toLowerCase();
 
     let pageComponent = null;
     let pageTitle = 'Home';
@@ -188,37 +190,37 @@ export function App() {
                 slug={dashboardDetailMatch[2] || undefined} 
             />
         );
-    } else if (routePath === '/Dashboards' && user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false) {
+    } else if (routePath === '/dashboards' && user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false) {
         pageTitle = 'Dashboards';
         pageComponent = <DashboardsPage />;
-    } else if (routePath === '/Assets' && user?.modules?.assets !== false && user?.permissions?.canAccessAssets !== false) {
+    } else if (routePath === '/assets' && user?.modules?.assets !== false && user?.permissions?.canAccessAssets !== false) {
         pageTitle = 'Assets';
         pageComponent = <AssetsPage initialNodeId={searchParams.get('node')} />;
-    } else if ((routePath === '/TelemetryList' || routePath === '/AssetsList') && user?.modules?.telemetry !== false && user?.permissions?.canAccessTelemetry !== false) {
+    } else if ((routePath === '/telemetrylist' || routePath === '/assetslist') && user?.modules?.telemetry !== false && user?.permissions?.canAccessTelemetry !== false) {
         pageTitle = 'Data Points';
         pageComponent = <TelemetryListPage />;
-    } else if (routePath === '/Connections' && user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false) {
+    } else if (routePath === '/connections' && user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false) {
         pageTitle = 'Connections';
         pageComponent = <ConnectionsPage initialConnId={searchParams.get('conn')} />;
-    } else if (routePath === '/Alarms' && user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false) {
+    } else if (routePath === '/alarms' && user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false) {
         pageTitle = 'Active Alarms';
         pageComponent = <AlarmsPage />;
-    } else if (routePath === '/Logs' && user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false) {
+    } else if (routePath === '/logs' && user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false) {
         pageTitle = 'System Logs';
         pageComponent = <LogsPage />;
-    } else if (routePath === '/Heartbeat' && user?.modules?.heartbeat !== false && user?.permissions?.canAccessHeartbeat !== false) {
+    } else if (routePath === '/heartbeat' && user?.modules?.heartbeat !== false && user?.permissions?.canAccessHeartbeat !== false) {
         pageTitle = 'System Heartbeat';
         pageComponent = <HeartbeatPage />;
-    } else if (routePath === '/Wallboxes' && user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false) {
+    } else if (routePath === '/wallboxes' && user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false) {
         pageTitle = 'Wallboxes';
         pageComponent = <WallboxesPage />;
-    } else if (routePath === '/Billing' && user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false) {
+    } else if (routePath === '/billing' && user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false) {
         pageTitle = 'Billing';
         pageComponent = <BillingPage />;
-    } else if ((routePath === '/ems' || routePath === '/Trajectory') && user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false) {
+    } else if (routePath === '/ems' && user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false) {
         pageTitle = 'Energy Management';
         pageComponent = <EmsPage />;
-    } else if (routePath === '/TelemetryCrud' && user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false) {
+    } else if (routePath === '/telemetrycrud' && user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false) {
         pageTitle = 'Historical Data';
         pageComponent = <TelemetryCrudPage initialKey={searchParams.get('key')} />;
     } else {
@@ -238,32 +240,32 @@ export function App() {
 
     const navItems = [
         { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home', title: 'Home' },
-        user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false ? { id: 'dashboards', path: '/plswk/Dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards', title: 'Dashboards' } : null,
-        user?.modules?.assets !== false && user?.permissions?.canAccessAssets !== false ? { id: 'assets', path: '/plswk/Assets', icon: 'fa-sitemap', labelKey: 'nav_assets', title: 'Assets' } : null,
-        user?.modules?.telemetry !== false && user?.permissions?.canAccessTelemetry !== false ? { id: 'telemetry', path: '/plswk/TelemetryList', icon: 'fa-table', labelKey: 'nav_telemetries', title: 'Data Points' } : null,
-        user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false ? { id: 'connections', path: '/plswk/Connections', icon: 'fa-network-wired', labelKey: 'nav_connections', title: 'Connections' } : null,
-        user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false ? { id: 'wallboxes', path: '/plswk/Wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes', title: 'Wallboxes' } : null,
-        user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false ? { id: 'billing', path: '/plswk/Billing', icon: 'fa-file-invoice-dollar', labelKey: 'nav_billing', title: 'Billing' } : null,
+        user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false ? { id: 'dashboards', path: '/plswk/dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards', title: 'Dashboards' } : null,
+        user?.modules?.assets !== false && user?.permissions?.canAccessAssets !== false ? { id: 'assets', path: '/plswk/assets', icon: 'fa-sitemap', labelKey: 'nav_assets', title: 'Assets' } : null,
+        user?.modules?.telemetry !== false && user?.permissions?.canAccessTelemetry !== false ? { id: 'telemetry', path: '/plswk/telemetrylist', icon: 'fa-table', labelKey: 'nav_telemetries', title: 'Data Points' } : null,
+        user?.modules?.connections !== false && user?.permissions?.canAccessConnections !== false ? { id: 'connections', path: '/plswk/connections', icon: 'fa-network-wired', labelKey: 'nav_connections', title: 'Connections' } : null,
+        user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false ? { id: 'wallboxes', path: '/plswk/wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes', title: 'Wallboxes' } : null,
+        user?.modules?.billing !== false && user?.permissions?.canAccessBilling !== false ? { id: 'billing', path: '/plswk/billing', icon: 'fa-file-invoice-dollar', labelKey: 'nav_billing', title: 'Billing' } : null,
         user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false ? { id: 'ems', path: '/plswk/ems', icon: 'fa-bolt', labelKey: 'nav_ems', title: 'Energy Management' } : null,
-        user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false ? { id: 'telemetryCrud', path: '/plswk/TelemetryCrud', icon: 'fa-history', labelKey: 'nav_historical_data', title: 'Historical Data' } : null,
-        user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false ? { id: 'alarms', path: '/plswk/Alarms', icon: 'fa-bell', labelKey: 'nav_alarms', title: 'Alarms' } : null,
-        user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false ? { id: 'logs', path: '/plswk/Logs', icon: 'fa-terminal', labelKey: 'nav_logs', title: 'Logs' } : null,
-        user?.modules?.heartbeat !== false && user?.permissions?.canAccessHeartbeat !== false ? { id: 'heartbeat', path: '/plswk/Heartbeat', icon: 'fa-heartbeat', labelKey: 'nav_heartbeat', title: 'Heartbeat' } : null
+        user?.modules?.historicalData !== false && user?.permissions?.canAccessHistoricalData !== false ? { id: 'telemetryCrud', path: '/plswk/telemetrycrud', icon: 'fa-history', labelKey: 'nav_historical_data', title: 'Historical Data' } : null,
+        user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false ? { id: 'alarms', path: '/plswk/alarms', icon: 'fa-bell', labelKey: 'nav_alarms', title: 'Alarms' } : null,
+        user?.modules?.logs !== false && user?.permissions?.canAccessLogs !== false ? { id: 'logs', path: '/plswk/logs', icon: 'fa-terminal', labelKey: 'nav_logs', title: 'Logs' } : null,
+        user?.modules?.heartbeat !== false && user?.permissions?.canAccessHeartbeat !== false ? { id: 'heartbeat', path: '/plswk/heartbeat', icon: 'fa-heartbeat', labelKey: 'nav_heartbeat', title: 'Heartbeat' } : null
     ].filter(Boolean) as any[];
 
     // Determine current navigation tab for active highlighting
     const getActiveNavId = () => {
-        if (path.startsWith('/plswk/Dashboards')) return 'dashboards';
-        if (path.startsWith('/plswk/Assets')) return 'assets';
-        if (path.startsWith('/plswk/TelemetryList') || path.startsWith('/plswk/AssetsList')) return 'telemetry';
-        if (path.startsWith('/plswk/Connections')) return 'connections';
-        if (path.startsWith('/plswk/Wallboxes')) return 'wallboxes';
-        if (path.startsWith('/plswk/Billing')) return 'billing';
-        if (path.startsWith('/plswk/ems') || path.startsWith('/plswk/Trajectory')) return 'ems';
-        if (path.startsWith('/plswk/TelemetryCrud')) return 'telemetryCrud';
-        if (path.startsWith('/plswk/Alarms')) return 'alarms';
-        if (path.startsWith('/plswk/Logs')) return 'logs';
-        if (path.startsWith('/plswk/Heartbeat')) return 'heartbeat';
+        if (path.startsWith('/plswk/dashboards')) return 'dashboards';
+        if (path.startsWith('/plswk/assets')) return 'assets';
+        if (path.startsWith('/plswk/telemetrylist') || path.startsWith('/plswk/assetslist')) return 'telemetry';
+        if (path.startsWith('/plswk/connections')) return 'connections';
+        if (path.startsWith('/plswk/wallboxes')) return 'wallboxes';
+        if (path.startsWith('/plswk/billing')) return 'billing';
+        if (path.startsWith('/plswk/ems')) return 'ems';
+        if (path.startsWith('/plswk/telemetrycrud')) return 'telemetryCrud';
+        if (path.startsWith('/plswk/alarms')) return 'alarms';
+        if (path.startsWith('/plswk/logs')) return 'logs';
+        if (path.startsWith('/plswk/heartbeat')) return 'heartbeat';
         return 'home';
     };
 
@@ -425,7 +427,7 @@ export function App() {
                              pageTitle === 'System Logs' ? t('nav_logs') :
                              pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
                              pageTitle === 'Billing' ? t('nav_billing') :
-                             (pageTitle === 'Energy Management' || pageTitle === 'Trajectory') ? t('nav_ems') :
+                             pageTitle === 'Energy Management' ? t('nav_ems') :
                              pageTitle === 'Historical Data' ? t('nav_historical_data') :
                              pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle}
                         </span>
@@ -462,7 +464,7 @@ export function App() {
                          pageTitle === 'System Logs' ? t('nav_logs') :
                          pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
                          pageTitle === 'Billing' ? t('nav_billing') :
-                         (pageTitle === 'Energy Management' || pageTitle === 'Trajectory') ? t('nav_ems') :
+                         pageTitle === 'Energy Management' ? t('nav_ems') :
                          pageTitle === 'Historical Data' ? t('nav_historical_data') :
                          pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle}
                     </h1>
@@ -478,13 +480,13 @@ export function App() {
                 {[
                     { id: 'home', path: '/plswk/', icon: 'fa-home', labelKey: 'nav_home' },
                     user?.modules?.wallbox !== false && user?.permissions?.canAccessWallbox !== false
-                        ? { id: 'wallboxes', path: '/plswk/Wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes' }
+                        ? { id: 'wallboxes', path: '/plswk/wallboxes', icon: 'fa-charging-station', labelKey: 'nav_wallboxes' }
                         : null,
                     user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false
-                        ? { id: 'dashboards', path: '/plswk/Dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards' }
+                        ? { id: 'dashboards', path: '/plswk/dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards' }
                         : null,
                     user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false
-                        ? { id: 'alarms', path: '/plswk/Alarms', icon: 'fa-bell', labelKey: 'nav_alarms' }
+                        ? { id: 'alarms', path: '/plswk/alarms', icon: 'fa-bell', labelKey: 'nav_alarms' }
                         : null
                 ].filter(Boolean).map((item: any) => {
                     const isActive = activeNavId === item.id;

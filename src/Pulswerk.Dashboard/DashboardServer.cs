@@ -272,9 +272,9 @@ namespace Pulswerk.Dashboard
                 if (path != null)
                 {
                     // Redirect legacy /plswk/AssetsList to TelemetryList
-                    if (path.Equals("/plswk/AssetsList", StringComparison.OrdinalIgnoreCase))
+                    if (path.Equals("/plswk/assetslist", StringComparison.OrdinalIgnoreCase))
                     {
-                        var dest = "/plswk/TelemetryList" + ctx.Request.QueryString.Value;
+                        var dest = "/plswk/telemetrylist" + ctx.Request.QueryString.Value;
                         ctx.Response.Redirect(dest, permanent: true);
                         return;
                     }
@@ -296,13 +296,14 @@ namespace Pulswerk.Dashboard
                         {
                             if (path.Equals(page, StringComparison.OrdinalIgnoreCase))
                             {
+                                // Redirect legacy capitalized pages to their lowercase SPA route.
                                 if (page.Equals("/AssetsList", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    target = "/plswk/TelemetryList";
+                                    target = "/plswk/telemetrylist";
                                 }
                                 else
                                 {
-                                    target = "/plswk" + page;
+                                    target = "/plswk" + page.ToLowerInvariant();
                                 }
                                 break;
                             }

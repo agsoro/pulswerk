@@ -156,7 +156,7 @@ test.describe('KNX IP Secure & Tunneling E2E Tests', () => {
     });
 
     test('KNX Connection details and device listing', async ({ page }) => {
-        await page.goto('/plswk/Connections');
+        await page.goto('/plswk/connections');
         
         // Wait for connection list to render
         const connCard = page.locator('text=KNX Test Gateway');
@@ -174,7 +174,7 @@ test.describe('KNX IP Secure & Tunneling E2E Tests', () => {
     });
 
     test('KNX Asset Tree auto-discovered XML points and write controls', async ({ page }) => {
-        await page.goto('/plswk/Assets');
+        await page.goto('/plswk/assets');
 
         // Check parent folder Building A and expand it
         const folderA = page.locator('.tree-row').filter({ hasText: /^Building A$/ });

@@ -65,7 +65,7 @@ export function SingleValueWidget({ widgetId, keyName, allKeysMeta }: SingleValu
             <div class="sv-card-path">
                 {pp.length > 0 ? pp.map((p: any, i: number) => (
                     <span key={p.id}>
-                        <a href={`/plswk/Assets?node=${p.id}`} style={{ color: 'inherit', textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
+                        <a href={`/plswk/assets?node=${p.id}`} style={{ color: 'inherit', textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
                             {p.name}
                         </a>
                         {i < pp.length - 1 && <i class="fas fa-chevron-right" style={{ margin: '0 0.4rem', fontSize: '0.55rem', opacity: 0.4 }}></i>}

@@ -152,18 +152,18 @@ test.describe('Mobile View & Touch Navigation Audits', () => {
     await expect(backdrop).toBeVisible();
     await expect(drawer).toBeVisible();
 
-    // Check that drawer contains Trajectory link
-    const trajectoryLink = drawer.locator('a[href="/plswk/Trajectory"]');
-    await expect(trajectoryLink).toBeVisible();
+    // Check that drawer contains EMS link
+    const emsLink = drawer.locator('a[href="/plswk/ems"]');
+    await expect(emsLink).toBeVisible();
 
-    // Clicking Trajectory navigates to Trajectory page and closes drawer
-    await trajectoryLink.click();
-    await page.waitForURL('**/plswk/Trajectory');
+    // Clicking EMS navigates to EMS page and closes drawer
+    await emsLink.click();
+    await page.waitForURL('**/plswk/ems');
     await expect(backdrop).toBeHidden();
   });
 
   test('Wallbox mobile dashboard displays 2x2 glance cards and touch-optimized start sheet', async ({ page }) => {
-    await page.goto('/plswk/Wallboxes');
+    await page.goto('/plswk/wallboxes');
     await page.waitForLoadState('domcontentloaded');
 
     // Check that Wallbox page rendered
@@ -204,7 +204,7 @@ test.describe('Mobile View & Touch Navigation Audits', () => {
   });
 
   test('Alarms page renders horizontal scrollable chips and mobile-friendly cards', async ({ page }) => {
-    await page.goto('/plswk/Alarms');
+    await page.goto('/plswk/alarms');
     await page.waitForLoadState('domcontentloaded');
 
     // Check alarm filter chips

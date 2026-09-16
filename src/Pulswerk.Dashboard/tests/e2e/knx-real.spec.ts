@@ -8,7 +8,7 @@ test.describe('KNX Real E2E Tests (Non-Mocked)', () => {
 
     test('KNX Connection details and live device listing', async ({ page }) => {
         // Go to the Connections page via the auth proxy as admin
-        await page.goto(`${ADMIN_PROXY_URL}/plswk/Connections`);
+        await page.goto(`${ADMIN_PROXY_URL}/plswk/connections`);
         
         // Wait for connection list to render and check that KNX Test Gateway is visible
         const connCard = page.locator('text=KNX Test Gateway');
@@ -41,7 +41,7 @@ test.describe('KNX Real E2E Tests (Non-Mocked)', () => {
 
     test('KNX Assets Tree live values and write control', async ({ page }) => {
         // Go to Assets page
-        await page.goto(`${ADMIN_PROXY_URL}/plswk/Assets`);
+        await page.goto(`${ADMIN_PROXY_URL}/plswk/assets`);
 
         // Check Building A and expand it
         const folderA = page.locator('.tree-row').filter({ hasText: /^Building A$/ }).first();

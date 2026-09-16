@@ -26,7 +26,7 @@ test.describe('Telemetry CRUD & Module Gating E2E Tests', () => {
     });
 
     test('Telemetry CRUD Page UI elements and telemetry key selection', async ({ page }) => {
-        await page.goto('/plswk/TelemetryCrud');
+        await page.goto('/plswk/telemetrycrud');
 
         const title = page.locator('[data-testid="page-title"]');
         await expect(title).toBeVisible();
@@ -109,12 +109,12 @@ test.describe('Telemetry CRUD & Module Gating E2E Tests', () => {
 
         // Wait for the Preact app to finish re-rendering after identity loads
         await page.waitForFunction(() => {
-            const trajectoryLink = document.querySelector('[data-testid="nav-trajectory"]');
-            return !trajectoryLink;
+            const emsLink = document.querySelector('[data-testid="nav-ems"]');
+            return !emsLink;
         }, { timeout: 10000 });
 
-        // Verify Trajectory (EMS) and Billing (disabled) links are hidden
-        const emsLink = page.locator('[data-testid="nav-trajectory"]');
+        // Verify EMS and Billing (disabled) links are hidden
+        const emsLink = page.locator('[data-testid="nav-ems"]');
         await expect(emsLink).toBeHidden();
 
         const billingLink = page.locator('[data-testid="nav-billing"]');
@@ -125,7 +125,7 @@ test.describe('Telemetry CRUD & Module Gating E2E Tests', () => {
         await expect(logsLink).toBeHidden();
 
         // Try navigating to a disabled page, it should fall back to Home
-        await page.goto('/plswk/Trajectory');
+        await page.goto('/plswk/ems');
         const pageTitle = page.locator('[data-testid="page-title"]');
         await expect(pageTitle).toHaveText(/Home/i);
     });
