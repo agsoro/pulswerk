@@ -594,70 +594,9 @@ namespace Pulswerk.Ems
                 }
             }
 
-            // Default fallback consumers if list is empty or had only corrupted entries: realistic fleet of controllable loads
-            // Uncontrollable base loads are calculated dynamically from the site energy balance by default.
-            if (Consumers.Count == 0)
-            {
-                Consumers = new List<EnergyConsumer>
-                {
-                    new EnergyConsumer
-                    {
-                        Id = "wb-fleet-01",
-                        Name = "Garage Wallbox 1 (11 kW)",
-                        BasePowerKw = 0.0,
-                        HasOptionalTier = true,
-                        MaxOptionalKw = 11.0,
-                        MinOptionalKw = 1.38,
-                        StandbyOptionalKw = 0.0,
-                        ActualPowerKey = "wallbox-sim-01_power",
-                        ForcePowerKey = "wallbox-sim-01_force_power",
-                        Priority = 1,
-                        MaxPowerKw = 11.0
-                    },
-                    new EnergyConsumer
-                    {
-                        Id = "wb-visitor-02",
-                        Name = "Garage Wallbox 2 (11 kW)",
-                        BasePowerKw = 0.0,
-                        HasOptionalTier = true,
-                        MaxOptionalKw = 11.0,
-                        MinOptionalKw = 1.38,
-                        StandbyOptionalKw = 0.0,
-                        ActualPowerKey = "wallbox-sim-02_power",
-                        ForcePowerKey = "wallbox-sim-02_force_power",
-                        Priority = 2,
-                        MaxPowerKw = 11.0
-                    },
-                    new EnergyConsumer
-                    {
-                        Id = "hvac-heat-pump",
-                        Name = "HVAC Heat Pump Main",
-                        BasePowerKw = 2.2,
-                        HasOptionalTier = true,
-                        MaxOptionalKw = 5.0,
-                        MinOptionalKw = 1.0,
-                        StandbyOptionalKw = 0.0,
-                        ActualPowerKey = "meter-hvac_power",
-                        ForcePowerKey = "",
-                        Priority = 3,
-                        MaxPowerKw = 7.5
-                    },
-                    new EnergyConsumer
-                    {
-                        Id = "heatpump-annex",
-                        Name = "Annex Heat Pump",
-                        BasePowerKw = 1.5,
-                        HasOptionalTier = true,
-                        MaxOptionalKw = 3.0,
-                        MinOptionalKw = 0.8,
-                        StandbyOptionalKw = 0.0,
-                        ActualPowerKey = "heatpump-annex_power",
-                        ForcePowerKey = "",
-                        Priority = 4,
-                        MaxPowerKw = 4.5
-                    }
-                };
-            }
+            // No demo fallback consumers: an empty consumer list is a valid state.
+            // Consumers are created explicitly via the dashboard; uncontrollable base
+            // loads are calculated dynamically from the site energy balance.
 
             // 3. Load rolling 24-hour energy state
             string energyJson = _billingStore.GetSetting("ems_energy_24h_state", "");
