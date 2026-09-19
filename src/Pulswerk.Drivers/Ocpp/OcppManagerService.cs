@@ -421,6 +421,49 @@ namespace Pulswerk.Drivers.Ocpp
         {
             try
             {
+                int? meterTransactionId = null;
+                int meterConnectorId = 1;
+                if (payload.ValueKind == JsonValueKind.Object)
+                {
+                    if (payload.TryGetProperty("transactionId", out var transactionProp) ||
+                        payload.TryGetProperty("TransactionId", out transactionProp))
+                    {
+                        if (transactionProp.ValueKind == JsonValueKind.Number)
+                            meterTransactionId = transactionProp.GetInt32();
+                        else if (int.TryParse(transactionProp.GetString(), out var parsedTransactionId))
+                            meterTransactionId = parsedTransactionId;
+                    }
+
+                    if (payload.TryGetProperty("connectorId", out var connectorProp) ||
+                        payload.TryGetProperty("ConnectorId", out connectorProp))
+                    {
+                        if (connectorProp.ValueKind == JsonValueKind.Number)
+                            meterConnectorId = connectorProp.GetInt32();
+                        else if (int.TryParse(connectorProp.GetString(), out var parsedConnectorId))
+                            meterConnectorId = parsedConnectorId;
+                    }
+                }
+
+                if (meterTransactionId is int recoveredTransactionId &&
+                    (!_activeTransactions.TryGetValue(recoveredTransactionId, out var knownTransaction) ||
+                     !string.Equals(knownTransaction.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _activeTransactions[recoveredTransactionId] = new ActiveTransactionInfo(
+                        chargePointId, meterConnectorId, "Recovered", 0.0, DateTime.UtcNow);
+                    Log.Info($"[OCPP] [{chargePointId}] Recovered active transaction {recoveredTransactionId} from MeterValues.");
+
+                    var telemetry = GetTelemetry(chargePointId);
+                    if (telemetry.TryGetValue("force_power", out var forcePowerObj) &&
+                        forcePowerObj is double forcePowerKw && forcePowerKw >= 0.0)
+                    {
+                        int preferredPhases = telemetry.TryGetValue("charging_phases", out var phaseObj) &&
+                            phaseObj is double phaseValue ? (int)phaseValue : MaxPhases;
+                        var (amps, phases) = ResolveForcePower(forcePowerKw, preferredPhases);
+                        _ = Task.Run(() => SetChargingLimitAsync(
+                            chargePointId, meterConnectorId, amps, phases, forcePowerKw));
+                    }
+                }
+
                 // 1. Locate the array of meter values
                 JsonElement meterValuesArray = default;
                 if (payload.ValueKind == JsonValueKind.Array)
