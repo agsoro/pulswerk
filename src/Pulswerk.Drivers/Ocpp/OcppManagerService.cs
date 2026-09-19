@@ -26,6 +26,8 @@ namespace Pulswerk.Drivers.Ocpp
 
         // Tracks active transaction IDs to details (ChargePointId, ConnectorId, IdTag, StartMeterValue)
         private readonly ConcurrentDictionary<int, ActiveTransactionInfo> _activeTransactions = new();
+        private readonly ConcurrentDictionary<string, int> _chargePointTransactionIds = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, int> _chargePointConnectorIds = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingCallResults = new();
 
         private int _transactionIdCounter = 1000;
@@ -159,6 +161,8 @@ namespace Pulswerk.Drivers.Ocpp
                     if (string.Equals(kvp.Value.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase))
                         _activeTransactions.TryRemove(kvp.Key, out _);
                 }
+                _chargePointTransactionIds.TryRemove(chargePointId, out _);
+                _chargePointConnectorIds.TryRemove(chargePointId, out _);
 
                 PublishServerTelemetry();
 
@@ -319,6 +323,8 @@ namespace Pulswerk.Drivers.Ocpp
 
                     int transId = Interlocked.Increment(ref _transactionIdCounter);
                     _activeTransactions[transId] = new ActiveTransactionInfo(chargePointId, connectorId, startIdTag, startMeter, DateTime.UtcNow);
+                    _chargePointTransactionIds[chargePointId] = transId;
+                    _chargePointConnectorIds[chargePointId] = connectorId;
 
                     Log.Info($"[OCPP] [{chargePointId}] StartTransaction {transId} on connector {connectorId} by '{startIdTag}' (meterStart: {startMeter} Wh)");
                     UpdateTelemetryValue(chargePointId, "status", "Charging");
@@ -378,6 +384,8 @@ namespace Pulswerk.Drivers.Ocpp
                         }
                         Log.Info($"[OCPP] [{chargePointId}] Transaction {stopTransId} completed. Consumed: {consumedKwh} kWh by {info.IdTag}");
                     }
+                    _chargePointTransactionIds.TryRemove(chargePointId, out _);
+                    _chargePointConnectorIds.TryRemove(chargePointId, out _);
 
                     UpdateTelemetryValue(chargePointId, "status", "Available");
                     UpdateTelemetryValue(chargePointId, "active_user", "None");
@@ -445,11 +453,13 @@ namespace Pulswerk.Drivers.Ocpp
                 }
 
                 if (meterTransactionId is int recoveredTransactionId &&
-                    (!_activeTransactions.TryGetValue(recoveredTransactionId, out var knownTransaction) ||
-                     !string.Equals(knownTransaction.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase)))
+                    (!_chargePointTransactionIds.TryGetValue(chargePointId, out var knownTransactionId) ||
+                     knownTransactionId != recoveredTransactionId))
                 {
-                    _activeTransactions[recoveredTransactionId] = new ActiveTransactionInfo(
-                        chargePointId, meterConnectorId, "Recovered", 0.0, DateTime.UtcNow);
+                    _activeTransactions.TryAdd(recoveredTransactionId, new ActiveTransactionInfo(
+                        chargePointId, meterConnectorId, "Recovered", 0.0, DateTime.UtcNow));
+                    _chargePointTransactionIds[chargePointId] = recoveredTransactionId;
+                    _chargePointConnectorIds[chargePointId] = meterConnectorId;
                     Log.Info($"[OCPP] [{chargePointId}] Recovered active transaction {recoveredTransactionId} from MeterValues.");
 
                     var telemetry = GetTelemetry(chargePointId);
@@ -830,16 +840,13 @@ namespace Pulswerk.Drivers.Ocpp
                 await ClearChargingProfileAsync(chargePointId, 0);
             }
 
-            // Find active transaction ID if any
             int? activeTxId = null;
-            foreach (var kvp in _activeTransactions)
+            if (_chargePointTransactionIds.TryGetValue(chargePointId, out var mappedTransactionId))
             {
-                if (string.Equals(kvp.Value.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase)
-                    && (connectorId == 0 || kvp.Value.ConnectorId == connectorId))
+                activeTxId = mappedTransactionId;
+                if (connectorId == 0 && _chargePointConnectorIds.TryGetValue(chargePointId, out var mappedConnectorId))
                 {
-                    activeTxId = kvp.Key;
-                    if (connectorId == 0) connectorId = kvp.Value.ConnectorId;
-                    break;
+                    connectorId = mappedConnectorId;
                 }
             }
 
@@ -1099,11 +1106,15 @@ namespace Pulswerk.Drivers.Ocpp
         public void RegisterTransactionForTest(int transId, ActiveTransactionInfo info)
         {
             _activeTransactions[transId] = info;
+            _chargePointTransactionIds[info.ChargePointId] = transId;
+            _chargePointConnectorIds[info.ChargePointId] = info.ConnectorId;
         }
 
         public void ClearTransactionsForTest()
         {
             _activeTransactions.Clear();
+            _chargePointTransactionIds.Clear();
+            _chargePointConnectorIds.Clear();
             _liveTelemetry.Clear();
         }
 
