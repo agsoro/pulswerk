@@ -11,8 +11,7 @@ namespace Pulswerk.Drivers.Ocpp
     /// <summary>
     /// Driver representing the central OCPP Master.
     /// Exposes aggregate telemetry across all connected wallboxes (total power,
-    /// total energy import, number of active sessions) and a writable force_power
-    /// setpoint (kW) that allocates power across all active sessions like the Solis battery.
+    /// total energy import, and number of active sessions.
     /// </summary>
     public class OcppMasterDriver : IDeviceDriver, IDeviceWriter
     {
@@ -23,16 +22,14 @@ namespace Pulswerk.Drivers.Ocpp
         {
             TelemetryKeys.PowerKw,
             TelemetryKeys.EnergyImportKwh,
-            TelemetryKeys.ActiveSessions,
-            TelemetryKeys.ForcePowerKw
+            TelemetryKeys.ActiveSessions
         };
 
         public IReadOnlyDictionary<string, string> GetTelemetryUnits() => new Dictionary<string, string>
         {
             [TelemetryKeys.PowerKw] = Units.Kilowatt,
             [TelemetryKeys.EnergyImportKwh] = Units.KilowattHour,
-            [TelemetryKeys.ActiveSessions] = Units.None,
-            [TelemetryKeys.ForcePowerKw] = Units.Kilowatt
+            [TelemetryKeys.ActiveSessions] = Units.None
         };
 
         public TelemetryValues Read(ConnectionConfig connection, DeviceConfig device)
@@ -65,7 +62,6 @@ namespace Pulswerk.Drivers.Ocpp
                     TelemetryKeys.PowerKw => "Total Charging Power",
                     TelemetryKeys.EnergyImportKwh => "Total Imported Energy",
                     TelemetryKeys.ActiveSessions => "Active Charging Sessions",
-                    TelemetryKeys.ForcePowerKw => "Force Power Setpoint",
                     _ => key.Replace("_", " ")
                 };
 
@@ -78,7 +74,6 @@ namespace Pulswerk.Drivers.Ocpp
                     FullName = $"{device.Name} / {niceName}",
                     Description = key switch
                     {
-                        TelemetryKeys.ForcePowerKw => "Aggregate charging power setpoint in kW across all active sessions",
                         TelemetryKeys.ActiveSessions => "Number of currently active charging sessions",
                         _ => $"OCPP Master aggregate telemetry: {key}"
                     },
@@ -105,18 +100,9 @@ namespace Pulswerk.Drivers.Ocpp
             return Task.FromResult(new List<PropertyDto>());
         }
 
-        // IDeviceWriter methods
         public void Write(ConnectionConfig connection, DeviceConfig device, string key, double value)
         {
-            if (key == TelemetryKeys.ForcePowerKw)
-            {
-                double validity = value > 0 ? OcppManagerService.DefaultManualValiditySeconds : 0.0;
-                OcppManagerService.Instance.SetForcePowerAsync(value, validity).GetAwaiter().GetResult();
-            }
-            else
-            {
-                throw new NotSupportedException($"Writing to key '{key}' is not supported on OCPP master.");
-            }
+            throw new NotSupportedException($"Writing to key '{key}' is not supported on OCPP master.");
         }
 
         public void WriteComplex(ConnectionConfig connection, DeviceConfig device, string key, object value)
@@ -126,7 +112,7 @@ namespace Pulswerk.Drivers.Ocpp
 
         public bool IsWritable(string key)
         {
-            return key == TelemetryKeys.ForcePowerKw;
+            return false;
         }
     }
 }

@@ -30,13 +30,6 @@ namespace Pulswerk.Drivers.Ocpp
         private int _transactionIdCounter = 1000;
         private BillingStore? _billingStore;
 
-        // Force power setpoint state (in kW, like Solis battery)
-        private double _forcePowerKw = 0.0;
-        private DateTime _forcePowerSetAtUtc = DateTime.MinValue;
-        private double _forcePowerValiditySeconds = 0.0;
-        private readonly object _forcePowerLock = new();
-        private Timer? _watchdogTimer;
-
         // Fixed maximum per-phase charge current (A) and the default number of phases.
         public const double DefaultMaxCurrentAmps = 16.0;
         public const int MaxPhases = 3;
@@ -54,7 +47,6 @@ namespace Pulswerk.Drivers.Ocpp
         public void Initialize(BillingStore billingStore)
         {
             _billingStore = billingStore;
-            _watchdogTimer ??= new Timer(CheckWatchdog, null, 10000, 10000);
             Log.Info("[OCPP] OcppManagerService initialized.");
         }
 
@@ -109,10 +101,6 @@ namespace Pulswerk.Drivers.Ocpp
             {
                 await Task.Delay(500);
                 await ConfigureChargerTelemetryAsync(chargePointId);
-                if (IsForcePowerActive(DateTime.UtcNow))
-                {
-                    await DistributeForcePowerAsync();
-                }
             });
 
             var buffer = new byte[8192];
@@ -172,10 +160,6 @@ namespace Pulswerk.Drivers.Ocpp
                 }
 
                 PublishServerTelemetry();
-                if (IsForcePowerActive(DateTime.UtcNow))
-                {
-                    _ = Task.Run(() => DistributeForcePowerAsync());
-                }
 
                 Log.Info($"[OCPP] Charger '{chargePointId}' disconnected.");
             }
@@ -259,10 +243,6 @@ namespace Pulswerk.Drivers.Ocpp
                     {
                         await Task.Delay(500);
                         await ConfigureChargerTelemetryAsync(chargePointId);
-                        if (IsForcePowerActive(DateTime.UtcNow))
-                        {
-                            await DistributeForcePowerAsync();
-                        }
                     });
                     break;
 
@@ -337,11 +317,6 @@ namespace Pulswerk.Drivers.Ocpp
                     UpdateTelemetryValue(chargePointId, "energy_import", Math.Round(startMeter / 1000.0, 3));
                     PublishServerTelemetry();
 
-                    if (IsForcePowerActive(DateTime.UtcNow))
-                    {
-                        _ = Task.Run(() => DistributeForcePowerAsync());
-                    }
-
                     _ = Task.Run(async () =>
                     {
                         await ConfigureChargerTelemetryAsync(chargePointId);
@@ -404,11 +379,6 @@ namespace Pulswerk.Drivers.Ocpp
                         UpdateTelemetryValue(chargePointId, "energy_import", Math.Round(stopMeter / 1000.0, 3));
                     }
                     PublishServerTelemetry();
-
-                    if (IsForcePowerActive(DateTime.UtcNow))
-                    {
-                        _ = Task.Run(() => DistributeForcePowerAsync());
-                    }
 
                     responsePayload = new
                     {
@@ -816,8 +786,8 @@ namespace Pulswerk.Drivers.Ocpp
                 }
             }
 
-            // If unrestricted (16A and no force_power limit active), also clear existing profiles
-            if (maxCurrentAmps >= DefaultMaxCurrentAmps && _forcePowerKw <= 0.0)
+            // If unrestricted (16A), also clear existing profiles.
+            if (maxCurrentAmps >= DefaultMaxCurrentAmps)
             {
                 _ = ClearChargingProfileAsync(chargePointId, 0);
             }
@@ -999,55 +969,6 @@ namespace Pulswerk.Drivers.Ocpp
             }
         }
 
-        // ── Server Telemetry & Force Power Setpoint ──────────────────────────
-
-        public const double DefaultManualValiditySeconds = 10 * 3600; // 10 hours (36,000 seconds)
-
-        public double ForcePowerValiditySeconds
-        {
-            get => _forcePowerValiditySeconds;
-            set => _forcePowerValiditySeconds = value;
-        }
-
-        public bool IsForcePowerActive(DateTime now)
-        {
-            lock (_forcePowerLock)
-            {
-                if (_forcePowerKw <= 0) return false;
-                if (_forcePowerValiditySeconds <= 0) return true;
-                return (now - _forcePowerSetAtUtc).TotalSeconds <= _forcePowerValiditySeconds;
-            }
-        }
-
-        public double GetEffectiveForcePowerKw(DateTime now)
-        {
-            lock (_forcePowerLock)
-            {
-                if (_forcePowerValiditySeconds > 0 && _forcePowerKw > 0 && (now - _forcePowerSetAtUtc).TotalSeconds > _forcePowerValiditySeconds)
-                {
-                    _forcePowerKw = 0.0;
-                    _forcePowerSetAtUtc = DateTime.MinValue;
-                    Log.Info("[OCPP] Server force_power setpoint expired. Reverted to 0.0 (Normal mode).");
-                    _ = Task.Run(() => DistributeForcePowerAsync());
-                }
-                return _forcePowerKw;
-            }
-        }
-
-        public async Task SetForcePowerAsync(double value, double validitySeconds = 0.0)
-        {
-            var now = DateTime.UtcNow;
-            lock (_forcePowerLock)
-            {
-                _forcePowerKw = Math.Max(0.0, value);
-                _forcePowerSetAtUtc = _forcePowerKw > 0 ? now : DateTime.MinValue;
-                _forcePowerValiditySeconds = validitySeconds;
-            }
-            Log.Info($"[OCPP] Server force_power set to {_forcePowerKw} kW" + (_forcePowerValiditySeconds > 0 ? $" (valid {_forcePowerValiditySeconds}s)" : " (permanent)"));
-            PublishServerTelemetry();
-            await DistributeForcePowerAsync();
-        }
-
         public Dictionary<string, object> GetServerTelemetry()
         {
             double totalPower = 0.0;
@@ -1066,14 +987,11 @@ namespace Pulswerk.Drivers.Ocpp
             }
 
             int activeSessions = _activeTransactions.Count;
-            double forcePower = GetEffectiveForcePowerKw(DateTime.UtcNow);
-
             return new Dictionary<string, object>
             {
                 [TelemetryKeys.PowerKw] = Math.Round(totalPower, 3),
                 [TelemetryKeys.EnergyImportKwh] = Math.Round(totalEnergy, 3),
-                [TelemetryKeys.ActiveSessions] = activeSessions,
-                [TelemetryKeys.ForcePowerKw] = Math.Round(forcePower, 3)
+                [TelemetryKeys.ActiveSessions] = activeSessions
             };
         }
 
@@ -1088,25 +1006,6 @@ namespace Pulswerk.Drivers.Ocpp
 
         private void CheckWatchdog(object? state)
         {
-            var now = DateTime.UtcNow;
-            bool expired = false;
-            lock (_forcePowerLock)
-            {
-                if (_forcePowerValiditySeconds > 0 && _forcePowerKw > 0 && (now - _forcePowerSetAtUtc).TotalSeconds > _forcePowerValiditySeconds)
-                {
-                    _forcePowerKw = 0.0;
-                    _forcePowerSetAtUtc = DateTime.MinValue;
-                    expired = true;
-                }
-            }
-
-            if (expired)
-            {
-                Log.Info("[OCPP] Server force_power setpoint expired. Reverted to 0.0 (Normal mode).");
-                PublishServerTelemetry();
-                _ = Task.Run(() => DistributeForcePowerAsync());
-            }
-
             // Periodic trigger for active charging sessions: request live MeterValues
             foreach (var cpId in _activeSockets.Keys)
             {
@@ -1116,148 +1015,6 @@ namespace Pulswerk.Drivers.Ocpp
                 if (hasActiveSession || currentStatus.Equals("Charging", StringComparison.OrdinalIgnoreCase))
                 {
                     _ = TriggerMessageAsync(cpId, "MeterValues");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Pure allocation algorithm: distributes a total target power (in kW) across
-        /// all active charging sessions within the physical bounds of EV charging (IEC 61851):
-        /// - Setpoint &lt;= 0: Unrestricted (16A, 3-phase = 100%).
-        /// - Share &gt;= 4.14 kW: 3-phase allocation (6A to 16A).
-        /// - 1.38 kW &lt;= Share &lt; 4.14 kW: 1-phase allocation (6A to 16A).
-        /// - Share &lt; 1.38 kW: Total power cannot satisfy all cars at minimum 6A.
-        ///   Allocates 1-phase to the oldest k = floor(P / 1.38) sessions, pausing the rest.
-        /// </summary>
-        public static List<SessionAllocation> ComputeAllocation(double forcePowerKw, IReadOnlyList<ActiveTransactionInfo> activeSessions)
-        {
-            var result = new List<SessionAllocation>();
-            if (activeSessions == null || activeSessions.Count == 0)
-                return result;
-
-            int n = activeSessions.Count;
-
-            // Normal / Unrestricted mode
-            if (forcePowerKw <= 0.0)
-            {
-                foreach (var s in activeSessions)
-                {
-                    result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, DefaultMaxCurrentAmps, MaxPhases, 11.04));
-                }
-                return result;
-            }
-
-            // Minimum power required per session:
-            // 1-phase @ 6A = 1 * 230V * 6A = 1.38 kW
-            // 3-phase @ 6A = 3 * 230V * 6A = 4.14 kW
-            const double minPower1p = 1.38;
-            const double minPower3p = 4.14;
-
-            double share = forcePowerKw / n;
-
-            if (share >= minPower3p)
-            {
-                // 3-phase allocation: P = 3 * 230 * I / 1000 = 0.69 * I  ==>  I = P / 0.69
-                double rawAmps = share / 0.69;
-                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
-                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
-                foreach (var s in activeSessions)
-                {
-                    result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, amps, 3, share));
-                }
-            }
-            else if (share >= minPower1p)
-            {
-                // 1-phase allocation: P = 1 * 230 * I / 1000 = 0.23 * I  ==>  I = P / 0.23
-                double rawAmps = share / 0.23;
-                if (Math.Abs(rawAmps - DefaultMaxCurrentAmps) < 0.2) rawAmps = DefaultMaxCurrentAmps;
-                double amps = Math.Clamp(Math.Round(rawAmps, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
-                foreach (var s in activeSessions)
-                {
-                    result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, amps, 1, share));
-                }
-            }
-            else
-            {
-                // Sub-minimum total power: cannot support all n sessions at 6A
-                int k = Math.Min(n, (int)Math.Floor(forcePowerKw / minPower1p));
-
-                if (k <= 0)
-                {
-                    // Cannot even support 1 car at 6A: pause all
-                    foreach (var s in activeSessions)
-                    {
-                        result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, 0.0, 1, 0.0));
-                    }
-                }
-                else
-                {
-                    // Order sessions by StartedAtUtc (FIFO)
-                    var sorted = activeSessions.OrderBy(s => s.StartedAtUtc).ToList();
-                    double activeShare = forcePowerKw / k;
-                    double amps = Math.Clamp(Math.Round(activeShare / 0.23, 1), MinCurrentAmps, DefaultMaxCurrentAmps);
-
-                    for (int i = 0; i < sorted.Count; i++)
-                    {
-                        var s = sorted[i];
-                        if (i < k)
-                        {
-                            result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, amps, 1, activeShare));
-                        }
-                        else
-                        {
-                            result.Add(new SessionAllocation(s.ChargePointId, s.ConnectorId, 0.0, 1, 0.0));
-                        }
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        public async Task DistributeForcePowerAsync()
-        {
-            var now = DateTime.UtcNow;
-            double forcePower = GetEffectiveForcePowerKw(now);
-            var sessions = _activeTransactions.Values.ToList();
-
-            // Check for any connected charge points reporting "Charging" status even if not in _activeTransactions
-            var activeCpIds = new HashSet<string>(sessions.Select(s => s.ChargePointId), StringComparer.OrdinalIgnoreCase);
-            foreach (var cpId in _activeSockets.Keys)
-            {
-                if (!activeCpIds.Contains(cpId))
-                {
-                    var telem = GetTelemetry(cpId);
-                    string status = telem.GetValueOrDefault("status", "")?.ToString() ?? "";
-                    if (status.Equals("Charging", StringComparison.OrdinalIgnoreCase))
-                    {
-                        sessions.Add(new ActiveTransactionInfo(cpId, 1, "Active", 0.0, DateTime.UtcNow));
-                        activeCpIds.Add(cpId);
-                    }
-                }
-            }
-
-            // If no active charging sessions are found, but wallboxes are connected,
-            // allocate across all connected wallboxes so hardware/defaults enforce the limit ahead of time.
-            if (sessions.Count == 0 && _activeSockets.Count > 0)
-            {
-                foreach (var cpId in _activeSockets.Keys)
-                {
-                    sessions.Add(new ActiveTransactionInfo(cpId, 1, "Standby", 0.0, DateTime.UtcNow));
-                }
-            }
-
-            var allocations = ComputeAllocation(forcePower, sessions);
-
-            foreach (var alloc in allocations)
-            {
-                try
-                {
-                    await SetChargingLimitAsync(alloc.ChargePointId, alloc.ConnectorId, alloc.Amps, alloc.Phases, alloc.TargetPowerKw);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning($"[OCPP] Failed to apply allocation to '{alloc.ChargePointId}': {ex.Message}");
                 }
             }
         }
@@ -1273,12 +1030,6 @@ namespace Pulswerk.Drivers.Ocpp
         {
             _activeTransactions.Clear();
             _liveTelemetry.Clear();
-            lock (_forcePowerLock)
-            {
-                _forcePowerKw = 0.0;
-                _forcePowerSetAtUtc = DateTime.MinValue;
-                _forcePowerValiditySeconds = 0.0;
-            }
         }
 
         public void SetLiveTelemetryForTest(string chargePointId, string key, object value)

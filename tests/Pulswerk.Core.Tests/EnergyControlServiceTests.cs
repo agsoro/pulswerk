@@ -45,6 +45,107 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
+        public void Dispatch_BatteryOnlySupply_ConsumersAreUnrestricted()
+        {
+            var sources = CreateDefaultSources(8.0);
+            sources.BatteryMaxDischargeKw = 5.0;
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallbox",
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
+                MaxPowerKw = 22.0
+            };
+
+            // Battery discharge is supply to the pool, but it has no remaining headroom.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 0.0, batteryPowerKw: 5.0, batterySocPct: 50.0, new[] { wallbox });
+
+            Assert.Equal(0.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal(0.0, wallbox.AllocatedPowerKw);
+            Assert.Equal("Autarky (Source Limited)", wallbox.Status);
+        }
+
+        [Fact]
+        public void Dispatch_BatteryHeadroom_LimitsOptionalAllocation()
+        {
+            var sources = CreateDefaultSources(8.0);
+            sources.BatteryMaxDischargeKw = 5.0;
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallbox",
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
+                MaxPowerKw = 22.0
+            };
+
+            // Only 2 kW of the battery's 5 kW discharge ceiling remains available.
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 0.0, batteryPowerKw: 3.0, batterySocPct: 50.0, new[] { wallbox });
+
+            Assert.Equal(2.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal(2.0, wallbox.AllocatedPowerKw);
+            Assert.Equal("Autarky (Source Limited)", wallbox.Status);
+        }
+
+        [Fact]
+        public void Dispatch_BatteryAtReserve_DoesNotAllocateBatteryBackedLoad()
+        {
+            var sources = CreateDefaultSources(8.0);
+            sources.BatteryMaxDischargeKw = 5.0;
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallbox",
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
+                MaxPowerKw = 22.0
+            };
+
+            EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 15.0, new[] { wallbox });
+
+            Assert.Equal(0.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal("Autarky (Source Limited)", wallbox.Status);
+        }
+
+        [Fact]
+        public void Dispatch_BatteryHeadroom_IsSharedByPriority()
+        {
+            var sources = CreateDefaultSources(8.0);
+            sources.BatteryMaxDischargeKw = 5.0;
+            var highPriority = new EnergyConsumer
+            {
+                Id = "priority-1",
+                Name = "Priority 1",
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
+                MaxPowerKw = 22.0,
+                Priority = 1
+            };
+            var lowPriority = new EnergyConsumer
+            {
+                Id = "priority-2",
+                Name = "Priority 2",
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
+                MaxPowerKw = 22.0,
+                Priority = 2
+            };
+
+            // Two kW remain after the battery's current 3 kW discharge; it must not be allocated twice.
+            EnergyDispatchEngine.Dispatch(
+                sources,
+                gridPowerKw: 0.0,
+                pvPowerKw: 0.0,
+                batteryPowerKw: 3.0,
+                batterySocPct: 50.0,
+                new[] { lowPriority, highPriority });
+
+            Assert.Equal(2.0, highPriority.AllocatedOptionalKw);
+            Assert.Equal(0.0, lowPriority.AllocatedOptionalKw);
+        }
+
+        [Fact]
         public void Dispatch_GridImport_AllControllableConsumersCurtailedToMinimum()
         {
             var sources = CreateDefaultSources(8.0);

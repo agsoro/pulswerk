@@ -289,9 +289,9 @@ namespace Pulswerk.Ems
         public const double GridImportDeadbandKw = 0.2;
 
         /// <summary>
-        /// Autarky dispatch: consumers may draw unlimited power as long as the site does
-        /// not import from the grid. As soon as a grid import is measured, ALL controllable
-        /// consumers are curtailed to 0 (their uncontrollable base tier keeps running).
+        /// Autarky dispatch: consumers may draw available power as long as the site does
+        /// not import from the grid. PV generation and battery discharge headroom limit
+        /// the optional tier; once both are exhausted, no extra load is allocated.
         /// <para>
         /// All power arguments are expected to be <b>already normalized</b> to the pool sign
         /// rule (see <see cref="PowerSignConvention"/>): positive = into the pool (supply),
@@ -313,6 +313,17 @@ namespace Pulswerk.Ems
             double gridImportKw = PowerSignConvention.SupplyPart(gridPowerKw);
             bool curtail = gridImportKw > GridImportDeadbandKw;
 
+            double availableSourceHeadroomKw = double.PositiveInfinity;
+            if (sources?.HasBattery == true)
+            {
+                bool aboveReserve = batterySocPct > sources.BatteryMinSocPct;
+                double currentDischargeKw = PowerSignConvention.SupplyPart(batteryPowerKw, GridImportDeadbandKw);
+                double batteryHeadroomKw = aboveReserve
+                    ? Math.Max(0.0, sources.BatteryMaxDischargeKw - currentDischargeKw)
+                    : 0.0;
+                availableSourceHeadroomKw = PowerSignConvention.SupplyPart(pvPowerKw, GridImportDeadbandKw) + batteryHeadroomKw;
+            }
+
             // Classify consumers.
             var controllable = new List<EnergyConsumer>();
             foreach (var consumer in consumers)
@@ -332,7 +343,8 @@ namespace Pulswerk.Ems
                 }
             }
 
-            foreach (var consumer in controllable)
+            double remainingSourceHeadroomKw = availableSourceHeadroomKw;
+            foreach (var consumer in controllable.OrderBy(c => c.Priority))
             {
                 double actualOpt = Math.Max(0.0, consumer.ActualPowerKw - consumer.BasePowerKw);
                 consumer.IsActivelyDemanding = actualOpt > Math.Max(0.1, consumer.StandbyOptionalKw);
@@ -357,16 +369,24 @@ namespace Pulswerk.Ems
                 }
                 else
                 {
-                    // Autarky: unlimited draw up to the physical ceiling of the consumer.
-                    double maxOpt = Math.Min(
+                    // Autarky: consume one shared source budget in priority order.
+                    double physicalMaxOpt = Math.Min(
                         consumer.MaxOptionalKw,
                         Math.Max(0.0, consumer.MaxPowerKw - consumer.BasePowerKw));
+                    double maxOpt = Math.Min(physicalMaxOpt, remainingSourceHeadroomKw);
+                    if (!double.IsPositiveInfinity(remainingSourceHeadroomKw))
+                    {
+                        remainingSourceHeadroomKw = Math.Max(0.0, remainingSourceHeadroomKw - maxOpt);
+                    }
                     consumer.AllocatedOptionalKw = Math.Round(maxOpt, 2);
                     consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + maxOpt, 2);
                     consumer.UnusedPowerKw = 0.0;
-                    consumer.Status = consumer.IsActivelyDemanding
-                        ? "Autarky (Unrestricted)"
-                        : "Ready (Autarky)";
+                    bool sourceLimited = maxOpt < physicalMaxOpt;
+                    consumer.Status = sourceLimited
+                        ? "Autarky (Source Limited)"
+                        : consumer.IsActivelyDemanding
+                            ? "Autarky (Unrestricted)"
+                            : "Ready (Autarky)";
                 }
             }
         }
@@ -1017,18 +1037,11 @@ namespace Pulswerk.Ems
                 LiveBatterySocPct,
                 Consumers);
 
-            // 4. Actuate controllable consumers
-            // Note: the OCPP master interprets force_power <= 0 as UNRESTRICTED. To switch a
-            // consumer OFF we therefore send the smallest sub-minimum value (0.1 kW), which
-            // resolves to 0A per ResolveForcePower. Unrestricted mode is signaled by 0.
-            const double offSetpointKw = 0.1;
+            // 4. Actuate controllable consumers using the dispatch allocation as the setpoint.
             var now = DateTime.UtcNow;
             foreach (var consumer in Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0 && !string.IsNullOrWhiteSpace(c.ForcePowerKey)))
             {
-                // Consumers in "Grid Import Curtailment" are off; in autarky they are unrestricted.
-                bool isCurtailed = consumer.Status == "Grid Import Curtailment";
-                bool isDisabled = !Enabled;
-                double writeValue = (isCurtailed || isDisabled) ? offSetpointKw : 0.0;
+                double writeValue = Math.Max(0.0, consumer.AllocatedPowerKw);
 
                 bool setpointChanged = Math.Abs(writeValue - consumer.LastWrittenSetpointKw) >= 0.3;
                 bool refreshHeartbeat = (now - consumer.LastWrittenUtc).TotalSeconds >= 60;
@@ -1043,11 +1056,7 @@ namespace Pulswerk.Ems
                         bool ok = await _telemetryWriter(consumer.ForcePowerKey, writeValue);
                         if (ok)
                         {
-                            string reason = writeValue <= offSetpointKw
-                                ? $"Grid import at {PowerSignConvention.SupplyPart(LiveGridKw):F1} kW. Consumer curtailed to 0 kW."
-                                : $"Autarky: no grid import. Unrestricted up to {consumer.MaxPowerKw:F1} kW.";
-
-                            AddLog($"[{consumer.Name}] Set force_power = {(writeValue <= offSetpointKw ? "OFF" : "UNRESTRICTED")}. {reason}", consumer.Status);
+                            AddLog($"[{consumer.Name}] Set force_power = {writeValue:F2} kW.", consumer.Status);
                             Log.Info($"[EnergyControl] [{consumer.Name}] Set {consumer.ForcePowerKey} = {writeValue} kW ({consumer.Status})");
                         }
                         else
