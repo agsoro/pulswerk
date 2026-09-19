@@ -773,6 +773,11 @@ namespace Pulswerk.Drivers.Ocpp
             UpdateTelemetryValue(chargePointId, "force_power", forcePowerKw);
             UpdateTelemetryValue(chargePointId, TelemetryKeys.ForcePowerKw, forcePowerKw);
 
+            if (maxCurrentAmps < DefaultMaxCurrentAmps)
+            {
+                await ClearChargingProfileAsync(chargePointId, 0);
+            }
+
             // Find active transaction ID if any
             int? activeTxId = null;
             foreach (var kvp in _activeTransactions)
