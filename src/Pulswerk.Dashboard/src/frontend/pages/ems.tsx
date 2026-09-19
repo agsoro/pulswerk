@@ -19,10 +19,6 @@ interface EnergyConsumer {
     unusedPowerKw: number;
     status: string;
 
-    // Legacy compatibility
-    isControllable?: boolean;
-    baseLimitKw?: number;
-    minPowerKw?: number;
     maxPowerKw?: number;
     energy24hKwh?: number;
 }
@@ -180,7 +176,6 @@ export function EmsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     enabled: snapshot?.enabled ?? true,
-                    baseLimitKw: gridMaxKw,
                     batteryReserveKw: battReserveKw,
                     batteryMaxPowerKw: battMaxKw,
                     batteryPowerKey: hasBattery ? battPowerKey : '',
@@ -243,9 +238,9 @@ export function EmsPage() {
             id: c.id,
             name: c.name,
             basePowerKw: c.basePowerKw ?? 0.0,
-            hasOptionalTier: c.hasOptionalTier ?? c.isControllable ?? true,
-            maxOptionalKw: c.maxOptionalKw ?? c.baseLimitKw ?? 8.0,
-            minOptionalKw: c.minOptionalKw ?? c.minPowerKw ?? 0.0,
+            hasOptionalTier: c.hasOptionalTier ?? true,
+            maxOptionalKw: c.maxOptionalKw ?? 8.0,
+            minOptionalKw: c.minOptionalKw ?? 0.0,
             standbyOptionalKw: c.standbyOptionalKw ?? 0.0,
             actualPowerKey: c.actualPowerKey ?? '',
             forcePowerKey: c.forcePowerKey ?? '',
@@ -325,8 +320,8 @@ export function EmsPage() {
         );
     }
 
-    const controllableConsumers = snapshot?.consumers?.filter(c => c.hasOptionalTier ?? c.isControllable) ?? [];
-    const uncontrollableConsumers = snapshot?.consumers?.filter(c => !(c.hasOptionalTier ?? c.isControllable)) ?? [];
+    const controllableConsumers = snapshot?.consumers?.filter(c => c.hasOptionalTier) ?? [];
+    const uncontrollableConsumers = snapshot?.consumers?.filter(c => !c.hasOptionalTier) ?? [];
 
     const isSurplusActive = (snapshot?.totalSurplusAvailableKw ?? 0) > 0.1;
     const hasReclaimedPower = (snapshot?.totalReclaimedPowerKw ?? 0) > 0.1;
@@ -787,7 +782,7 @@ export function EmsPage() {
 
                     {/* Controllable Consumers List */}
                     {controllableConsumers.map((consumer) => {
-                        const optQuota = consumer.maxOptionalKw ?? consumer.baseLimitKw ?? 8.0;
+                        const optQuota = consumer.maxOptionalKw ?? 8.0;
                         const isBoosted = consumer.allocatedPowerKw > (consumer.basePowerKw ?? 0) + optQuota + 0.1;
                         const isIdle = !consumer.isActivelyDemanding;
                         const hasUnused = (consumer.unusedPowerKw ?? 0) > 0.1;
@@ -929,7 +924,7 @@ export function EmsPage() {
                                         </div>
                                     </div>
                                     <span class="text-[0.68rem] text-slate-400 font-mono whitespace-nowrap text-right">
-                                        Base: {(consumer.basePowerKw ?? 0).toFixed(1)} kW · Opt: {(consumer.maxOptionalKw ?? consumer.baseLimitKw ?? 8.0).toFixed(1)} kW
+                                        Base: {(consumer.basePowerKw ?? 0).toFixed(1)} kW · Opt: {(consumer.maxOptionalKw ?? 8.0).toFixed(1)} kW
                                     </span>
                                 </div>
                             </div>
@@ -1391,7 +1386,7 @@ export function EmsPage() {
                                             type="checkbox"
                                             id="hasOptionalTier"
                                             checked={editingConsumer.hasOptionalTier ?? true}
-                                            onChange={(e: any) => setEditingConsumer({ ...editingConsumer, hasOptionalTier: e.target.checked, isControllable: e.target.checked })}
+                                            onChange={(e: any) => setEditingConsumer({ ...editingConsumer, hasOptionalTier: e.target.checked })}
                                             class="w-4 h-4 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700"
                                         />
                                         <label for="hasOptionalTier" class="font-bold text-slate-200 cursor-pointer">
@@ -1409,7 +1404,7 @@ export function EmsPage() {
                                                 <input
                                                     type="number"
                                                     step="0.5"
-                                                    value={editingConsumer.maxOptionalKw ?? editingConsumer.baseLimitKw ?? 8.0}
+                                                    value={editingConsumer.maxOptionalKw ?? 8.0}
                                                     onInput={(e: any) => setEditingConsumer({ ...editingConsumer, maxOptionalKw: parseFloat(e.target.value) || 8.0 })}
                                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                                 />
@@ -1421,7 +1416,7 @@ export function EmsPage() {
                                                 <input
                                                     type="number"
                                                     step="0.1"
-                                                    value={editingConsumer.minOptionalKw ?? editingConsumer.minPowerKw ?? 0.0}
+                                                    value={editingConsumer.minOptionalKw ?? 0.0}
                                                     onInput={(e: any) => setEditingConsumer({ ...editingConsumer, minOptionalKw: parseFloat(e.target.value) || 0.0 })}
                                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                                 />

@@ -191,25 +191,6 @@ namespace Pulswerk.Ems
         // ── Priority ──────────────────────────────────────────────────────────
         public int Priority { get; set; } = 1;
 
-        // ── Backward Compatibility Properties ─────────────────────────────────
-        public bool IsControllable
-        {
-            get => HasOptionalTier && _maxOptionalKw > 0;
-            set => HasOptionalTier = value;
-        }
-
-        public double BaseLimitKw
-        {
-            get => _maxOptionalKw;
-            set => _maxOptionalKw = value;
-        }
-
-        public double MinPowerKw
-        {
-            get => MinOptionalKw;
-            set => MinOptionalKw = value;
-        }
-
         // ── Runtime Dynamic State ─────────────────────────────────────────────
         [JsonIgnore]
         public double ActualPowerKw { get; set; }
@@ -423,28 +404,15 @@ namespace Pulswerk.Ems
         public double LiveBatterySocPct { get; private set; }
         public bool IsBatteryCharging { get; private set; }
 
-        // Backward compatibility properties for UI/API
-        public double BaseLimitKw => Consumers.FirstOrDefault(c => c.IsControllable)?.BaseLimitKw ?? SourcesConfig.GridMaxImportKw;
-        public double EffectiveLimitKw => Consumers.FirstOrDefault(c => c.IsControllable)?.AllocatedPowerKw ?? BaseLimitKw;
-        public double WbActualKw => Consumers.FirstOrDefault(c => c.IsControllable)?.ActualPowerKw ?? 0.0;
         public double BatteryPowerKw => LiveBatteryKw;
         public double BatteryChargeKw => LiveBatteryChargeKw;
         public double BatterySocPct => LiveBatterySocPct;
-        public string ControlMode => Consumers.FirstOrDefault(c => c.IsControllable)?.Status ?? "Normal";
-        public string WbForcePowerKey => Consumers.FirstOrDefault(c => c.IsControllable)?.ForcePowerKey ?? "ocpp-central_force_power";
-        public string WbActualPowerKey => Consumers.FirstOrDefault(c => c.IsControllable)?.ActualPowerKey ?? "ocpp-central_power";
         public string BatteryPowerKey => SourcesConfig.BatteryPowerKey;
         public string BatterySocKey => SourcesConfig.BatterySocKey;
         public double BatteryReserveKw => SourcesConfig.BatteryMinReserveKw;
         public double BatteryMaxPowerKw => SourcesConfig.BatteryMaxPowerKw;
         public double BatteryMaxChargeKw => SourcesConfig.BatteryMaxChargeKw;
         public double BatteryMaxDischargeKw => SourcesConfig.BatteryMaxDischargeKw;
-
-        public double TargetKwh => EffectiveLimitKw;
-        public double ActualKwh => WbActualKw;
-        public double DeviationPct => BaseLimitKw > 0 ? Math.Round(((EffectiveLimitKw - BaseLimitKw) / BaseLimitKw) * 100.0, 1) : 0.0;
-        public bool IsCurtailmentActive => EffectiveLimitKw < BaseLimitKw;
-        public string ControlState => ControlMode;
 
         public event Action<Dictionary<string, object>>? OnTelemetryUpdated;
 
@@ -636,12 +604,6 @@ namespace Pulswerk.Ems
                 _billingStore.SetSetting("energy_consumers_config", JsonSerializer.Serialize(consumers));
                 _billingStore.SetSetting("ems_energy_24h_state", _energyCalc.Serialize());
 
-                var primaryControllable = consumers.FirstOrDefault(c => c.IsControllable);
-                if (primaryControllable != null)
-                {
-                    _billingStore.SetSetting("energy_control_wb_key", primaryControllable.ForcePowerKey);
-                    _billingStore.SetSetting("energy_control_wb_actual_key", primaryControllable.ActualPowerKey);
-                }
             }
 
             PublishTelemetries();
@@ -649,8 +611,8 @@ namespace Pulswerk.Ems
 
         public EnergySystemSnapshot GetSnapshot()
         {
-            double totalControllable = Consumers.Where(c => c.IsControllable).Sum(c => c.ActualPowerKw);
-            double totalUncontrollable = Consumers.Where(c => !c.IsControllable).Sum(c => c.ActualPowerKw);
+            double totalControllable = Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0).Sum(c => c.ActualPowerKw);
+            double totalUncontrollable = Consumers.Where(c => !c.HasOptionalTier || c.MaxOptionalKw <= 0.0).Sum(c => c.ActualPowerKw);
             double totalBaseTier = Consumers.Sum(c => c.BasePowerKw);
             double totalOptional = Consumers.Sum(c => c.AllocatedOptionalKw);
             double totalReclaimed = Consumers.Sum(c => c.UnusedPowerKw);
@@ -688,7 +650,7 @@ namespace Pulswerk.Ems
             // Autarky = 1 - (grid import / consumption), i.e. the share of consumption not covered by the grid.
             double autarkyPct = totalConsumption > 0.01
                 ? Math.Round(Math.Clamp((1.0 - gridImportKw / totalConsumption) * 100.0, 0.0, 100.0), 1)
-                : 0.0;
+                : 100.0;
 
             // Compute rolling 24-hour energy totals
             var energyTotals = _energyCalc.Get24hTotals(DateTime.UtcNow);
@@ -704,7 +666,7 @@ namespace Pulswerk.Ems
             double consumption24h = energyTotals.ConsumerKwh.Values.Sum() + energyTotals.UncontrollableKwh;
             double autarky24hPct = consumption24h > 0.01
                 ? Math.Round(Math.Clamp((1.0 - energyTotals.GridImportKwh / consumption24h) * 100.0, 0.0, 100.0), 1)
-                : 0.0;
+                : 100.0;
 
             return new EnergySystemSnapshot
             {
@@ -981,7 +943,7 @@ namespace Pulswerk.Ems
                     }
                     else
                     {
-                        foreach (var c in Consumers.Where(c => c.IsControllable))
+                        foreach (var c in Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0))
                         {
                             c.AllocatedOptionalKw = 0.0;
                             c.AllocatedPowerKw = 0.0; // 0 = Unrestricted in OCPP master
@@ -1061,7 +1023,7 @@ namespace Pulswerk.Ems
             // resolves to 0A per ResolveForcePower. Unrestricted mode is signaled by 0.
             const double offSetpointKw = 0.1;
             var now = DateTime.UtcNow;
-            foreach (var consumer in Consumers.Where(c => c.IsControllable && !string.IsNullOrWhiteSpace(c.ForcePowerKey)))
+            foreach (var consumer in Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0 && !string.IsNullOrWhiteSpace(c.ForcePowerKey)))
             {
                 // Consumers in "Grid Import Curtailment" are off; in autarky they are unrestricted.
                 bool isCurtailed = consumer.Status == "Grid Import Curtailment";
@@ -1101,8 +1063,8 @@ namespace Pulswerk.Ems
             }
 
             // 5. Update Rolling 24-hour Energy Calculation
-            double totalControllablePower = Consumers.Where(c => c.IsControllable).Sum(c => c.ActualPowerKw);
-            double uncPower = Consumers.Where(c => !c.IsControllable).Sum(c => c.ActualPowerKw);
+            double totalControllablePower = Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0).Sum(c => c.ActualPowerKw);
+            double uncPower = Consumers.Where(c => !c.HasOptionalTier || c.MaxOptionalKw <= 0.0).Sum(c => c.ActualPowerKw);
             // Pool balance: supply (Grid + PV + Battery, all positive = into the pool) minus controllable draw.
             double effectivePv = LivePvKw;
             double effectiveBatt = SourcesConfig.HasBattery ? LiveBatteryKw : 0.0;

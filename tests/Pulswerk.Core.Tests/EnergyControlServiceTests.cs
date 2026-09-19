@@ -28,10 +28,10 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "wb",
                 Name = "Wallboxes",
-                IsControllable = true,
-                BaseLimitKw = 8.0,
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
                 ActualPowerKw = 6.5,
-                MinPowerKw = 1.38,
+                MinOptionalKw = 1.38,
                 MaxPowerKw = 22.0
             };
 
@@ -53,10 +53,10 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "wb",
                 Name = "Wallboxes",
-                IsControllable = true,
-                BaseLimitKw = 8.0,
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
                 ActualPowerKw = 6.5,
-                MinPowerKw = 1.38, // guaranteed minimum (6A 1-phase)
+                MinOptionalKw = 1.38, // guaranteed minimum (6A 1-phase)
                 MaxPowerKw = 22.0
             };
 
@@ -64,10 +64,10 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "hp",
                 Name = "Heat Pump",
-                IsControllable = true,
+                HasOptionalTier = true,
                 BasePowerKw = 2.0,
                 MaxOptionalKw = 5.0,
-                MinPowerKw = 0.5,
+                MinOptionalKw = 0.5,
                 ActualPowerKw = 4.0,
                 MaxPowerKw = 7.5
             };
@@ -76,10 +76,10 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "booster",
                 Name = "Booster (no guaranteed minimum)",
-                IsControllable = true,
+                HasOptionalTier = true,
                 BasePowerKw = 0.0,
                 MaxOptionalKw = 3.0,
-                MinPowerKw = 0.0,
+                MinOptionalKw = 0.0,
                 ActualPowerKw = 1.0,
                 MaxPowerKw = 5.0
             };
@@ -113,10 +113,10 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "odd",
                 Name = "Consumer with minimum above optional tier",
-                IsControllable = true,
+                HasOptionalTier = true,
                 BasePowerKw = 0.0,
                 MaxOptionalKw = 2.0,
-                MinPowerKw = 3.0, // misconfiguration: minimum above the tier
+                MinOptionalKw = 3.0, // misconfiguration: minimum above the tier
                 ActualPowerKw = 1.0,
                 MaxPowerKw = 10.0
             };
@@ -136,8 +136,8 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "wb",
                 Name = "Wallboxes",
-                IsControllable = true,
-                BaseLimitKw = 8.0,
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
                 ActualPowerKw = 6.5,
                 MaxPowerKw = 22.0
             };
@@ -157,8 +157,8 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "wb",
                 Name = "Wallboxes",
-                IsControllable = true,
-                BaseLimitKw = 8.0,
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
                 ActualPowerKw = 7.0,
                 MaxPowerKw = 22.0
             };
@@ -178,8 +178,8 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "wb",
                 Name = "Wallboxes",
-                IsControllable = true,
-                BaseLimitKw = 8.0,
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
                 ActualPowerKw = 6.5,
                 MaxPowerKw = 22.0
             };
@@ -202,7 +202,7 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "house",
                 Name = "House Lights & Sockets",
-                IsControllable = false,
+                HasOptionalTier = false,
                 ActualPowerKw = 1.5,
                 BasePowerKw = 1.0
             };
@@ -223,10 +223,10 @@ namespace Pulswerk.Core.Tests
             {
                 Id = "wb",
                 Name = "Wallboxes",
-                IsControllable = true,
-                BaseLimitKw = 8.0, // MaxOptionalKw 8
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
                 ActualPowerKw = 6.0,
-                MinPowerKw = 1.38,
+                MinOptionalKw = 1.38,
                 MaxPowerKw = 11.0 // physical ceiling below MaxOptionalKw
             };
 
@@ -685,7 +685,7 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
-        public void EmsService_Snapshot_Autarky_IsZeroWhenNoConsumption()
+        public void EmsService_Snapshot_Autarky_IsFullWhenNoConsumption()
         {
             var svc = EmsService.Instance;
             var originalSources = svc.SourcesConfig;
@@ -697,7 +697,8 @@ namespace Pulswerk.Core.Tests
 
                 var snap = svc.GetSnapshot();
                 Assert.Equal(0.0, snap.TotalConsumptionKw);
-                Assert.Equal(0.0, snap.AutarkyPct);
+                Assert.Equal(100.0, snap.AutarkyPct);
+                Assert.Equal(100.0, snap.Autarky24hPct);
             }
             finally
             {

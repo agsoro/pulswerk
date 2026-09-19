@@ -1666,9 +1666,6 @@ namespace Pulswerk.Dashboard.Controllers
                     actualPowerKey = c.ActualPowerKey,
                     forcePowerKey = c.ForcePowerKey,
                     priority = c.Priority,
-                    isControllable = c.IsControllable,
-                    baseLimitKw = c.BaseLimitKw,
-                    minPowerKw = c.MinPowerKw,
                     actualPowerKw = c.ActualPowerKw,
                     isActivelyDemanding = c.IsActivelyDemanding,
                     allocatedOptionalKw = c.AllocatedOptionalKw,
@@ -1679,23 +1676,9 @@ namespace Pulswerk.Dashboard.Controllers
                 }).ToList(),
                 sources = svc.SourcesConfig,
 
-                // Legacy & convenience aliases for backward compatibility
-                baseLimitKw = svc.BaseLimitKw,
-                effectiveLimitKw = svc.EffectiveLimitKw,
-                wbActualKw = svc.WbActualKw,
                 batteryPowerKey = svc.BatteryPowerKey,
                 batterySocKey = svc.BatterySocKey,
                 batteryReserveKw = svc.BatteryReserveKw,
-                wbForcePowerKey = svc.WbForcePowerKey,
-                wbActualPowerKey = svc.WbActualPowerKey,
-                controlMode = svc.ControlMode,
-                monthlyTargetKwh = svc.BaseLimitKw,
-                mainMeterKey = svc.WbActualPowerKey,
-                targetKwh = svc.TargetKwh,
-                actualKwh = svc.ActualKwh,
-                deviationPct = svc.DeviationPct,
-                isCurtailmentActive = svc.IsCurtailmentActive,
-                controlState = svc.ControlState,
                 logs = snapshot.Logs.Select(l => new {
                     timestamp = l.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
                     message = l.Message,
@@ -1707,10 +1690,7 @@ namespace Pulswerk.Dashboard.Controllers
         public class EmsConfigDto
         {
             public bool Enabled { get; set; } = true;
-            public double BaseLimitKw { get; set; } = 8.0;
             public double BatteryReserveKw { get; set; } = 1.0;
-            public string WbForcePowerKey { get; set; } = "";
-            public string WbActualPowerKey { get; set; } = "";
             public string BatteryPowerKey { get; set; } = "";
             public string BatterySocKey { get; set; } = "";
             public double BatteryMaxPowerKw { get; set; } = 5.0;
@@ -1719,9 +1699,6 @@ namespace Pulswerk.Dashboard.Controllers
             public EnergySourcesConfig? Sources { get; set; }
             public List<EnergyConsumer>? Consumers { get; set; }
 
-            // Legacy fallbacks
-            public double MonthlyTargetKwh { get; set; }
-            public string MainMeterKey { get; set; } = "";
         }
 
         [HttpPost("ems/config")]
@@ -1733,8 +1710,6 @@ namespace Pulswerk.Dashboard.Controllers
             var svc = EmsService.Instance;
 
             var sources = req.Sources ?? svc.SourcesConfig;
-            double baseLimit = req.BaseLimitKw > 0 ? req.BaseLimitKw : (req.MonthlyTargetKwh > 0 ? req.MonthlyTargetKwh : sources.GridMaxImportKw);
-            sources.GridMaxImportKw = baseLimit;
 
             if (req.HasBattery.HasValue)
                 sources.HasBattery = req.HasBattery.Value;
@@ -1750,18 +1725,7 @@ namespace Pulswerk.Dashboard.Controllers
             if (!string.IsNullOrWhiteSpace(req.BatterySocKey))
                 sources.BatterySocKey = req.BatterySocKey;
 
-            var consumers = req.Consumers ?? svc.Consumers;
-            var primary = consumers.FirstOrDefault(c => c.IsControllable);
-            if (primary != null)
-            {
-                if (!string.IsNullOrWhiteSpace(req.WbForcePowerKey))
-                    primary.ForcePowerKey = req.WbForcePowerKey;
-                if (!string.IsNullOrWhiteSpace(req.WbActualPowerKey))
-                    primary.ActualPowerKey = req.WbActualPowerKey;
-                primary.BaseLimitKw = baseLimit;
-            }
-
-            svc.SaveConfiguration(req.Enabled, sources, consumers);
+            svc.SaveConfiguration(req.Enabled, sources, req.Consumers ?? svc.Consumers);
             return Ok(new { success = true });
         }
 
