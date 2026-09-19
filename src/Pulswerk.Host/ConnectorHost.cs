@@ -96,7 +96,7 @@ namespace Pulswerk.Host
                     ctx => { ctx.Cancel = true; cts.Cancel(); });
             }
 
-            StartMonitoringDashboard(cts.Token);
+            Task dashboardTask = StartMonitoringDashboard(cts.Token);
             StartBacnetClients();
             StartKnxConnections();
 
@@ -111,8 +111,16 @@ namespace Pulswerk.Host
             try { await Task.Delay(-1, cts.Token); }
             catch (TaskCanceledException) { }
 
-            Shutdown();
-            sigtermReg?.Dispose();
+            try
+            {
+                await dashboardTask;
+            }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                Shutdown();
+                sigtermReg?.Dispose();
+            }
         }
 
         // ── Config loading ───────────────────────────────────────────────────
@@ -296,9 +304,9 @@ namespace Pulswerk.Host
 
         // ── Monitoring dashboard ─────────────────────────────────────────────
 
-        void StartMonitoringDashboard(CancellationToken ct)
+        Task StartMonitoringDashboard(CancellationToken ct)
         {
-            if (_cfg.Server == null) return;
+            if (_cfg.Server == null) return Task.CompletedTask;
             Log.Info($"Starting dashboard on port {_cfg.Server.Port}...");
 
             var dataService = new DashboardDataService(
@@ -425,7 +433,7 @@ namespace Pulswerk.Host
                 EmsService.Instance.Start();
             }
 
-            _ = Task.Run(async () =>
+            return Task.Run(async () =>
             {
                 try { await server.RunAsync(ct); }
                 catch (OperationCanceledException) { }
