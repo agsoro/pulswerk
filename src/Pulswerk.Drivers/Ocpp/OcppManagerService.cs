@@ -26,6 +26,7 @@ namespace Pulswerk.Drivers.Ocpp
 
         // Tracks active transaction IDs to details (ChargePointId, ConnectorId, IdTag, StartMeterValue)
         private readonly ConcurrentDictionary<int, ActiveTransactionInfo> _activeTransactions = new();
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingCallResults = new();
 
         private int _transactionIdCounter = 1000;
         private BillingStore? _billingStore;
@@ -204,6 +205,10 @@ namespace Pulswerk.Drivers.Ocpp
                 {
                     string payloadStr = root.GetArrayLength() > 2 ? root[2].ToString() : "";
                     Log.Info($"[OCPP] [{chargePointId}] Received CallResult for message {messageId}: {payloadStr}");
+                    if (_pendingCallResults.TryRemove(messageId, out var pendingResult))
+                    {
+                        pendingResult.TrySetResult(true);
+                    }
                 }
                 // MessageType 4 = CALLERROR
                 else if (messageType == 4)
@@ -211,6 +216,10 @@ namespace Pulswerk.Drivers.Ocpp
                     string errorCode = root.GetArrayLength() > 2 ? root[2].GetString() ?? "" : "";
                     string errorDesc = root.GetArrayLength() > 3 ? root[3].GetString() ?? "" : "";
                     Log.Warning($"[OCPP] [{chargePointId}] Received CallError for message {messageId}: {errorCode} - {errorDesc}");
+                    if (_pendingCallResults.TryRemove(messageId, out var pendingError))
+                    {
+                        pendingError.TrySetResult(false);
+                    }
                 }
             }
             catch (Exception ex)
@@ -846,7 +855,25 @@ namespace Pulswerk.Drivers.Ocpp
             var payload = new { connectorId = connectorId };
             string ocppMsg = $"[2,\"{messageId}\",\"ClearChargingProfile\",{JsonSerializer.Serialize(payload)}]";
             Log.Debug($"[OCPP] [{chargePointId}] Sending ClearChargingProfile on connector {connectorId}");
-            return await SendMessageAsync(chargePointId, ocppMsg);
+            var pendingResult = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingCallResults[messageId] = pendingResult;
+
+            if (!await SendMessageAsync(chargePointId, ocppMsg))
+            {
+                _pendingCallResults.TryRemove(messageId, out _);
+                return false;
+            }
+
+            try
+            {
+                return await pendingResult.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (TimeoutException)
+            {
+                _pendingCallResults.TryRemove(messageId, out _);
+                Log.Warning($"[OCPP] [{chargePointId}] Timed out waiting for ClearChargingProfile response.");
+                return false;
+            }
         }
 
         private async Task<bool> SendChargingProfileMessageAsync(
