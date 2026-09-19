@@ -956,7 +956,7 @@ namespace Pulswerk.Drivers.Ocpp
                             chargingRateUnit = "A",
                             chargingSchedulePeriod = new[]
                             {
-                                new { startPeriod = 0, limit = Math.Round(limitAmps, 1), numberPhases = phases }
+                                new { startPeriod = 0, limit = Math.Round(limitAmps, 1) }
                             }
                         }
                     }
@@ -978,7 +978,7 @@ namespace Pulswerk.Drivers.Ocpp
                             chargingRateUnit = "A",
                             chargingSchedulePeriod = new[]
                             {
-                                new { startPeriod = 0, limit = Math.Round(limitAmps, 1), numberPhases = phases }
+                                new { startPeriod = 0, limit = Math.Round(limitAmps, 1) }
                             }
                         }
                     }
