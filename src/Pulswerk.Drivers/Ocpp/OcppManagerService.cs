@@ -838,7 +838,7 @@ namespace Pulswerk.Drivers.Ocpp
                     chargePointId,
                     connectorId: targetConnector,
                     profileId: 3,
-                    stackLevel: 2,
+                    stackLevel: 10,
                     purpose: "TxProfile",
                     kind: "Relative",
                     limitAmps: maxCurrentAmps,
