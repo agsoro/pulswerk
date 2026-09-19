@@ -179,6 +179,12 @@ namespace Pulswerk.Ems
         public double StandbyOptionalKw { get; set; } = 0.0;
 
         /// <summary>
+        /// Percentage of the optional tier added per dispatch cycle while the consumer is running.
+        /// The default reaches full power in about three minutes at the ten-second dispatch interval.
+        /// </summary>
+        public double RampPercentPerCycle { get; set; } = 100.0 / 18.0;
+
+        /// <summary>
         /// Physical/hardware upper limit (e.g. 22 kW for 3-phase 32A wallboxes, or 11 kW).
         /// Solar surplus can boost the consumer up to this ceiling.
         /// </summary>
@@ -373,7 +379,21 @@ namespace Pulswerk.Ems
                     double physicalMaxOpt = Math.Min(
                         consumer.MaxOptionalKw,
                         Math.Max(0.0, consumer.MaxPowerKw - consumer.BasePowerKw));
-                    double maxOpt = Math.Min(physicalMaxOpt, remainingSourceHeadroomKw);
+                    double requestedOpt = guaranteedOpt;
+                    if (consumer.IsActivelyDemanding)
+                    {
+                        double step = physicalMaxOpt * Math.Max(0.0, consumer.RampPercentPerCycle) / 100.0;
+                        requestedOpt = consumer.AllocatedOptionalKw >= guaranteedOpt &&
+                            (consumer.AllocatedOptionalKw > 0.0 || guaranteedOpt > 0.0)
+                            ? consumer.AllocatedOptionalKw + step
+                            : guaranteedOpt > 0.0
+                                ? guaranteedOpt
+                                : step;
+                    }
+
+                    double sourceAvailableKw = remainingSourceHeadroomKw;
+                    double maxOpt = Math.Min(physicalMaxOpt, requestedOpt);
+                    maxOpt = Math.Min(maxOpt, remainingSourceHeadroomKw);
                     if (!double.IsPositiveInfinity(remainingSourceHeadroomKw))
                     {
                         remainingSourceHeadroomKw = Math.Max(0.0, remainingSourceHeadroomKw - maxOpt);
@@ -381,7 +401,7 @@ namespace Pulswerk.Ems
                     consumer.AllocatedOptionalKw = Math.Round(maxOpt, 2);
                     consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + maxOpt, 2);
                     consumer.UnusedPowerKw = 0.0;
-                    bool sourceLimited = maxOpt < physicalMaxOpt;
+                    bool sourceLimited = maxOpt < physicalMaxOpt && sourceAvailableKw < physicalMaxOpt;
                     consumer.Status = sourceLimited
                         ? "Autarky (Source Limited)"
                         : consumer.IsActivelyDemanding

@@ -38,10 +38,32 @@ namespace Pulswerk.Core.Tests
             // Grid idle, PV covers everything -> no curtailment.
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
 
-            // Unrestricted up to the physical ceiling: min(MaxOptionalKw=8, MaxPowerKw-Base=22).
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
+            // A running consumer starts at its guaranteed minimum.
+            Assert.Equal(1.38, wallbox.AllocatedOptionalKw);
+            Assert.Equal(1.38, wallbox.AllocatedPowerKw);
             Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
+        }
+
+        [Fact]
+        public void Dispatch_RunningConsumer_RampsByPercentageOverThreeMinutes()
+        {
+            var sources = CreateDefaultSources(8.0);
+            var wallbox = new EnergyConsumer
+            {
+                Id = "wb",
+                Name = "Wallbox",
+                HasOptionalTier = true,
+                MaxOptionalKw = 8.0,
+                ActualPowerKw = 6.5,
+                MinOptionalKw = 1.38,
+                MaxPowerKw = 22.0
+            };
+
+            EnergyDispatchEngine.Dispatch(sources, 0.0, 10.0, 0.0, 50.0, new[] { wallbox });
+            Assert.Equal(1.38, wallbox.AllocatedOptionalKw);
+
+            EnergyDispatchEngine.Dispatch(sources, 0.0, 10.0, 0.0, 50.0, new[] { wallbox });
+            Assert.Equal(1.82, wallbox.AllocatedOptionalKw);
         }
 
         [Fact]
@@ -77,7 +99,9 @@ namespace Pulswerk.Core.Tests
                 Name = "Wallbox",
                 HasOptionalTier = true,
                 MaxOptionalKw = 8.0,
-                MaxPowerKw = 22.0
+                MaxPowerKw = 22.0,
+                ActualPowerKw = 1.0,
+                RampPercentPerCycle = 100.0
             };
 
             // Only 2 kW of the battery's 5 kW discharge ceiling remains available.
@@ -120,6 +144,8 @@ namespace Pulswerk.Core.Tests
                 HasOptionalTier = true,
                 MaxOptionalKw = 8.0,
                 MaxPowerKw = 22.0,
+                ActualPowerKw = 1.0,
+                RampPercentPerCycle = 100.0,
                 Priority = 1
             };
             var lowPriority = new EnergyConsumer
@@ -129,6 +155,8 @@ namespace Pulswerk.Core.Tests
                 HasOptionalTier = true,
                 MaxOptionalKw = 8.0,
                 MaxPowerKw = 22.0,
+                ActualPowerKw = 1.0,
+                RampPercentPerCycle = 100.0,
                 Priority = 2
             };
 
@@ -246,7 +274,7 @@ namespace Pulswerk.Core.Tests
             // Import below the 0.2 kW deadband -> no curtailment.
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.15, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
 
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal(0.44, wallbox.AllocatedOptionalKw);
             Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
@@ -264,10 +292,10 @@ namespace Pulswerk.Core.Tests
                 MaxPowerKw = 22.0
             };
 
-            // Grid export (negative = out of pool) -> autarky, unlimited draw.
+            // Grid export (negative = out of pool) -> autarky, first ramp step.
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: -3.5, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 0.0, new[] { wallbox });
 
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal(0.44, wallbox.AllocatedOptionalKw);
             Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
@@ -289,9 +317,9 @@ namespace Pulswerk.Core.Tests
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 3.0, pvPowerKw: 0.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
             Assert.Equal(0.0, wallbox.AllocatedOptionalKw);
 
-            // Phase 2: import stops -> immediately unrestricted again.
+            // Phase 2: import stops -> the running consumer starts at its first step.
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
+            Assert.Equal(0.44, wallbox.AllocatedOptionalKw);
             Assert.Equal("Autarky (Unrestricted)", wallbox.Status);
         }
 
@@ -333,9 +361,9 @@ namespace Pulswerk.Core.Tests
 
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 10.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { wallbox });
 
-            // min(MaxOptionalKw=8, MaxPowerKw-Base=11) = 8.
-            Assert.Equal(8.0, wallbox.AllocatedOptionalKw);
-            Assert.Equal(8.0, wallbox.AllocatedPowerKw);
+            // The first running cycle starts at the configured minimum.
+            Assert.Equal(1.38, wallbox.AllocatedOptionalKw);
+            Assert.Equal(1.38, wallbox.AllocatedPowerKw);
         }
 
         [Fact]
@@ -355,9 +383,9 @@ namespace Pulswerk.Core.Tests
 
             EnergyDispatchEngine.Dispatch(sources, gridPowerKw: 0.0, pvPowerKw: 8.0, batteryPowerKw: 0.0, batterySocPct: 50.0, new[] { heatPump });
 
-            // Autarky: base 2.0 + full optional 4.0 = 6.0 kW total setpoint.
-            Assert.Equal(4.0, heatPump.AllocatedOptionalKw);
-            Assert.Equal(6.0, heatPump.AllocatedPowerKw);
+            // The first running cycle adds 5.56% of the optional tier.
+            Assert.Equal(0.22, heatPump.AllocatedOptionalKw);
+            Assert.Equal(2.22, heatPump.AllocatedPowerKw);
             Assert.Equal("Autarky (Unrestricted)", heatPump.Status);
         }
 
