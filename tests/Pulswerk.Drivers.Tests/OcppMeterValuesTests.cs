@@ -57,6 +57,36 @@ namespace Pulswerk.Drivers.Tests
         }
 
         [Fact]
+        public void ProcessMeterValues_PrefersCompletePhaseReadingsOverStaleAggregatePower()
+        {
+            string json = """
+            {
+                "connectorId": 1,
+                "meterValue": [
+                    {
+                        "sampledValue": [
+                            { "value": "11040", "measurand": "Power.Active.Import", "unit": "W" },
+                            { "value": "6.2", "measurand": "Current.Import", "phase": "L1", "unit": "A" },
+                            { "value": "6.2", "measurand": "Current.Import", "phase": "L2", "unit": "A" },
+                            { "value": "6.2", "measurand": "Current.Import", "phase": "L3", "unit": "A" },
+                            { "value": "230.0", "measurand": "Voltage", "phase": "L1", "unit": "V" },
+                            { "value": "230.0", "measurand": "Voltage", "phase": "L2", "unit": "V" },
+                            { "value": "230.0", "measurand": "Voltage", "phase": "L3", "unit": "V" }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+            using var doc = JsonDocument.Parse(json);
+            _service.ProcessMeterValues(CpId, doc.RootElement);
+
+            var telemetry = _service.GetTelemetry(CpId);
+            Assert.Equal(4.278, Convert.ToDouble(telemetry["power"]), 3);
+            Assert.Equal(6.2, Convert.ToDouble(telemetry["current"]));
+        }
+
+        [Fact]
         public void ProcessMeterValues_WithoutPowerMeasurand_CalculatesPowerFromCurrentAndVoltage()
         {
             // Real wallbox scenario: sends Voltage, Energy, Current on 3 phases, but NO Power.Active.Import measurand!

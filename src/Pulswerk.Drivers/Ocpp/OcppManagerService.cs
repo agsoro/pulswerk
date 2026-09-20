@@ -645,33 +645,31 @@ namespace Pulswerk.Drivers.Ocpp
 
                 // Calculate total power
                 double? resolvedPowerKw = null;
-                if (explicitTotalPowerKw.HasValue)
-                {
-                    resolvedPowerKw = explicitTotalPowerKw.Value;
-                }
-                else if (phasePowersKw.Count > 0)
+                if (phasePowersKw.Count > 0)
                 {
                     resolvedPowerKw = phasePowersKw.Values.Sum();
                 }
+                else if (phaseCurrents.Count > 0 && phaseVoltages.Count >= phaseCurrents.Count &&
+                         maxCurrent.HasValue && maxCurrent.Value > 0)
+                {
+                    double defaultV = (maxVoltage.HasValue && maxVoltage.Value > 50.0) ? maxVoltage.Value : 230.0;
+                    double totalW = 0.0;
+                    foreach (var (ph, cur) in phaseCurrents)
+                    {
+                        double v = phaseVoltages.GetValueOrDefault(ph, defaultV);
+                        totalW += cur * v;
+                    }
+                    resolvedPowerKw = totalW / 1000.0;
+                }
+                else if (explicitTotalPowerKw.HasValue)
+                {
+                    resolvedPowerKw = explicitTotalPowerKw.Value;
+                }
                 else if (maxCurrent.HasValue && maxCurrent.Value > 0)
                 {
-                    // Calculate power from Current and Voltage
+                    int phCount = activePhases.Count > 0 ? activePhases.Count : 1;
                     double defaultV = (maxVoltage.HasValue && maxVoltage.Value > 50.0) ? maxVoltage.Value : 230.0;
-                    if (phaseCurrents.Count > 0)
-                    {
-                        double totalW = 0.0;
-                        foreach (var (ph, cur) in phaseCurrents)
-                        {
-                            double v = phaseVoltages.GetValueOrDefault(ph, defaultV);
-                            totalW += cur * v;
-                        }
-                        resolvedPowerKw = totalW / 1000.0;
-                    }
-                    else
-                    {
-                        int phCount = activePhases.Count > 0 ? activePhases.Count : 1;
-                        resolvedPowerKw = (maxCurrent.Value * defaultV * phCount) / 1000.0;
-                    }
+                    resolvedPowerKw = (maxCurrent.Value * defaultV * phCount) / 1000.0;
                 }
 
                 // Commit telemetry updates
