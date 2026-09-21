@@ -130,7 +130,7 @@ export function App() {
     routePath = routePath.toLowerCase();
     let pageComponent = null;
     let pageTitle = 'Home';
-    const dashboardDetailMatch = routePath.match(/^\/Dashboards\/([^/]+)(?:\/([^/]+))?$/);
+    const dashboardDetailMatch = routePath.match(/^\/dashboards\/([^/]+)(?:\/([^/]+))?$/);
     if (dashboardDetailMatch && user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false) {
         pageTitle = 'Dashboards';
         pageComponent = (_jsx(DashboardsPage, { dashboardId: dashboardDetailMatch[1], slug: dashboardDetailMatch[2] || undefined }));

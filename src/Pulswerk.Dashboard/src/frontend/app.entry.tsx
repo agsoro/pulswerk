@@ -181,7 +181,7 @@ export function App() {
     let pageTitle = 'Home';
 
 
-    const dashboardDetailMatch = routePath.match(/^\/Dashboards\/([^/]+)(?:\/([^/]+))?$/);
+    const dashboardDetailMatch = routePath.match(/^\/dashboards\/([^/]+)(?:\/([^/]+))?$/);
     if (dashboardDetailMatch && user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false) {
         pageTitle = 'Dashboards';
         pageComponent = (
