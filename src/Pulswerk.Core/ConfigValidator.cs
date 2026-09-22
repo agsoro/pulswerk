@@ -222,11 +222,66 @@ namespace Pulswerk.Core
             if (cfg.Polling != null && cfg.Polling.IntervalSeconds < 1)
                 errors.Add("Polling interval must be at least 1 second.");
 
+            ValidateControls(cfg, errors);
+
             if (errors.Any())
             {
                 var msg = "Configuration validation failed:\n" + string.Join("\n", errors.Select(e => $"  • {e}"));
                 throw new Exception(msg);
             }
+        }
+
+        private static void ValidateControls(AppConfig cfg, List<string> errors)
+        {
+            if (cfg.Controls == null) return;
+
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var deviceIds = (cfg.Devices ?? new()).Select(device => device.Id).ToList();
+            foreach (var control in cfg.Controls)
+            {
+                if (string.IsNullOrWhiteSpace(control.Id) || !ids.Add(control.Id))
+                    errors.Add($"Control rule ID '{control.Id}' is missing or duplicated.");
+                if (control.IntervalSeconds < 1)
+                    errors.Add($"Control '{control.Id}' intervalSeconds must be at least 1.");
+                if (control.SourceStaleSeconds < 1)
+                    errors.Add($"Control '{control.Id}' sourceStaleSeconds must be at least 1.");
+                if (control.Actions == null || control.Actions.Count == 0)
+                    errors.Add($"Control '{control.Id}' must define at least one action.");
+
+                if (control.When != null)
+                    ValidateCondition(control.When, $"Control '{control.Id}' condition", errors);
+                foreach (var action in control.Actions ?? new())
+                {
+                    if (string.IsNullOrWhiteSpace(action.Target))
+                        errors.Add($"Control '{control.Id}' has an action with no target.");
+                    else if (!deviceIds.Any(id => action.Target.StartsWith(id + "_", StringComparison.OrdinalIgnoreCase)))
+                        errors.Add($"Control '{control.Id}' action target '{action.Target}' must start with a configured device ID and underscore.");
+                    if (string.IsNullOrWhiteSpace(action.ValueSource) && action.Value == null)
+                        errors.Add($"Control '{control.Id}' action '{action.Target}' needs value or valueSource.");
+                    if (!string.IsNullOrWhiteSpace(action.ValueSource) && action.Value != null)
+                        errors.Add($"Control '{control.Id}' action '{action.Target}' cannot define both value and valueSource.");
+                }
+            }
+        }
+
+        private static void ValidateCondition(ControlConditionConfig? condition, string context, List<string> errors)
+        {
+            if (condition == null)
+            {
+                errors.Add($"{context} is missing.");
+                return;
+            }
+
+            bool compound = condition.All is { Count: > 0 } || condition.Any is { Count: > 0 };
+            bool leaf = !string.IsNullOrWhiteSpace(condition.Source) ||
+                        !string.IsNullOrWhiteSpace(condition.Operator) || condition.Value != null;
+            if (compound == leaf)
+                errors.Add($"{context} must define either source/operator/value or all/any.");
+
+            foreach (var child in condition.All ?? new())
+                ValidateCondition(child, context + ".all", errors);
+            foreach (var child in condition.Any ?? new())
+                ValidateCondition(child, context + ".any", errors);
         }
 
         private static void ValidateFormula(string formula, AppConfig cfg, DeviceConfig? currentDevice, string context, List<string> errors)

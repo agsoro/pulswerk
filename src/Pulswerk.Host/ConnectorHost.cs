@@ -46,6 +46,7 @@ namespace Pulswerk.Host
         BillingStore _billingStore = null!;
         DashboardServer? _dashboardServer;
         DevicePoller _poller = null!;
+        ControlEngine? _controlEngine;
 
         ConnectorHost(AppConfig cfg)
         {
@@ -100,8 +101,15 @@ namespace Pulswerk.Host
             StartBacnetClients();
             StartKnxConnections();
 
-            _poller = new DevicePoller(_drivers, _dataService, _offlineDevices, _lastPolledAt);
+            InitializeConnectionLocks();
+            _controlEngine = new ControlEngine(
+                _cfg.Controls, _cfg.Devices, _drivers, _connections, _connLocks, _alarmStore);
+            _poller = new DevicePoller(
+                _drivers, _dataService, _offlineDevices, _lastPolledAt,
+                values => _controlEngine.Update(values),
+                deviceName => _controlEngine.MarkDeviceSeen(deviceName));
             StartPollingLoops(cts.Token);
+            StartControlLoop(cts.Token);
 
             // BACnet COV discovery + hierarchy run in background — Modbus polling is already active
             _ = Task.Run(() => StartCovSubscriptions(cts.Token), cts.Token);
@@ -228,7 +236,8 @@ namespace Pulswerk.Host
                 overrideCfg.Server ?? baseCfg.Server,
                 overrideCfg.Modules ?? baseCfg.Modules,
                 overrideCfg.Latitude ?? baseCfg.Latitude,
-                overrideCfg.Longitude ?? baseCfg.Longitude
+                overrideCfg.Longitude ?? baseCfg.Longitude,
+                overrideCfg.Controls ?? baseCfg.Controls
             );
         }
 
@@ -557,6 +566,8 @@ namespace Pulswerk.Host
                         }
                     }
 
+                    _controlEngine?.Update(values);
+
                     _lastPolledAt[device.Name] = DateTime.UtcNow;
                 }
             }
@@ -701,11 +712,6 @@ namespace Pulswerk.Host
         {
             Log.Info("Starting device polling loops. Ctrl+C to stop.");
 
-            // Create one semaphore per connection to serialize requests
-            // and prevent overloading shared gateways/controllers.
-            foreach (var conn in _cfg.Connections)
-                _connLocks[conn.Id] = new SemaphoreSlim(1, 1);
-
             int staggerIndex = 0;
             foreach (var device in _cfg.Devices)
             {
@@ -766,6 +772,30 @@ namespace Pulswerk.Host
                     }
                 }, ct);
             }
+        }
+
+        void InitializeConnectionLocks()
+        {
+            foreach (var conn in _cfg.Connections)
+                _connLocks[conn.Id] = new SemaphoreSlim(1, 1);
+        }
+
+        void StartControlLoop(CancellationToken ct)
+        {
+            if (_controlEngine is not { HasRules: true }) return;
+
+            Log.Info($"Starting control rules ({_cfg.Controls!.Count}).");
+            _ = Task.Run(async () =>
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    try { _controlEngine.EvaluateDue(); }
+                    catch (Exception ex) { Log.Error($"[Control] Evaluation error: {ex.Message}"); }
+
+                    try { await Task.Delay(1_000, ct); }
+                    catch (TaskCanceledException) { break; }
+                }
+            }, ct);
         }
 
         // ── Shutdown ─────────────────────────────────────────────────────────

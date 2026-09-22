@@ -26,6 +26,8 @@ namespace Pulswerk.Host
     {
         readonly Dictionary<string, IDeviceDriver> _drivers;
         readonly DashboardDataService? _dataService;
+        readonly Action<Dictionary<string, object>>? _onTelemetryUpdated;
+        readonly Action<string>? _onDeviceSeen;
         readonly ConcurrentDictionary<string, byte> _offlineDevices;
         readonly ConcurrentDictionary<string, DateTime> _lastPolledAt;
 
@@ -38,10 +40,14 @@ namespace Pulswerk.Host
             Dictionary<string, IDeviceDriver> drivers,
             DashboardDataService? dataService,
             ConcurrentDictionary<string, byte> offlineDevices,
-            ConcurrentDictionary<string, DateTime> lastPolledAt)
+            ConcurrentDictionary<string, DateTime> lastPolledAt,
+            Action<Dictionary<string, object>>? onTelemetryUpdated = null,
+            Action<string>? onDeviceSeen = null)
         {
             _drivers = drivers;
             _dataService = dataService;
+            _onTelemetryUpdated = onTelemetryUpdated;
+            _onDeviceSeen = onDeviceSeen;
             _offlineDevices = offlineDevices;
             _lastPolledAt = lastPolledAt;
         }
@@ -98,6 +104,7 @@ namespace Pulswerk.Host
                 // ── Mark device as recently seen ─────────────────────────
                 _lastPolledAt[device.Name] = DateTime.UtcNow;
                 _failCounts[device.Name] = 0;
+                _onDeviceSeen?.Invoke(device.Name);
 
                 if (_offlineDevices.TryRemove(device.Name, out _))
                 {
@@ -146,7 +153,11 @@ namespace Pulswerk.Host
             if (attributes.Count > 0)
                 _dataService?.UpdateAttributes(attributes);
 
+            if (telemetryValues.Count > 0)
+                _onTelemetryUpdated?.Invoke(new Dictionary<string, object>(telemetryValues));
+
             _lastPolledAt[device.Name] = DateTime.UtcNow;
+            _onDeviceSeen?.Invoke(device.Name);
 
             if (attributes.Count > 0 || telemetryValues.Count > 0)
                 Log.Debug(
@@ -198,7 +209,12 @@ namespace Pulswerk.Host
                     }
                 }
                 dataStore.InsertBatch(scoped);
+
+                foreach (var pair in scoped)
+                    telemetryValues[pair.Key] = pair.Value;
             }
+
+            _onTelemetryUpdated?.Invoke(new Dictionary<string, object>(telemetryValues));
         }
 
         // =================================================================

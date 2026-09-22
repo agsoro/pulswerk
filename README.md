@@ -81,6 +81,45 @@ dotnet run --project src/Pulswerk.Host
 ## ⚙️ Configuration
 System behavior is defined in `pulswerk.json`. A fully documented template is available at `pulswerk.example.json` in the project root.
 
+### Scheduled Control Writes
+
+The optional `controls` section evaluates telemetry and writes numeric or boolean values to writable KNX, BACnet, or other driver points. Targets use the globally scoped telemetry key format `{deviceId}_{pointKey}`.
+
+```json
+"controls": [
+  {
+    "id": "export-power-to-knx",
+    "when": {
+      "source": "pv_active",
+      "operator": "eq",
+      "value": true
+    },
+    "actions": [
+      {
+        "target": "building-knx_total_power",
+        "valueSource": "plant_total_power"
+      }
+    ],
+    "intervalSeconds": 60,
+    "sourceStaleSeconds": 600
+  }
+]
+```
+
+Supported comparison operators are `eq`, `neq`, `gt`, `gte`, `lt`, and `lte`. Conditions can also use `all` or `any` arrays. The defaults are 60 seconds for `intervalSeconds` and 600 seconds for `sourceStaleSeconds`. Staleness is based on the last successful observation or device service, not on whether the value changed, so a healthy device reporting the same value remains valid. Values are not written when an input is stale, unavailable, or the target is not writable. Set `onChangeOnly` to `true` for edge-triggered actions; it defaults to periodic synchronization while the condition remains true. A failed write creates a `Control Write Failure` alarm.
+
+The `when` block is optional. If omitted, the action runs periodically according to `intervalSeconds`:
+
+```json
+{
+  "id": "refresh-setpoint",
+  "actions": [
+    { "target": "building-knx_total_power", "value": 0 }
+  ],
+  "intervalSeconds": 60
+}
+```
+
 ## 📜 License
 Pulswerk is released under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for the full text.
 

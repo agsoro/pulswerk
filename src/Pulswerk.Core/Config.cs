@@ -13,7 +13,32 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("server")] ServerConfig? Server,
         [property: JsonPropertyName("modules")] ModulesConfig? Modules = null,
         [property: JsonPropertyName("latitude")] double? Latitude = null,
-        [property: JsonPropertyName("longitude")] double? Longitude = null
+        [property: JsonPropertyName("longitude")] double? Longitude = null,
+        [property: JsonPropertyName("controls")] List<ControlRuleConfig>? Controls = null
+    );
+
+    public record ControlRuleConfig(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("when")] ControlConditionConfig? When,
+        [property: JsonPropertyName("actions")] List<ControlActionConfig> Actions,
+        [property: JsonPropertyName("intervalSeconds")] int IntervalSeconds = 60,
+        [property: JsonPropertyName("onChangeOnly")] bool OnChangeOnly = false,
+        [property: JsonPropertyName("sourceStaleSeconds")] int SourceStaleSeconds = 600,
+        [property: JsonPropertyName("enabled")] bool Enabled = true
+    );
+
+    public record ControlConditionConfig(
+        [property: JsonPropertyName("source")] string? Source = null,
+        [property: JsonPropertyName("operator")] string? Operator = null,
+        [property: JsonPropertyName("value")] object? Value = null,
+        [property: JsonPropertyName("all")] List<ControlConditionConfig>? All = null,
+        [property: JsonPropertyName("any")] List<ControlConditionConfig>? Any = null
+    );
+
+    public record ControlActionConfig(
+        [property: JsonPropertyName("target")] string Target,
+        [property: JsonPropertyName("value")] object? Value = null,
+        [property: JsonPropertyName("valueSource")] string? ValueSource = null
     );
 
     public record TelemetryConfig(
