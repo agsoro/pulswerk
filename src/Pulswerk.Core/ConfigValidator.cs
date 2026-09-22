@@ -31,8 +31,8 @@ namespace Pulswerk.Core
                     else if (!connIds.Add(conn.Id))
                         errors.Add($"Duplicate connection ID found: '{conn.Id}'.");
 
-                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp-ws" && conn.Type != "knx-ip" && conn.Type != "smgw-http")
-                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp-ws', 'knx-ip', 'smgw-http'.");
+                    if (conn.Type != "modbus-tcp" && conn.Type != "bacnet-ip" && conn.Type != "ocpp-ws" && conn.Type != "knx-ip" && conn.Type != "smgw-http" && conn.Type != "weather-http")
+                        errors.Add($"Connection '{conn.Id}' has unsupported type '{conn.Type}'. Supported: 'modbus-tcp', 'bacnet-ip', 'ocpp-ws', 'knx-ip', 'smgw-http', 'weather-http'.");
 
                     if (conn.Type == "bacnet-ip")
                     {
@@ -99,7 +99,7 @@ namespace Pulswerk.Core
                     if (string.IsNullOrWhiteSpace(dev.Name))
                         errors.Add($"Device '{dev.Id}' is missing a name.");
 
-                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ems" && dev.DeviceType != "ocpp" && dev.DeviceType != "ocpp-master" && dev.DeviceType != "knx" && dev.DeviceType != "smgw")
+                    if (dev.DeviceType != "virtual" && dev.DeviceType != "ems" && dev.DeviceType != "ocpp" && dev.DeviceType != "ocpp-master" && dev.DeviceType != "knx" && dev.DeviceType != "smgw" && dev.DeviceType != "open-meteo")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");
@@ -109,7 +109,7 @@ namespace Pulswerk.Core
                         if (dev.DeviceId == null)
                             errors.Add($"Device '{dev.Id}' is missing 'deviceId' (Slave ID or Instance ID).");
                     }
-                    else if (dev.DeviceType == "ocpp" || dev.DeviceType == "ocpp-master" || dev.DeviceType == "knx" || dev.DeviceType == "smgw")
+                    else if (dev.DeviceType == "ocpp" || dev.DeviceType == "ocpp-master" || dev.DeviceType == "knx" || dev.DeviceType == "smgw" || dev.DeviceType == "open-meteo")
                     {
                         if (string.IsNullOrWhiteSpace(dev.ConnectionId))
                             errors.Add($"Device '{dev.Id}' is missing a 'connectionId'.");

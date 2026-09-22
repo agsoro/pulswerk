@@ -31,6 +31,7 @@ namespace Pulswerk.Core
         public const string Ampere = "A";
         public const string Milliampere = "mA";
         public const string Watt = "W";
+        public const string WattPerSquareMeter = "W/m²";
         public const string Kilowatt = "kW";
         public const string Megawatt = "MW";
         public const string VoltAmpere = "VA";

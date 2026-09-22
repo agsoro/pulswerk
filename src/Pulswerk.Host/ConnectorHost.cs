@@ -226,7 +226,9 @@ namespace Pulswerk.Host
                 mergedConnections,
                 mergedDevices,
                 overrideCfg.Server ?? baseCfg.Server,
-                overrideCfg.Modules ?? baseCfg.Modules
+                overrideCfg.Modules ?? baseCfg.Modules,
+                overrideCfg.Latitude ?? baseCfg.Latitude,
+                overrideCfg.Longitude ?? baseCfg.Longitude
             );
         }
 
@@ -276,7 +278,10 @@ namespace Pulswerk.Host
             foreach (var d in _cfg.Devices)
             {
                 if (d.DeviceType == "virtual" || d.DeviceType == "ems") continue;
-                _drivers[d.Name] = DeviceDriverFactory.Create(d.DeviceType);
+                var driver = DeviceDriverFactory.Create(d.DeviceType);
+                if (driver is Pulswerk.Drivers.Weather.OpenMeteoDriver weather)
+                    weather.ConfigureLocation(_cfg.Latitude, _cfg.Longitude);
+                _drivers[d.Name] = driver;
                 _lastPolledAt[d.Name] = DateTime.MinValue;
             }
         }
@@ -717,6 +722,7 @@ namespace Pulswerk.Host
                 // field controllers. COV-mode devices handle real-time updates via
                 // subscriptions; this interval only governs periodic rediscovery/full reads.
                 int defaultIntervalSeconds = IsBacnet(device) ? 3600
+                    : IsWeather(device) ? 900
                     : (_cfg.Polling?.IntervalSeconds ?? 60);
 
                 int intervalMs = (capturedDevice.PollIntervalSeconds ?? defaultIntervalSeconds) * 1000;
@@ -799,6 +805,9 @@ namespace Pulswerk.Host
         static bool IsBacnet(DeviceConfig d) =>
             d.DeviceType.Equals("bacnet", StringComparison.OrdinalIgnoreCase) ||
             d.DeviceType.Equals("deziko", StringComparison.OrdinalIgnoreCase);
+
+        static bool IsWeather(DeviceConfig d) =>
+            d.DeviceType.Equals("open-meteo", StringComparison.OrdinalIgnoreCase);
 
         static string? ResolveConfigPath()
         {

@@ -150,7 +150,9 @@ namespace Pulswerk.Dashboard
                 _config.Connections,
                 _config.Devices,
                 _config.Server,
-                modules
+                modules,
+                _config.Latitude,
+                _config.Longitude
             );
         }
 

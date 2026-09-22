@@ -13,6 +13,8 @@
   "polling": {
     "intervalSeconds": 30
   },
+  "latitude": 52.52,
+  "longitude": 13.405,
   "connections": [
     {
       "id": "modbus-building-a",
@@ -74,6 +76,11 @@
       "password": "your-han-password",
       "ignoreSslErrors": true,
       "name": "Smart Meter Gateway"
+    },
+    {
+      "id": "weather-api",
+      "type": "weather-http",
+      "name": "Open-Meteo Weather API"
     }
   ],
   "devices": [
@@ -92,6 +99,14 @@
         "Billing"
       ],
       "assetType": "Meter"
+    },
+    {
+      "id": "weather-site",
+      "name": "Site Weather",
+      "deviceType": "open-meteo",
+      "connectionId": "weather-api",
+      "path": ["Weather"],
+      "assetType": "Weather"
     },
     {
       "id": "meter-main-a",

@@ -15,6 +15,8 @@
   "polling": {
     "intervalSeconds": 30
   },
+  "latitude": 52.52,
+  "longitude": 13.405,
   // ── Server / Web Dashboard ────────────────────────────────────────────────
   "server": {
     "port": 5000,
@@ -119,6 +121,11 @@
       "knxCommissioningPassword": "code-printed-on-the-bridge",
       "knxStaleSeconds": 180,
       "name": "KNX Test Gateway"
+    },
+    {
+      "id": "weather-test",
+      "type": "weather-http",
+      "name": "Open-Meteo Test Weather"
     }
   ],
   // ── Devices ──────────────────────────────────────────────────────────────
@@ -323,6 +330,18 @@
       ],
       "assetType": "KNX Controller",
       "knxGroupAddressXml": "ets_export.xml"
+    },
+    {
+      "id": "weather-test-site",
+      "name": "Test Site Weather",
+      "deviceType": "open-meteo",
+      "connectionId": "weather-test",
+      "pollIntervalSeconds": 900,
+      "path": [
+        "Building A",
+        "Weather"
+      ],
+      "assetType": "Weather"
     }
   ]
 }

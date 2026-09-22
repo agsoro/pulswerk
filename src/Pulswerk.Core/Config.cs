@@ -11,7 +11,9 @@ namespace Pulswerk.Core
         [property: JsonPropertyName("connections")] List<ConnectionConfig> Connections,
         [property: JsonPropertyName("devices")] List<DeviceConfig> Devices,
         [property: JsonPropertyName("server")] ServerConfig? Server,
-        [property: JsonPropertyName("modules")] ModulesConfig? Modules = null
+        [property: JsonPropertyName("modules")] ModulesConfig? Modules = null,
+        [property: JsonPropertyName("latitude")] double? Latitude = null,
+        [property: JsonPropertyName("longitude")] double? Longitude = null
     );
 
     public record TelemetryConfig(
