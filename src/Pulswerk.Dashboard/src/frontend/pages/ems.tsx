@@ -335,45 +335,56 @@ export function EmsPage() {
     return (
         <div class="max-w-7xl mx-auto px-4 py-8 space-y-8">
             {/* Header with Glassmorphism and Status */}
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 p-6 rounded-3xl shadow-xl">
-                <div>
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-sm">
-                            <i class="fas fa-bolt text-lg"></i>
-                        </div>
-                        <div>
-                            <h1 class="text-2xl font-black text-slate-100 tracking-tight">
-                                {t('ems_page_title')}
-                            </h1>
-                            <p class="text-xs text-slate-400 mt-0.5">
-                                {t('ems_page_subtitle')}
-                            </p>
-                        </div>
+            <div class="flex flex-col gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 p-5 rounded-3xl shadow-xl">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-sm shrink-0">
+                        <i class="fas fa-bolt text-lg"></i>
+                    </div>
+                    <h1 class="text-2xl font-black text-slate-100 tracking-tight">
+                        {t('ems_page_title')}
+                    </h1>
+                    <div class={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[0.58rem] font-bold uppercase tracking-[0.16em] ${
+                        snapshot?.enabled
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                            : 'border-slate-700 bg-slate-800 text-slate-400'
+                    }`}>
+                        <span class={`w-1.5 h-1.5 rounded-full ${snapshot?.enabled ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+                        {snapshot?.enabled ? 'Active' : 'Disabled'}
                     </div>
                 </div>
 
-                <div class="flex items-center gap-3">
-                    <button
-                        onClick={handleToggleEnabled}
-                        disabled={toggling}
-                        class={`px-4 py-2.5 rounded-xl font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-2.5 shadow-sm ${
-                            snapshot?.enabled
-                                ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25'
-                                : 'bg-slate-800 border border-slate-700 text-slate-400 hover:bg-slate-750'
-                        }`}
-                    >
-                        <span class={`w-2.5 h-2.5 rounded-full ${snapshot?.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
-                        {snapshot?.enabled ? 'EMS Active' : 'EMS Disabled'}
-                    </button>
+                <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                    <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
+                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_autarky')}</div>
+                        <div class="mt-2 text-2xl font-black" style={{ color: autarkyColor }}>
+                            {(snapshot?.autarkyPct ?? 0).toFixed(0)}%
+                        </div>
+                        <div class="text-[0.65rem] text-slate-500">Current</div>
+                    </div>
 
-                    <button
-                        onClick={handleOpenConfigModal}
-                        class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all flex items-center gap-2"
-                        title={t('ems_configure_system')}
-                    >
-                        <i class="fas fa-sliders-h text-cyan-400"></i>
-                        <span>{t('ems_configure_system')}</span>
-                    </button>
+                    <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
+                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_autarky_24h')}</div>
+                        <div class="mt-2 text-3xl font-black text-slate-100" style={{ color: autarkyColor }}>
+                            {(snapshot?.autarky24hPct ?? 0).toFixed(0)}%
+                        </div>
+                        <div class="text-[0.65rem] text-slate-500">24h Self-sufficiency</div>
+                    </div>
+
+                    <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
+                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_surplus_pool')}</div>
+                        <div class="mt-2 text-2xl font-black text-cyan-400">
+                            {isSurplusActive ? `+${(snapshot?.totalSurplusAvailableKw ?? 0).toFixed(1)}` : `${(snapshot?.totalSurplusAvailableKw ?? 0).toFixed(1)}`}kW
+                        </div>
+                        <div class="text-[0.65rem] text-slate-500">{isSurplusActive ? t('ems_surplus_active') : t('ems_base_active')}</div>
+                    </div>
+
+                    <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
+                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_battery_soc')}</div>
+                        <div class="mt-2 text-2xl font-black text-emerald-400">
+                            {(snapshot?.batterySocPct ?? 0).toFixed(0)}%
+                        </div>
+                        <div class="text-[0.65rem] text-slate-500">Battery state of charge</div>
+                    </div>
                 </div>
             </div>
 
@@ -728,11 +739,11 @@ export function EmsPage() {
                         </div>
                         <div
                             onClick={() => handleOpenTelemetryDetails('ems_autarky_24h')}
-                            class="text-[0.65rem] text-slate-400 font-mono mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors"
+                            class="text-[0.65rem] text-slate-400 mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors"
                             title="View telemetry details: ems_autarky_24h"
                         >
                             <span>{t('ems_autarky_24h')}:</span>
-                            <span class="font-bold text-slate-200">{(snapshot?.autarky24hPct ?? 0).toFixed(0)}%</span>
+                            <span class="font-bold text-slate-200" style={{ color: autarkyColor }}>{(snapshot?.autarky24hPct ?? 0).toFixed(0)}%</span>
                             <i class="fas fa-arrow-right text-[0.55rem] text-slate-500"></i>
                         </div>
                     </div>
