@@ -89,7 +89,6 @@ interface LogEntry {
 export function EmsPage() {
     const [snapshot, setSnapshot] = useState<EnergySystemSnapshot | null>(null);
     const [loading, setLoading] = useState(true);
-    const [toggling, setToggling] = useState(false);
 
     // Modal state
     const [showConfigModal, setShowConfigModal] = useState(false);
@@ -132,40 +131,6 @@ export function EmsPage() {
         const interval = setInterval(fetchSnapshot, 4000);
         return () => clearInterval(interval);
     }, []);
-
-    const handleToggleEnabled = async () => {
-        if (!snapshot || toggling) return;
-        setToggling(true);
-        try {
-            const res = await fetch('/plswk/api/ems/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: !snapshot.enabled })
-            });
-            if (res.ok) await fetchSnapshot();
-        } catch (e) {
-            console.error("Failed to toggle EMS:", e);
-        } finally {
-            setToggling(false);
-        }
-    };
-
-    const handleOpenConfigModal = () => {
-        if (snapshot?.sources) {
-            setGridMaxKw(snapshot.sources.gridMaxImportKw ?? 8.0);
-            setGridKey(snapshot.sources.gridMeterKey ?? 'meter-main-a_power');
-            setPvKey(snapshot.sources.pvMeterKey ?? 'pv-rooftop_power');
-            setHasBattery(snapshot.sources.hasBattery ?? true);
-            setBattPowerKey(snapshot.sources.batteryPowerKey ?? 'solis-battery_power');
-            setBattSocKey(snapshot.sources.batterySocKey ?? 'solis-battery_battery_soc');
-            setBattReserveKw(snapshot.sources.batteryMinReserveKw ?? 1.0);
-            setBattMaxKw(snapshot.sources.batteryMaxPowerKw ?? 5.0);
-            setInvertGridSign(snapshot.sources.invertGridPowerSign ?? false);
-            setInvertPvSign(snapshot.sources.invertPvPowerSign ?? false);
-            setInvertBattSign(snapshot.sources.invertBatteryPowerSign ?? false);
-        }
-        setShowConfigModal(true);
-    };
 
     const handleSaveSystemConfig = async (e: Event) => {
         e.preventDefault();
