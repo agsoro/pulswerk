@@ -121,6 +121,7 @@ namespace Pulswerk.Drivers.Knx
 
         public static object Decode(byte[] bytes, string dpt)
         {
+            dpt = NormalizeDpt(dpt);
             if (bytes == null || bytes.Length == 0)
                 return 0.0;
 
@@ -135,7 +136,9 @@ namespace Pulswerk.Drivers.Knx
             }
             else if (dpt.StartsWith("5.")) // 8-bit unsigned value (Scaling, 0-255 / 0-100%)
             {
-                return (double)bytes[0];
+                return NormalizeDpt(dpt) == "5.001"
+                    ? bytes[0] * 100.0 / byte.MaxValue
+                    : (double)bytes[0];
             }
             else if (dpt.StartsWith("9.")) // 2-byte float (Temperature, Humidity, etc.)
             {
@@ -196,6 +199,7 @@ namespace Pulswerk.Drivers.Knx
 
         public static byte[] Encode(object value, string dpt, out bool isSmall)
         {
+            dpt = NormalizeDpt(dpt);
             isSmall = false;
 
             if (dpt.StartsWith("1."))
@@ -225,6 +229,16 @@ namespace Pulswerk.Drivers.Knx
             }
             else if (dpt.StartsWith("5."))
             {
+                if (NormalizeDpt(dpt) == "5.001")
+                {
+                    double percent = Convert.ToDouble(value);
+                    if (!double.IsFinite(percent) || percent < 0 || percent > 100)
+                        throw new ArgumentOutOfRangeException(nameof(value), "DPT 5.001 values must be between 0 and 100 percent.");
+
+                    byte rawPercent = (byte)Math.Round(percent * byte.MaxValue / 100.0);
+                    return new byte[] { rawPercent };
+                }
+
                 byte val = Convert.ToByte(value);
                 return new byte[] { val };
             }

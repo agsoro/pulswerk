@@ -170,11 +170,40 @@ namespace Pulswerk.Drivers.Tests
         [Fact]
         public void TestDpt5Scaling()
         {
-            byte[] encoded = KnxDpt.Encode(128, "5.001", out bool isSmall);
+            byte[] encoded = KnxDpt.Encode(128, "5.004", out bool isSmall);
             Assert.False(isSmall);
             Assert.Single(encoded);
             Assert.Equal(128, encoded[0]);
-            Assert.Equal(128.0, KnxDpt.Decode(encoded, "5.001"));
+            Assert.Equal(128.0, KnxDpt.Decode(encoded, "5.004"));
+        }
+
+        [Theory]
+        [InlineData(0.0, 0)]
+        [InlineData(50.0, 128)]
+        [InlineData(100.0, 255)]
+        public void TestDpt5001PercentScaling(double percent, byte expectedRawValue)
+        {
+            byte[] encoded = KnxDpt.Encode(percent, "DPST-5-1", out bool isSmall);
+
+            Assert.False(isSmall);
+            Assert.Equal(expectedRawValue, Assert.Single(encoded));
+            Assert.Equal(expectedRawValue * 100.0 / 255.0, KnxDpt.Decode(encoded, "5.001"));
+        }
+
+        [Theory]
+        [InlineData(-0.1)]
+        [InlineData(100.1)]
+        public void TestDpt5001RejectsOutOfRangePercent(double percent)
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => KnxDpt.Encode(percent, "5.001", out _));
+        }
+
+        [Fact]
+        public void TestDpt5001RejectsNonFinitePercent()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => KnxDpt.Encode(double.NaN, "5.001", out _));
+            Assert.Throws<ArgumentOutOfRangeException>(() => KnxDpt.Encode(double.PositiveInfinity, "5.001", out _));
+            Assert.Throws<ArgumentOutOfRangeException>(() => KnxDpt.Encode(double.NegativeInfinity, "5.001", out _));
         }
 
         [Fact]
