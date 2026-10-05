@@ -13,7 +13,6 @@ const TRANSLATIONS = {
         'nav_wallboxes': 'Wallboxes',
         'nav_billing': 'Billing',
         'nav_ems': 'Energy Management',
-        'nav_ems': 'Energy Management',
         'nav_config': 'Configuration',
         'config_discover_devices': 'Discover Devices',
         'config_discover_title': 'Discover Devices on Network',

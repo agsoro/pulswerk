@@ -270,6 +270,9 @@ export function App() {
                         user?.modules?.dashboards !== false && user?.permissions?.canAccessDashboards !== false
                             ? { id: 'dashboards', path: '/plswk/dashboards', icon: 'fa-th-large', labelKey: 'nav_dashboards' }
                             : null,
+                        user?.modules?.ems !== false && user?.permissions?.canAccessEms !== false
+                            ? { id: 'ems', path: '/plswk/ems', icon: 'fa-bolt', labelKey: 'nav_ems' }
+                            : null,
                         user?.modules?.alarms !== false && user?.permissions?.canAccessAlarms !== false
                             ? { id: 'alarms', path: '/plswk/alarms', icon: 'fa-bell', labelKey: 'nav_alarms' }
                             : null
