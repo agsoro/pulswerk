@@ -836,6 +836,40 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
+        public void EmsService_Snapshot_Autarky24h_DoesNotDoubleCountUncontrollableLoadsWithoutBattery()
+        {
+            var svc = EmsService.Instance;
+            var originalSources = svc.SourcesConfig;
+            var originalEnergyState = svc.EnergyCalculator.Serialize();
+            try
+            {
+                svc.Configure(new EnergySourcesConfig { HasBattery = false, GridMaxImportKw = 10.0, PvMeterKey = "pv_test" });
+                svc.EnergyCalculator.Reset();
+                long minuteKey = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
+
+                // The same 8 kWh uncontrollable load appears in both buckets; grid supplies
+                // 2 kWh and PV supplies 6 kWh.
+                svc.EnergyCalculator.AddEnergy(
+                    minuteKey,
+                    gridImportKwh: 2.0,
+                    pvGenKwh: 6.0,
+                    uncontrollableKwh: 8.0,
+                    consumerKwh: new Dictionary<string, double> { ["base-load"] = 8.0 });
+
+                var snap = svc.GetSnapshot();
+
+                Assert.Equal(8.0, snap.TotalConsumption24hKwh);
+                Assert.Equal(75.0, snap.Autarky24hPct);
+            }
+            finally
+            {
+                svc.Configure(originalSources);
+                svc.EnergyCalculator.Reset();
+                svc.EnergyCalculator.Deserialize(originalEnergyState);
+            }
+        }
+
+        [Fact]
         public void EmsService_GetTelemetryValues_PublishesAutarkyKeys()
         {
             var svc = EmsService.Instance;
@@ -904,4 +938,3 @@ namespace Pulswerk.Core.Tests
         }
     }
 }
-

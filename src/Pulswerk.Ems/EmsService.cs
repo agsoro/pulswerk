@@ -702,8 +702,15 @@ namespace Pulswerk.Ems
                     consumer.Energy24hKwh = 0.0;
             }
 
-            // 24h consumption = controllable + uncontrollable
-            double consumption24h = energyTotals.ConsumerKwh.Values.Sum() + energyTotals.UncontrollableKwh;
+            // Calculate site consumption from the energy balance. Uncontrollable consumers
+            // are included in both ConsumerKwh and UncontrollableKwh, so summing load buckets
+            // can double-count them.
+            double consumption24h = Math.Max(
+                0.0,
+                energyTotals.GridImportKwh - energyTotals.GridExportKwh
+                    + energyTotals.PvGenerationKwh
+                    + energyTotals.BatteryDischargedKwh
+                    - energyTotals.BatteryChargedKwh);
             double autarky24hPct = consumption24h > 0.01
                 ? Math.Round(Math.Clamp((1.0 - energyTotals.GridImportKwh / consumption24h) * 100.0, 0.0, 100.0), 1)
                 : 100.0;
