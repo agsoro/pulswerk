@@ -25,7 +25,11 @@ namespace Pulswerk.Billing.Tests
         public void Dispose()
         {
             Store.Dispose();
-            if (File.Exists(DbPath)) File.Delete(DbPath);
+            // WAL mode leaves -wal/-shm siblings next to the database file.
+            foreach (var path in new[] { DbPath, DbPath + "-wal", DbPath + "-shm" })
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
         }
     }
 

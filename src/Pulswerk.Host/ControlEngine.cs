@@ -63,7 +63,7 @@ namespace Pulswerk.Host
             lock (_stateLock) _deviceSeen[device.Id] = DateTime.UtcNow;
         }
 
-        public void EvaluateDue()
+        public async Task EvaluateDueAsync()
         {
             foreach (var rule in _rules)
             {
@@ -92,7 +92,7 @@ namespace Pulswerk.Host
                 if (!condition || (rule.OnChangeOnly && previousCondition)) continue;
 
                 foreach (var action in rule.Actions)
-                    ExecuteAction(rule, action, values);
+                    await ExecuteActionAsync(rule, action, values);
             }
         }
 
@@ -141,7 +141,7 @@ namespace Pulswerk.Host
             foreach (var child in condition.Any ?? new()) CollectSources(child, sources);
         }
 
-        void ExecuteAction(
+        async Task ExecuteActionAsync(
             ControlRuleConfig rule,
             ControlActionConfig action,
             IReadOnlyDictionary<string, object> values)
@@ -178,8 +178,8 @@ namespace Pulswerk.Host
 
             try
             {
-                connectionLock.Wait();
-                try { writer.Write(connection, device, driverKey, value); }
+                await connectionLock.WaitAsync();
+                try { await writer.WriteAsync(connection, device, driverKey, value); }
                 finally { connectionLock.Release(); }
 
                 _alarmStore.ClearByOriginAndType($"CONTROL:{rule.Id}", "Control Write Failure");

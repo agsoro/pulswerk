@@ -74,8 +74,6 @@ fi
 echo "▶ Running Playwright tests…"
 echo ""
 
-PLAYWRIGHT_ARGS="${*}"
-
 docker run --rm \
   --network "${COMPOSE_NETWORK}" \
   -e DASHBOARD_URL="${DASHBOARD_URL}" \
@@ -84,15 +82,15 @@ docker run --rm \
   -v "${DASHBOARD_DIR}:/work" \
   -w /work \
   "${PLAYWRIGHT_IMAGE}" \
-  bash -c "
+  bash -c '
     set -euo pipefail
-    echo '  → Installing npm dependencies…'
-    npm install --silent --omit=optional 2>&1 | grep -v 'npm notice' || true
-    echo '  → Running Playwright…'
-    npx playwright test ${PLAYWRIGHT_ARGS} 2>&1
-  "
+    echo "  → Installing npm dependencies…"
+    npm install --silent --omit=optional 2>&1 | grep -v "npm notice" || true
+    echo "  → Running Playwright…"
+    npx playwright test "$@" 2>&1
+  ' -- "$@" || EXIT_CODE=$?
 
-EXIT_CODE=$?
+EXIT_CODE=${EXIT_CODE:-0}
 
 echo ""
 if [ "${EXIT_CODE}" -eq 0 ]; then

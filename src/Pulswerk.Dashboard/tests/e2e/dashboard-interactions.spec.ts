@@ -306,7 +306,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     await submitBtn.click();
 
     // Verify redirection to the new dashboard in edit mode
-    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForURL(/\/plswk\/dashboards\/[^/]+/);
     await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
     
     // Verify the page title matches
@@ -325,7 +325,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     // Update and save the description
     await descInput.fill('Updated description via E2E test');
     await page.locator('#btnSave').click();
-    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForURL(/\/plswk\/dashboards\/[^/]+/);
     await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
 
     // Verify description updated in view mode
@@ -341,7 +341,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     await descInput.fill('Canceled description change');
     await page.locator('#btnCancel').click();
     
-    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForURL(/\/plswk\/dashboards\/[^/]+/);
     await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
     await expect(descView).toHaveText('Updated description via E2E test');
   });
@@ -389,7 +389,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     const cards = page.locator('.dash-card');
     if (await cards.count() > 0) {
       await cards.first().click();
-      await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+      await page.waitForURL(/\/plswk\/dashboards\/[^/]+/);
       await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
 
       // After loading a dashboard, it should only query metadata for the keys actually used,
@@ -437,7 +437,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     await modal.locator('button:has-text("Create")').click();
 
     // Verify redirection to the new dashboard in edit mode
-    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForURL(/\/plswk\/dashboards\/[^/]+/);
     await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
 
     // Click "Add your first widget" or "Add Widget" on the top right
@@ -599,7 +599,7 @@ test.describe('Dashboard Interactions and Component States', () => {
     await modal.locator('button:has-text("Create")').click();
 
     // Verify redirection to the new dashboard in edit mode
-    await page.waitForURL(/\/plswk\/Dashboards\/[^/]+/);
+    await page.waitForURL(/\/plswk\/dashboards\/[^/]+/);
     await page.waitForSelector('[data-testid="dash-edit-mode"]', { state: 'visible' });
 
     // Click "Add your first widget" or "Add Widget" on the top right

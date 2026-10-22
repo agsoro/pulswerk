@@ -13,13 +13,14 @@ namespace Pulswerk.Dashboard
 {
     public partial class DashboardDataService
     {
-        public Task<bool> WriteValueAsync(string key, double value)
+        public async Task<WriteResult> WriteValueAsync(string key, double value)
         {
             var device = IdentifyDeviceFromTelemetryKey(key);
             if (device == null)
             {
-                Log.Error($"[Dashboard] Write rejected: no device found for key '{key}'");
-                return Task.FromResult(false);
+                string error = $"no device found for key '{key}'";
+                Log.Error($"[Dashboard] Write rejected: {error}");
+                return WriteResult.Fail(error);
             }
 
             string driverKey = key.Substring(device.Id.Length + 1);
@@ -27,25 +28,28 @@ namespace Pulswerk.Dashboard
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
             if (conn == null && device.DeviceType != "ems" && device.DeviceType != "virtual")
             {
-                Log.Error($"[Dashboard] Write rejected: no connection for device '{device.Name}'");
-                return Task.FromResult(false);
+                string error = $"no connection for device '{device.Name}'";
+                Log.Error($"[Dashboard] Write rejected: {error}");
+                return WriteResult.Fail(error);
             }
 
             var writer = (Drivers.TryGetValue(device.Name, out var drv) ? drv : null) as IDeviceWriter;
             if (writer == null)
             {
-                Log.Error($"[Dashboard] Write rejected: driver for '{device.Name}' is not an IDeviceWriter");
-                return Task.FromResult(false);
+                string error = $"driver for '{device.Name}' is not an IDeviceWriter";
+                Log.Error($"[Dashboard] Write rejected: {error}");
+                return WriteResult.Fail(error);
             }
             if (!writer.IsWritable(driverKey))
             {
-                Log.Error($"[Dashboard] Write rejected: key '{driverKey}' (full: '{key}') is not writable");
-                return Task.FromResult(false);
+                string error = $"key '{driverKey}' (full: '{key}') is not writable";
+                Log.Error($"[Dashboard] Write rejected: {error}");
+                return WriteResult.Fail(error);
             }
 
             try
             {
-                writer.Write(conn!, device, driverKey, value);
+                await writer.WriteAsync(conn!, device, driverKey, value);
                 Log.Info($"[Dashboard] Manual write success: {key} = {value}");
 
                 // Immediately update LatestValues with the correctly formatted display value
@@ -70,38 +74,40 @@ namespace Pulswerk.Dashboard
                 DataStore.Insert(key, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), value);
                 DataStore.Flush();
 
-                return Task.FromResult(true);
+                return WriteResult.Ok();
             }
             catch (Exception ex)
             {
                 Log.Error($"[Dashboard] Write failed for {key}: {ex.Message}");
-                return Task.FromResult(false);
+                return WriteResult.Fail(ex.Message);
             }
         }
 
-        public Task<bool> WriteComplexValueAsync(string key, object value)
+        public Task<WriteResult> WriteComplexValueAsync(string key, object value)
         {
             var device = IdentifyDeviceFromTelemetryKey(key);
-            if (device == null) return Task.FromResult(false);
+            if (device == null) return Task.FromResult(WriteResult.Fail($"no device found for key '{key}'"));
 
             string driverKey = key.Substring(device.Id.Length + 1);
 
             var conn = Config.Connections.FirstOrDefault(c => c.Id == device.ConnectionId);
-            if (conn == null && device.DeviceType != "ems" && device.DeviceType != "virtual") return Task.FromResult(false);
+            if (conn == null && device.DeviceType != "ems" && device.DeviceType != "virtual")
+                return Task.FromResult(WriteResult.Fail($"no connection for device '{device.Name}'"));
 
             var writer = (Drivers.TryGetValue(device.Name, out var drv) ? drv : null) as IDeviceWriter;
-            if (writer == null || !writer.IsWritable(driverKey)) return Task.FromResult(false);
+            if (writer == null || !writer.IsWritable(driverKey))
+                return Task.FromResult(WriteResult.Fail($"key '{driverKey}' (full: '{key}') is not writable"));
 
             try
             {
                 writer.WriteComplex(conn!, device, driverKey, value);
                 Log.Info($"[Dashboard] Complex write success: {key}");
-                return Task.FromResult(true);
+                return Task.FromResult(WriteResult.Ok());
             }
             catch (Exception ex)
             {
                 Log.Error($"[Dashboard] Complex write failed for {key}: {ex.Message}");
-                return Task.FromResult(false);
+                return Task.FromResult(WriteResult.Fail(ex.Message));
             }
         }
     }

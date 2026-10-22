@@ -130,7 +130,7 @@ test.describe('Mobile View & Touch Navigation Audits', () => {
     // Bottom navigation bar should be visible with primary icons
     const bottomNav = page.locator('[data-testid="bottom-nav"]');
     await expect(bottomNav).toBeVisible();
-    await expect(bottomNav.locator('a, button')).toHaveCount(5); // Home, Wallboxes, Dashboards, Alarms, More
+    await expect(bottomNav.locator('a, button')).toHaveCount(6); // Home, Wallboxes, Dashboards, EMS, Alarms, More
   });
 
   test('Mobile "More" drawer opens, closes, and navigates properly', async ({ page }) => {

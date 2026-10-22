@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { t } from '../i18n';
+import { setMobileHeaderAction } from '../mobileHeaderAction';
 
 interface EnergyConsumer {
     id: string;
@@ -21,6 +22,8 @@ interface EnergyConsumer {
 
     maxPowerKw?: number;
     energy24hKwh?: number;
+    energy30dKwh?: number;
+    energy1yKwh?: number;
 }
 
 interface EnergySourcesConfig {
@@ -75,6 +78,30 @@ interface EnergySystemSnapshot {
     totalConsumption24hKwh?: number;
     autarky24hPct?: number;
 
+    // Rolling 30-day calculated energy
+    gridImport30dKwh?: number;
+    gridExport30dKwh?: number;
+    pvGeneration30dKwh?: number;
+    batteryCharged30dKwh?: number;
+    batteryDischarged30dKwh?: number;
+    uncontrollable30dKwh?: number;
+    totalSurplus30dKwh?: number;
+    totalControllable30dKwh?: number;
+    totalConsumption30dKwh?: number;
+    autarky30dPct?: number;
+
+    // Rolling 1-year calculated energy
+    gridImport1yKwh?: number;
+    gridExport1yKwh?: number;
+    pvGeneration1yKwh?: number;
+    batteryCharged1yKwh?: number;
+    batteryDischarged1yKwh?: number;
+    uncontrollable1yKwh?: number;
+    totalSurplus1yKwh?: number;
+    totalControllable1yKwh?: number;
+    totalConsumption1yKwh?: number;
+    autarky1yPct?: number;
+
     consumers: EnergyConsumer[];
     sources: EnergySourcesConfig;
     logs: LogEntry[];
@@ -84,6 +111,62 @@ interface LogEntry {
     timestamp: string;
     message: string;
     state: string;
+}
+
+/** Formats a kWh value with adaptive precision so 1y totals stay readable. */
+function formatKwh(value?: number): string {
+    const v = value ?? 0;
+    if (!isFinite(v)) return '0';
+    const abs = Math.abs(v);
+    if (abs >= 1000) return Math.round(v).toLocaleString();
+    if (abs >= 100) return v.toFixed(0);
+    return v.toFixed(1);
+}
+
+interface RollingEnergyLineProps {
+    label?: string;
+    h24?: number;
+    d30?: number;
+    y1?: number;
+    accentClass: string;
+    onOpen?: (key: string) => void;
+    telemetryKey?: string;
+}
+
+/**
+ * Renders the rolling day / month / year energy as a three-cell grid.
+ * The instantaneous power is already shown as the card's headline value.
+ */
+function RollingEnergyLine({
+    label, h24, d30, y1, accentClass, onOpen, telemetryKey,
+}: RollingEnergyLineProps) {
+    const cells = [
+        { key: t('ems_24h_short'), value: formatKwh(h24) },
+        { key: t('ems_30d_short'), value: formatKwh(d30) },
+        { key: t('ems_1y_short'), value: formatKwh(y1) },
+    ];
+    return (
+        <div
+            class={onOpen && telemetryKey ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''}
+            onClick={onOpen && telemetryKey ? () => onOpen(telemetryKey) : undefined}
+            title={telemetryKey ? `View telemetry details: ${telemetryKey}` : undefined}
+        >
+            {label && (
+                <div class={`text-[0.6rem] uppercase tracking-[0.16em] font-bold mb-1 ${accentClass}`}>{label}</div>
+            )}
+            <div class="grid grid-cols-3 gap-1.5">
+                {cells.map(cell => (
+                    <div key={cell.key} class="rounded-lg bg-slate-950/50 border border-slate-800/70 px-2 py-1.5 min-w-0">
+                        <div class="text-[0.6rem] uppercase tracking-wider text-slate-500 font-bold">{cell.key}</div>
+                        <div class="font-mono leading-tight truncate">
+                            <span class="text-base font-bold text-slate-100">{cell.value}</span>
+                            <span class="text-[0.6rem] text-slate-500 ml-1">kWh</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
 }
 
 export function EmsPage() {
@@ -99,11 +182,11 @@ export function EmsPage() {
 
     // Config form
     const [gridMaxKw, setGridMaxKw] = useState(8.0);
-    const [gridKey, setGridKey] = useState('meter-main-a_power');
-    const [pvKey, setPvKey] = useState('pv-rooftop_power');
-    const [hasBattery, setHasBattery] = useState(true);
-    const [battPowerKey, setBattPowerKey] = useState('solis-battery_power');
-    const [battSocKey, setBattSocKey] = useState('solis-battery_battery_soc');
+    const [gridKey, setGridKey] = useState('');
+    const [pvKey, setPvKey] = useState('');
+    const [hasBattery, setHasBattery] = useState(false);
+    const [battPowerKey, setBattPowerKey] = useState('');
+    const [battSocKey, setBattSocKey] = useState('');
     const [battReserveKw, setBattReserveKw] = useState(1.0);
     const [battMaxKw, setBattMaxKw] = useState(5.0);
     const [invertGridSign, setInvertGridSign] = useState(false);
@@ -130,6 +213,34 @@ export function EmsPage() {
         fetchSnapshot();
         const interval = setInterval(fetchSnapshot, 4000);
         return () => clearInterval(interval);
+    }, []);
+
+    const handleOpenSystemConfig = () => {
+        const s = snapshot?.sources;
+        setGridMaxKw(s?.gridMaxImportKw ?? 8.0);
+        setGridKey(s?.gridMeterKey ?? '');
+        setPvKey(s?.pvMeterKey ?? '');
+        setHasBattery(s?.hasBattery ?? !!s?.batteryPowerKey);
+        setBattPowerKey(s?.batteryPowerKey ?? '');
+        setBattSocKey(s?.batterySocKey ?? '');
+        setBattReserveKw(s?.batteryMinReserveKw ?? 1.0);
+        setBattMaxKw(s?.batteryMaxPowerKw ?? 5.0);
+        setInvertGridSign(s?.invertGridPowerSign ?? false);
+        setInvertPvSign(s?.invertPvPowerSign ?? false);
+        setInvertBattSign(s?.invertBatteryPowerSign ?? false);
+        setShowConfigModal(true);
+    };
+
+    const openConfigRef = useRef(handleOpenSystemConfig);
+    openConfigRef.current = handleOpenSystemConfig;
+
+    useEffect(() => {
+        setMobileHeaderAction({
+            icon: 'fa-sliders-h',
+            title: t('ems_configure_system'),
+            onClick: () => openConfigRef.current(),
+        });
+        return () => setMobileHeaderAction(null);
     }, []);
 
     const handleSaveSystemConfig = async (e: Event) => {
@@ -168,13 +279,14 @@ export function EmsPage() {
             if (res.ok) {
                 setShowConfigModal(false);
                 await fetchSnapshot();
+                window.pwToast(t('ems_config_saved'));
             } else {
                 const errText = await res.text();
-                alert(`Failed to save system configuration: ${errText || res.statusText}`);
+                window.pwToast(`Failed to save system configuration: ${errText || res.statusText}`, 'error');
             }
         } catch (err: any) {
             console.error("Failed to save config:", err);
-            alert(`Error saving configuration: ${err?.message || err}`);
+            window.pwToast(`Error saving configuration: ${err?.message || err}`, 'error');
         } finally {
             setSavingConfig(false);
         }
@@ -216,15 +328,20 @@ export function EmsPage() {
     };
 
     const handleDeleteConsumer = async (id: string, name: string) => {
-        if (!confirm(`Delete consumer '${name}'?`)) return;
+        if (!(await window.pwConfirm(`Delete consumer '${name}'?`))) return;
         try {
             const res = await fetch(`/plswk/api/ems/consumers/${encodeURIComponent(id)}`, {
                 method: 'DELETE'
             });
-            if (res.ok) await fetchSnapshot();
-            else alert("Failed to delete consumer");
+            if (res.ok) {
+                await fetchSnapshot();
+                window.pwToast(t('ems_consumer_deleted'));
+            } else {
+                window.pwToast('Failed to delete consumer', 'error');
+            }
         } catch (e) {
             console.error("Failed to delete consumer:", e);
+            window.pwToast('Failed to delete consumer', 'error');
         }
     };
 
@@ -242,13 +359,14 @@ export function EmsPage() {
                 setShowConsumerModal(false);
                 setEditingConsumer(null);
                 await fetchSnapshot();
+                window.pwToast(t('ems_consumer_saved'));
             } else {
                 const errText = await res.text();
-                alert(`Failed to save consumer: ${errText || res.statusText}`);
+                window.pwToast(`Failed to save consumer: ${errText || res.statusText}`, 'error');
             }
         } catch (err: any) {
             console.error("Failed to save consumer:", err);
-            alert(`Error saving consumer: ${err?.message || err}`);
+            window.pwToast(`Error saving consumer: ${err?.message || err}`, 'error');
         } finally {
             setSavingConsumer(false);
         }
@@ -288,82 +406,144 @@ export function EmsPage() {
     const controllableConsumers = snapshot?.consumers?.filter(c => c.hasOptionalTier) ?? [];
     const uncontrollableConsumers = snapshot?.consumers?.filter(c => !c.hasOptionalTier) ?? [];
 
-    const isSurplusActive = (snapshot?.totalSurplusAvailableKw ?? 0) > 0.1;
-    const hasReclaimedPower = (snapshot?.totalReclaimedPowerKw ?? 0) > 0.1;
-
     // Autarky color: continuous gradient red (0%) → amber (~50%) → dark green (100%).
     // HSL hue interpolation 0° (red) → 145° (dark green), lightness 45% for readability.
     const autarkyPct = Math.min(100, Math.max(0, snapshot?.autarkyPct ?? 0));
     const autarkyHue = (autarkyPct / 100) * 145;
     const autarkyColor = `hsl(${autarkyHue.toFixed(0)}, 75%, 45%)`;
 
+    // Saldo = self-generated energy that stayed on site (PV minus grid feed-in)
+    // minus what the site actually consumed. Positive = surplus, negative = deficit.
+    // The headline shows the rolling 24 h balance in kWh; D/M/Y break it down.
+    const saldo24h = Math.max(0, (snapshot?.pvGeneration24hKwh ?? 0) - (snapshot?.gridExport24hKwh ?? 0)) - (snapshot?.totalConsumption24hKwh ?? 0);
+    const saldo30d = Math.max(0, (snapshot?.pvGeneration30dKwh ?? 0) - (snapshot?.gridExport30dKwh ?? 0)) - (snapshot?.totalConsumption30dKwh ?? 0);
+    const saldo1y = Math.max(0, (snapshot?.pvGeneration1yKwh ?? 0) - (snapshot?.gridExport1yKwh ?? 0)) - (snapshot?.totalConsumption1yKwh ?? 0);
+    const saldoPositive = saldo24h >= 0;
+    const saldoColor = saldoPositive ? 'text-emerald-400' : 'text-rose-400';
+
+    const autarkyWindows = [
+        { key: t('ems_24h_short'), pct: snapshot?.autarky24hPct ?? 0 },
+        { key: t('ems_30d_short'), pct: snapshot?.autarky30dPct ?? 0 },
+        { key: t('ems_1y_short'), pct: snapshot?.autarky1yPct ?? 0 },
+    ];
+    const saldoWindows = [
+        { key: t('ems_24h_short'), value: saldo24h },
+        { key: t('ems_30d_short'), value: saldo30d },
+        { key: t('ems_1y_short'), value: saldo1y },
+    ];
+
     return (
-        <div class="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        <div class="max-w-7xl mx-auto px-2 py-3 sm:px-4 sm:py-8 space-y-3 sm:space-y-8">
             {/* Header with Glassmorphism and Status */}
-            <div class="flex flex-col gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 p-5 rounded-3xl shadow-xl">
-                <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-sm shrink-0">
+            <div class="flex flex-col gap-3 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 p-3 sm:p-5 rounded-2xl sm:rounded-3xl shadow-xl" data-testid="ems-header">
+                <div class="hidden sm:flex items-center gap-3 min-w-0">
+                    <div class="flex w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 items-center justify-center text-cyan-400 shadow-sm shrink-0">
                         <i class="fas fa-bolt text-lg"></i>
                     </div>
-                    <h1 class="text-2xl font-black text-slate-100 tracking-tight">
+                    <h2 class="text-2xl font-black text-slate-100 tracking-tight">
                         {t('ems_page_title')}
-                    </h1>
-                    <div class={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[0.58rem] font-bold uppercase tracking-[0.16em] ${
-                        snapshot?.enabled
-                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                            : 'border-slate-700 bg-slate-800 text-slate-400'
-                    }`}>
-                        <span class={`w-1.5 h-1.5 rounded-full ${snapshot?.enabled ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
-                        {snapshot?.enabled ? 'Active' : 'Disabled'}
+                    </h2>
+                    <div class="flex items-center gap-2 ml-auto shrink-0">
+                        <button
+                            onClick={handleOpenSystemConfig}
+                            class="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-slate-300 hover:text-cyan-300 hover:border-cyan-500/50 transition-colors"
+                            title={t('ems_configure_system')}
+                        >
+                            <i class="fas fa-sliders-h"></i>
+                            <span>{t('ems_configure_system')}</span>
+                        </button>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* Autarky — current value plus rolling windows in one card */}
                     <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
-                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_autarky')}</div>
-                        <div class="mt-2 text-2xl font-black" style={{ color: autarkyColor }}>
-                            {(snapshot?.autarkyPct ?? 0).toFixed(0)}%
+                        <div class="flex items-baseline justify-between gap-2">
+                            <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_autarky')}</div>
+                            <div class="text-2xl font-black leading-none" style={{ color: autarkyColor }}>
+                                {(snapshot?.autarkyPct ?? 0).toFixed(0)}%
+                            </div>
                         </div>
-                        <div class="text-[0.65rem] text-slate-500">Current</div>
+                        <div class="w-full bg-slate-800/80 rounded-full h-1.5 mt-2 overflow-hidden">
+                            <div
+                                class="h-full rounded-full transition-all duration-500"
+                                style={{ width: `${autarkyPct}%`, backgroundColor: autarkyColor }}
+                            ></div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1.5 mt-2">
+                            {autarkyWindows.map(w => {
+                                const pct = Math.min(100, Math.max(0, w.pct));
+                                const color = `hsl(${((pct / 100) * 145).toFixed(0)}, 75%, 45%)`;
+                                return (
+                                    <div key={w.key} class="rounded-lg bg-slate-950/50 border border-slate-800/70 px-2 py-1.5 min-w-0">
+                                        <div class="text-[0.6rem] uppercase tracking-wider text-slate-500 font-bold">{w.key}</div>
+                                        <div class="text-lg font-black font-mono leading-tight truncate" style={{ color }}>
+                                            {w.pct.toFixed(0)}%
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
 
+                    {/* Saldo — self-generated (PV minus feed-in) minus consumption */}
                     <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
-                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_autarky_24h')}</div>
-                        <div class="mt-2 text-3xl font-black text-slate-100" style={{ color: autarkyColor }}>
-                            {(snapshot?.autarky24hPct ?? 0).toFixed(0)}%
+                        <div class="flex items-baseline justify-between gap-2">
+                            <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_saldo')}</div>
+                            <div class={`text-2xl font-black leading-none font-mono ${saldoColor}`}>
+                                {saldoPositive ? '+' : '−'}{formatKwh(Math.abs(saldo24h))}<span class="text-xs font-bold text-slate-400 ml-1">kWh</span>
+                            </div>
                         </div>
-                        <div class="text-[0.65rem] text-slate-500">24h Self-sufficiency</div>
+                        <div class="text-[0.6rem] text-slate-500 mt-1 leading-snug" title={t('ems_saldo_hint')}>
+                            {t('ems_saldo_hint')}
+                        </div>
+                        <div class="grid grid-cols-3 gap-1.5 mt-2">
+                            {saldoWindows.map(w => (
+                                <div key={w.key} class="rounded-lg bg-slate-950/50 border border-slate-800/70 px-2 py-1.5 min-w-0">
+                                    <div class="text-[0.6rem] uppercase tracking-wider text-slate-500 font-bold">{w.key}</div>
+                                    <div class={`text-lg font-black font-mono leading-tight truncate ${w.value >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {w.value >= 0 ? '+' : '−'}{formatKwh(Math.abs(w.value))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
+                    {/* Battery state of charge */}
                     <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
-                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_surplus_pool')}</div>
-                        <div class="mt-2 text-2xl font-black text-cyan-400">
-                            {isSurplusActive ? `+${(snapshot?.totalSurplusAvailableKw ?? 0).toFixed(1)}` : `${(snapshot?.totalSurplusAvailableKw ?? 0).toFixed(1)}`}kW
+                        <div class="flex items-baseline justify-between gap-2">
+                            <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_battery_soc')}</div>
+                            <div class="text-2xl font-black leading-none text-emerald-400">
+                                {(snapshot?.batterySocPct ?? 0).toFixed(0)}%
+                            </div>
                         </div>
-                        <div class="text-[0.65rem] text-slate-500">{isSurplusActive ? t('ems_surplus_active') : t('ems_base_active')}</div>
-                    </div>
-
-                    <div class="rounded-2xl border border-slate-800/90 bg-slate-950/40 p-3">
-                        <div class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 font-bold">{t('ems_battery_soc')}</div>
-                        <div class="mt-2 text-2xl font-black text-emerald-400">
-                            {(snapshot?.batterySocPct ?? 0).toFixed(0)}%
+                        <div class="w-full bg-slate-800/80 rounded-full h-1.5 mt-2 overflow-hidden">
+                            <div
+                                class={`h-full rounded-full transition-all duration-500 ${(snapshot?.batterySocPct ?? 0) > 20 ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                                style={{ width: `${Math.min(100, Math.max(0, snapshot?.batterySocPct ?? 0))}%` }}
+                            ></div>
                         </div>
-                        <div class="text-[0.65rem] text-slate-500">Battery state of charge</div>
+                        <div class="text-[0.6rem] text-slate-500 mt-2 truncate">
+                            {snapshot?.isBatteryCharging
+                                ? t('ems_battery_charging')
+                                : (snapshot?.batteryPowerKw ?? 0) > 0.3 ? t('ems_battery_discharging') : t('ems_battery_idle')}
+                            {' · '}
+                            {Math.abs(snapshot?.batteryPowerKw ?? 0).toFixed(1)} kW
+                        </div>
                     </div>
                 </div>
             </div>
 
             {/* Two-Sided Grid Layout: Sources & Storage (Left) <-> Center Dispatch <-> Consumers (Right) */}
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                 
                 {/* ── LEFT COLUMN: SOURCES & STORAGE (5 Cols) ────────────────── */}
-                <div class="lg:col-span-5 space-y-4">
+                <div class="space-y-4">
                     <div class="flex items-center justify-between px-1">
                         <h2 class="text-xs uppercase tracking-widest font-black text-slate-400 flex items-center gap-2">
                             <i class="fas fa-layer-group text-emerald-400"></i>
                             {t('ems_sources_title')}
                         </h2>
-                        <span class="text-[0.65rem] text-slate-500 font-mono">SUPPLY & STORAGE</span>
                     </div>
 
                     {/* Grid Connection Card */}
@@ -427,29 +607,26 @@ export function EmsPage() {
                             ></div>
                         </div>
 
-                        {/* Rolling 24h Energy Footer */}
-                        <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                            <span class="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">{t('ems_24h_rolling')}</span>
-                            <div class="flex items-center gap-2">
-                                <div 
-                                    onClick={() => handleOpenTelemetryDetails('ems_grid_export_24h')}
-                                    class="flex items-center gap-1 text-[0.68rem] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-emerald-500/20 hover:border-emerald-500/40 transition-all" 
-                                    title="View telemetry details: ems_grid_export_24h"
-                                >
-                                    <i class="fas fa-arrow-left text-[0.55rem] text-emerald-400"></i>
-                                    <span class="font-bold">{snapshot?.gridExport24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
-                                    <span class="text-[0.6rem] text-emerald-400/80 uppercase font-semibold">{t('ems_export')}</span>
-                                </div>
-                                <div 
-                                    onClick={() => handleOpenTelemetryDetails('ems_grid_import_24h')}
-                                    class="flex items-center gap-1 text-[0.68rem] bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/40 transition-all" 
-                                    title="View telemetry details: ems_grid_import_24h"
-                                >
-                                    <span class="text-[0.6rem] text-amber-400/80 uppercase font-semibold">{t('ems_import')}</span>
-                                    <span class="font-bold">{snapshot?.gridImport24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
-                                    <i class="fas fa-arrow-right text-[0.55rem] text-amber-400"></i>
-                                </div>
-                            </div>
+                        {/* Rolling Energy Footer: current / 24h / 30d / 1y */}
+                        <div class="mt-3 pt-3 border-t border-slate-800/80 space-y-1">
+                            <RollingEnergyLine
+                                label={t('ems_export')}
+                                h24={snapshot?.gridExport24hKwh}
+                                d30={snapshot?.gridExport30dKwh}
+                                y1={snapshot?.gridExport1yKwh}
+                                accentClass="text-emerald-400"
+                                onOpen={handleOpenTelemetryDetails}
+                                telemetryKey="ems_grid_export_24h"
+                            />
+                            <RollingEnergyLine
+                                label={t('ems_import')}
+                                h24={snapshot?.gridImport24hKwh}
+                                d30={snapshot?.gridImport30dKwh}
+                                y1={snapshot?.gridImport1yKwh}
+                                accentClass="text-amber-400"
+                                onOpen={handleOpenTelemetryDetails}
+                                telemetryKey="ems_grid_import_24h"
+                            />
                         </div>
                     </div>
 
@@ -472,13 +649,6 @@ export function EmsPage() {
                                     </div>
                                 </div>
                             </div>
-                            <span 
-                                onClick={() => handleOpenTelemetryDetails(snapshot?.sources?.pvMeterKey || 'ems_pv_power')}
-                                class="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 text-[0.65rem] font-bold border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/40 cursor-pointer transition-all"
-                                title={`View telemetry details for ${snapshot?.sources?.pvMeterKey || 'ems_pv_power'}`}
-                            >
-                                PV Solar
-                            </span>
                         </div>
 
                         <div class="flex items-baseline justify-between mt-2">
@@ -504,18 +674,17 @@ export function EmsPage() {
                             </span>
                         </div>
 
-                        {/* Rolling 24h Energy Footer */}
-                        <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                            <span class="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">{t('ems_24h_rolling')}</span>
-                            <div 
-                                onClick={() => handleOpenTelemetryDetails('ems_pv_generation_24h')}
-                                class="flex items-center gap-1 text-[0.68rem] bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/40 transition-all" 
-                                title="View telemetry details: ems_pv_generation_24h"
-                            >
-                                <span class="text-[0.6rem] text-amber-400/80 uppercase font-semibold">{t('ems_generation')}</span>
-                                <span class="font-bold">{snapshot?.pvGeneration24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
-                                <i class="fas fa-arrow-right text-[0.55rem] text-amber-400"></i>
-                            </div>
+                        {/* Rolling Energy Footer: current / 24h / 30d / 1y */}
+                        <div class="mt-3 pt-3 border-t border-slate-800/80">
+                            <RollingEnergyLine
+                                label={t('ems_generation')}
+                                h24={snapshot?.pvGeneration24hKwh}
+                                d30={snapshot?.pvGeneration30dKwh}
+                                y1={snapshot?.pvGeneration1yKwh}
+                                accentClass="text-amber-400"
+                                onOpen={handleOpenTelemetryDetails}
+                                telemetryKey="ems_pv_generation_24h"
+                            />
                         </div>
                     </div>
 
@@ -554,7 +723,7 @@ export function EmsPage() {
                                         ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25 animate-pulse'
                                         : (snapshot?.batteryPowerKw ?? 0) > 0.3
                                             ? 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
-                                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
                                 }`}
                                 title={`View telemetry details for ${snapshot?.isBatteryCharging ? 'ems_battery_charge' : (snapshot?.sources?.batteryPowerKey || 'ems_battery_power')}`}
                             >
@@ -615,131 +784,34 @@ export function EmsPage() {
                             ></div>
                         </div>
 
-                        {/* Rolling 24h Energy Footer */}
-                        <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                            <span class="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">{t('ems_24h_rolling')}</span>
-                            <div class="flex items-center gap-2">
-                                <div 
-                                    onClick={() => handleOpenTelemetryDetails('ems_battery_charged_24h')}
-                                    class="flex items-center gap-1 text-[0.68rem] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-emerald-500/20 hover:border-emerald-500/40 transition-all" 
-                                    title="View telemetry details: ems_battery_charged_24h"
-                                >
-                                    <i class="fas fa-arrow-left text-[0.55rem] text-emerald-400"></i>
-                                    <span class="font-bold">{snapshot?.batteryCharged24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
-                                    <span class="text-[0.6rem] text-emerald-400/80 uppercase font-semibold">{t('ems_charged')}</span>
-                                </div>
-                                <div 
-                                    onClick={() => handleOpenTelemetryDetails('ems_battery_discharged_24h')}
-                                    class="flex items-center gap-1 text-[0.68rem] bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/40 transition-all" 
-                                    title="View telemetry details: ems_battery_discharged_24h"
-                                >
-                                    <span class="text-[0.6rem] text-amber-400/80 uppercase font-semibold">{t('ems_discharged')}</span>
-                                    <span class="font-bold">{snapshot?.batteryDischarged24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
-                                    <i class="fas fa-arrow-right text-[0.55rem] text-amber-400"></i>
-                                </div>
-                            </div>
+                        {/* Rolling Energy Footer: current / 24h / 30d / 1y */}
+                        <div class="mt-3 pt-3 border-t border-slate-800/80 space-y-1">
+                            <RollingEnergyLine
+                                label={t('ems_charged')}
+                                h24={snapshot?.batteryCharged24hKwh}
+                                d30={snapshot?.batteryCharged30dKwh}
+                                y1={snapshot?.batteryCharged1yKwh}
+                                accentClass="text-emerald-400"
+                                onOpen={handleOpenTelemetryDetails}
+                                telemetryKey="ems_battery_charged_24h"
+                            />
+                            <RollingEnergyLine
+                                label={t('ems_discharged')}
+                                h24={snapshot?.batteryDischarged24hKwh}
+                                d30={snapshot?.batteryDischarged30dKwh}
+                                y1={snapshot?.batteryDischarged1yKwh}
+                                accentClass="text-amber-400"
+                                onOpen={handleOpenTelemetryDetails}
+                                telemetryKey="ems_battery_discharged_24h"
+                            />
                         </div>
                     </div>
                     )}
                 </div>
 
-                {/* ── CENTER: POWER FLOW & SURPLUS DISPATCH (2 Cols) ───────────── */}
-                <div class="lg:col-span-2 flex flex-col items-center justify-center gap-3 py-4">
-                    <div class="hidden lg:flex flex-col items-center gap-2 text-slate-600">
-                        <i class="fas fa-chevron-right text-lg text-slate-500 animate-pulse"></i>
-                    </div>
-
-                    {/* Surplus Card */}
-                    <div class={`w-full bg-slate-900/80 border rounded-2xl p-4 text-center shadow-lg transition-all ${
-                        isSurplusActive 
-                            ? 'border-cyan-500/50 shadow-cyan-500/10 bg-cyan-950/20' 
-                            : 'border-slate-800/90'
-                    }`}>
-                        <div class="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                            {t('ems_surplus_pool')}
-                        </div>
-                        <div 
-                            onClick={() => handleOpenTelemetryDetails('ems_surplus_power')}
-                            class={`text-2xl font-black ${isSurplusActive ? 'text-cyan-400 hover:text-cyan-300' : 'text-slate-500 hover:text-slate-400'} cursor-pointer transition-colors inline-block`}
-                            title="View telemetry details: ems_surplus_power"
-                        >
-                            {isSurplusActive ? `+${snapshot?.totalSurplusAvailableKw.toFixed(1)} kW` : '0.0 kW'}
-                        </div>
-                        <div class="text-[0.65rem] text-slate-400 mt-1 font-medium">
-                            {isSurplusActive ? t('ems_surplus_active') : t('ems_base_active')}
-                        </div>
-                        <div 
-                            onClick={() => handleOpenTelemetryDetails('ems_total_surplus_24h')}
-                            class="text-[0.65rem] text-cyan-300/90 font-mono mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-center gap-1.5 cursor-pointer hover:text-cyan-200 transition-colors"
-                            title="View telemetry details: ems_total_surplus_24h"
-                        >
-                            <span class="text-slate-400">{t('ems_24h_surplus')}:</span>
-                            <span class="font-bold text-cyan-300">{snapshot?.totalSurplus24hKwh?.toFixed(1) ?? '0.0'} kWh</span>
-                            <i class="fas fa-arrow-right text-[0.55rem] text-cyan-400"></i>
-                        </div>
-                    </div>
-
-                    {/* Autarky Card — continuous red→dark-green gradient over 0-100% */}
-                    <div class="w-full bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 text-center shadow-lg transition-all">
-                        <div class="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                            {t('ems_autarky')}
-                        </div>
-                        <div
-                            onClick={() => handleOpenTelemetryDetails('ems_autarky')}
-                            class="text-2xl font-black cursor-pointer transition-colors inline-block"
-                            style={{ color: autarkyColor }}
-                            title="View telemetry details: ems_autarky"
-                        >
-                            {(snapshot?.autarkyPct ?? 0).toFixed(0)}%
-                        </div>
-                        {/* Autarky progress bar — gradient track, fill up to current value */}
-                        <div
-                            class="w-full rounded-full h-1.5 mt-2 overflow-hidden"
-                            style={{ background: 'linear-gradient(to right, #ef4444, #f59e0b, #166534)' }}
-                        >
-                            <div
-                                class="h-full rounded-full bg-slate-900/85 transition-all duration-500"
-                                style={{ width: `${100 - Math.min(100, Math.max(0, snapshot?.autarkyPct ?? 0))}%`, marginLeft: 'auto' }}
-                            ></div>
-                        </div>
-                        <div
-                            onClick={() => handleOpenTelemetryDetails('ems_autarky_24h')}
-                            class="text-[0.65rem] text-slate-400 mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors"
-                            title="View telemetry details: ems_autarky_24h"
-                        >
-                            <span>{t('ems_autarky_24h')}:</span>
-                            <span class="font-bold text-slate-200" style={{ color: autarkyColor }}>{(snapshot?.autarky24hPct ?? 0).toFixed(0)}%</span>
-                            <i class="fas fa-arrow-right text-[0.55rem] text-slate-500"></i>
-                        </div>
-                    </div>
-
-                    {/* Reclaimed & Redistributed Card */}
-                    {hasReclaimedPower && (
-                        <div 
-                            onClick={() => handleOpenTelemetryDetails('ems_reclaimed_power')}
-                            class="w-full bg-amber-950/25 border border-amber-500/40 rounded-2xl p-3 text-center shadow-lg transition-all animate-fade-in cursor-pointer hover:bg-amber-950/40 hover:border-amber-500/60"
-                            title="View telemetry details: ems_reclaimed_power"
-                        >
-                            <div class="text-[0.65rem] uppercase tracking-wider font-bold text-amber-400 mb-0.5 flex items-center justify-center gap-1">
-                                <i class="fas fa-redo-alt text-[0.6rem]"></i>
-                                {t('ems_reclaimed_power')}
-                            </div>
-                            <div class="text-xl font-black text-amber-300">
-                                {snapshot?.totalReclaimedPowerKw?.toFixed(1)} kW
-                            </div>
-                            <div class="text-[0.6rem] text-amber-400/80 mt-0.5">
-                                Idle capacity redistributed
-                            </div>
-                        </div>
-                    )}
-
-                    <div class="hidden lg:flex flex-col items-center gap-2 text-slate-600">
-                        <i class="fas fa-chevron-right text-lg text-slate-500 animate-pulse"></i>
-                    </div>
-                </div>
 
                 {/* ── RIGHT COLUMN: CONSUMERS & SINKS (5 Cols) ────────────────── */}
-                <div class="lg:col-span-5 space-y-4">
+                <div class="space-y-4">
                     <div class="flex items-center justify-between px-1">
                         <h2 class="text-xs uppercase tracking-widest font-black text-slate-400 flex items-center gap-2">
                             <i class="fas fa-charging-station text-cyan-400"></i>
@@ -885,23 +957,20 @@ export function EmsPage() {
                                     </div>
                                 </div>
 
-                                {/* Rolling 24h Energy Footer (Consistent with Supply Cards) */}
-                                <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs gap-2">
-                                    <div class="flex items-center gap-2 whitespace-nowrap shrink-0">
-                                        <span class="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">{t('ems_24h_rolling')}</span>
-                                        <div 
-                                            onClick={() => handleOpenTelemetryDetails(energyKey)}
-                                            class="flex items-center gap-1 text-[0.68rem] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-all" 
-                                            title={`View telemetry details: ${energyKey}`}
-                                        >
-                                            <span class="text-[0.6rem] text-cyan-400/80 uppercase font-semibold">{t('ems_consumed')}</span>
-                                            <span class="font-bold">{(consumer.energy24hKwh ?? 0).toFixed(1)} kWh</span>
-                                            <i class="fas fa-arrow-right text-[0.55rem] text-cyan-400"></i>
-                                        </div>
-                                    </div>
-                                    <span class="text-[0.68rem] text-slate-400 font-mono whitespace-nowrap text-right">
+                                {/* Rolling Energy Footer: current / 24h / 30d / 1y */}
+                                <div class="mt-3 pt-3 border-t border-slate-800/80 space-y-1">
+                                    <RollingEnergyLine
+                                        label={t('ems_consumed')}
+                                        h24={consumer.energy24hKwh}
+                                        d30={consumer.energy30dKwh}
+                                        y1={consumer.energy1yKwh}
+                                        accentClass="text-cyan-400"
+                                        onOpen={handleOpenTelemetryDetails}
+                                        telemetryKey={energyKey}
+                                    />
+                                    <div class="text-[0.68rem] text-slate-400 font-mono whitespace-nowrap text-right">
                                         Base: {(consumer.basePowerKw ?? 0).toFixed(1)} kW · Opt: {(consumer.maxOptionalKw ?? 8.0).toFixed(1)} kW
-                                    </span>
+                                    </div>
                                 </div>
                             </div>
                         );
@@ -927,59 +996,36 @@ export function EmsPage() {
                                     </div>
                                 </div>
                             </div>
-                            <span 
+                        </div>
+
+                        <div class="mt-2">
+                            <div class="text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5">
+                                {t('ems_actual_power')}
+                            </div>
+                            <div
                                 onClick={() => handleOpenTelemetryDetails('ems_uncontrollable_load')}
-                                class="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 text-[0.65rem] font-bold border border-purple-500/20 hover:bg-purple-500/20 cursor-pointer transition-all"
+                                class="cursor-pointer group/uc inline-flex items-baseline hover:opacity-85 transition-all"
                                 title="View telemetry details: ems_uncontrollable_load"
                             >
-                                {uncontrollableConsumers.length > 0 ? 'Essential Load' : t('ems_calculated_balance')}
-                            </span>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-4 mt-2">
-                            <div>
-                                <div class="text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5">
-                                    {t('ems_actual_power')}
-                                </div>
-                                <div
-                                    onClick={() => handleOpenTelemetryDetails('ems_uncontrollable_load')}
-                                    class="cursor-pointer group/uc inline-flex items-baseline hover:opacity-85 transition-all"
-                                    title="View telemetry details: ems_uncontrollable_load"
-                                >
-                                    <span class="text-2xl font-black text-slate-200 group-hover/uc:text-purple-300 transition-colors">
-                                        {(snapshot?.uncontrollableLoadKw ?? 0).toFixed(1)}
-                                    </span>
-                                    <span class="text-xs font-bold text-slate-400 ml-1">kW</span>
-                                    <i class="fas fa-chart-area text-[0.65rem] text-slate-600 group-hover/uc:text-purple-400 ml-1.5 opacity-0 group-hover/uc:opacity-100 transition-all"></i>
-                                </div>
-                            </div>
-                            <div>
-                                <div class="text-[0.65rem] uppercase tracking-wider text-slate-400 font-bold mb-0.5">
-                                    Load Profile
-                                </div>
-                                <span class="text-sm font-bold text-slate-300">
-                                    {uncontrollableConsumers.length > 0 ? 'Continuous Draw' : 'Dynamic Balance'}
+                                <span class="text-2xl font-black text-slate-200 group-hover/uc:text-purple-300 transition-colors">
+                                    {(snapshot?.uncontrollableLoadKw ?? 0).toFixed(1)}
                                 </span>
+                                <span class="text-xs font-bold text-slate-400 ml-1">kW</span>
+                                <i class="fas fa-chart-area text-[0.65rem] text-slate-600 group-hover/uc:text-purple-400 ml-1.5 opacity-0 group-hover/uc:opacity-100 transition-all"></i>
                             </div>
                         </div>
 
-                        {/* Rolling 24h Energy Footer */}
-                        <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                            <div class="flex items-center gap-2">
-                                <span class="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">{t('ems_24h_rolling')}</span>
-                                <div 
-                                    onClick={() => handleOpenTelemetryDetails('ems_uncontrollable_24h')}
-                                    class="flex items-center gap-1 text-[0.68rem] bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded-md px-2 py-0.5 cursor-pointer hover:bg-purple-500/20 hover:border-purple-500/40 transition-all" 
-                                    title="View telemetry details: ems_uncontrollable_24h"
-                                >
-                                    <span class="text-[0.6rem] text-purple-400/80 uppercase font-semibold">{t('ems_consumed')}</span>
-                                    <span class="font-bold">{(snapshot?.uncontrollable24hKwh ?? 0).toFixed(1)} kWh</span>
-                                    <i class="fas fa-arrow-right text-[0.55rem] text-purple-400"></i>
-                                </div>
-                            </div>
-                            <span class="text-[0.7rem] text-slate-400 font-mono">
-                                {uncontrollableConsumers.length > 0 ? 'Uncurtailable Base' : 'Energy Balance'}
-                            </span>
+                        {/* Rolling Energy Footer: current / 24h / 30d / 1y */}
+                        <div class="mt-3 pt-3 border-t border-slate-800/80 space-y-1">
+                            <RollingEnergyLine
+                                label={t('ems_consumed')}
+                                h24={snapshot?.uncontrollable24hKwh}
+                                d30={snapshot?.uncontrollable30dKwh}
+                                y1={snapshot?.uncontrollable1yKwh}
+                                accentClass="text-purple-400"
+                                onOpen={handleOpenTelemetryDetails}
+                                telemetryKey="ems_uncontrollable_24h"
+                            />
                         </div>
 
                         {uncontrollableConsumers.length === 0 ? (
@@ -1018,11 +1064,15 @@ export function EmsPage() {
                                                 </span>
                                                 <div 
                                                     onClick={() => handleOpenTelemetryDetails(ucEnergyKey)}
-                                                    class="flex items-center gap-1 text-purple-300 font-semibold cursor-pointer hover:text-purple-200 transition-colors"
+                                                    class="flex items-center gap-1.5 text-purple-300 font-semibold cursor-pointer hover:text-purple-200 transition-colors whitespace-nowrap"
                                                     title={`View telemetry details: ${ucEnergyKey}`}
                                                 >
-                                                    <span>{(uc.energy24hKwh ?? 0).toFixed(1)} kWh</span>
-                                                    <i class="fas fa-arrow-right text-[0.55rem] text-purple-400/70"></i>
+                                                    <span class="text-slate-500">{t('ems_24h_short')} {formatKwh(uc.energy24hKwh)}</span>
+                                                    <span class="text-slate-600">·</span>
+                                                    <span class="text-slate-500">{t('ems_30d_short')} {formatKwh(uc.energy30dKwh)}</span>
+                                                    <span class="text-slate-600">·</span>
+                                                    <span class="text-slate-500">{t('ems_1y_short')} {formatKwh(uc.energy1yKwh)}</span>
+                                                    <span class="text-slate-500">kWh</span>
                                                 </div>
                                                 <div class="flex items-center gap-1">
                                                     <button
@@ -1057,7 +1107,6 @@ export function EmsPage() {
                         <i class="fas fa-history text-cyan-400"></i>
                         {t('ems_intervention_logs')}
                     </h2>
-                    <span class="text-xs text-slate-500 font-mono">Live Stream</span>
                 </div>
 
                 {(!snapshot?.logs || snapshot.logs.length === 0) ? (
@@ -1125,11 +1174,11 @@ export function EmsPage() {
                                     onInput={(e: any) => setGridMaxKw(parseFloat(e.target.value) || 8.0)}
                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                 />
-                                <span class="text-[0.65rem] text-slate-500 mt-1 block">Contract/fuse ceiling</span>
+                                <span class="text-[0.65rem] text-slate-500 mt-1 block">{t('ems_grid_limit_hint')}</span>
                             </div>
 
                             {/* Battery Storage Options */}
-                            <div class="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+                            <div class="bg-slate-800/60 border border-slate-800 rounded-2xl p-3.5 space-y-3">
                                 <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-2">
                                         <input
@@ -1137,7 +1186,7 @@ export function EmsPage() {
                                             id="hasBattery"
                                             checked={hasBattery}
                                             onChange={(e: any) => setHasBattery(e.target.checked)}
-                                            class="w-4 h-4 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                            class="w-4 h-4 rounded accent-cyan-500 cursor-pointer"
                                         />
                                         <label for="hasBattery" class="font-bold text-slate-200 cursor-pointer">
                                             {t('ems_has_battery')}
@@ -1159,7 +1208,7 @@ export function EmsPage() {
                                                 onInput={(e: any) => setBattMaxKw(parseFloat(e.target.value) || 5.0)}
                                                 class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                             />
-                                            <span class="text-[0.65rem] text-slate-500 mt-1 block">Max rating (5.0 kW)</span>
+                                            <span class="text-[0.65rem] text-slate-500 mt-1 block">{t('ems_battery_max_hint')}</span>
                                         </div>
 
                                         <div>
@@ -1173,17 +1222,17 @@ export function EmsPage() {
                                                 onInput={(e: any) => setBattReserveKw(parseFloat(e.target.value) || 1.0)}
                                                 class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                             />
-                                            <span class="text-[0.65rem] text-slate-500 mt-1 block">Trickle buffer (1.0 kW)</span>
+                                            <span class="text-[0.65rem] text-slate-500 mt-1 block">{t('ems_reserve_hint')}</span>
                                         </div>
                                     </div>
                                 )}
                             </div>
 
                             <div class="space-y-3 pt-2 border-t border-slate-800">
-                                <div class="text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold">Telemetry Key Mappings</div>
+                                <div class="text-[0.7rem] uppercase tracking-wider text-slate-400 font-bold">{t('ems_key_mappings')}</div>
 
                                 <div>
-                                    <label class="block text-slate-400 mb-1">Grid Power Key</label>
+                                    <label class="block text-slate-400 mb-1">{t('ems_grid_power_key')}</label>
                                     <input
                                         type="text"
                                         value={gridKey}
@@ -1197,7 +1246,7 @@ export function EmsPage() {
                                                 type="checkbox"
                                                 checked={invertGridSign}
                                                 onChange={(e: any) => setInvertGridSign(e.target.checked)}
-                                                class="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                                class="w-3.5 h-3.5 rounded accent-cyan-500 cursor-pointer"
                                             />
                                             {t('ems_invert_sign')}
                                         </label>
@@ -1205,7 +1254,7 @@ export function EmsPage() {
                                 </div>
 
                                 <div>
-                                    <label class="block text-slate-400 mb-1">PV Solar Power Key</label>
+                                    <label class="block text-slate-400 mb-1">{t('ems_pv_power_key')}</label>
                                     <input
                                         type="text"
                                         value={pvKey}
@@ -1219,7 +1268,7 @@ export function EmsPage() {
                                                 type="checkbox"
                                                 checked={invertPvSign}
                                                 onChange={(e: any) => setInvertPvSign(e.target.checked)}
-                                                class="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                                class="w-3.5 h-3.5 rounded accent-cyan-500 cursor-pointer"
                                             />
                                             {t('ems_invert_sign')}
                                         </label>
@@ -1243,7 +1292,7 @@ export function EmsPage() {
                                                         type="checkbox"
                                                         checked={invertBattSign}
                                                         onChange={(e: any) => setInvertBattSign(e.target.checked)}
-                                                        class="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700 cursor-pointer"
+                                                        class="w-3.5 h-3.5 rounded accent-cyan-500 cursor-pointer"
                                                     />
                                                     {t('ems_invert_sign')}
                                                 </label>
@@ -1313,7 +1362,7 @@ export function EmsPage() {
                                         required
                                         value={editingConsumer.name || ''}
                                         onInput={(e: any) => setEditingConsumer({ ...editingConsumer, name: e.target.value })}
-                                        placeholder="e.g. Garage Wallbox 1"
+                                        placeholder={t('ems_consumer_name_placeholder')}
                                         class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                     />
                                 </div>
@@ -1328,15 +1377,15 @@ export function EmsPage() {
                                         onInput={(e: any) => setEditingConsumer({ ...editingConsumer, priority: parseInt(e.target.value) || 1 })}
                                         class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                     />
-                                    <span class="text-[0.65rem] text-slate-500 mt-0.5 block">1 = Highest Priority</span>
+                                    <span class="text-[0.65rem] text-slate-500 mt-0.5 block">{t('ems_priority_hint')}</span>
                                 </div>
                             </div>
 
                             {/* Tier 1: Uncontrollable Base Power */}
-                            <div class="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-2">
+                            <div class="bg-slate-800/60 border border-slate-800 rounded-2xl p-3.5 space-y-2">
                                 <div class="flex items-center justify-between">
                                     <label class="font-bold text-slate-200">{t('ems_base_tier')}</label>
-                                    <span class="text-[0.65rem] text-purple-400 font-mono">Tier 1 (Base Load)</span>
+                                    <span class="text-[0.65rem] text-purple-400 font-mono">{t('ems_tier1_badge')}</span>
                                 </div>
                                 <div class="flex items-center gap-3">
                                     <input
@@ -1350,12 +1399,12 @@ export function EmsPage() {
                                     <span class="text-xs font-bold text-slate-400">kW</span>
                                 </div>
                                 <span class="text-[0.65rem] text-slate-500 block">
-                                    Essential continuous load drawn without curtailment (e.g. electronics, compressor).
+                                    {t('ems_base_tier_hint')}
                                 </span>
                             </div>
 
                             {/* Tier 2: Optional Controllable Tier */}
-                            <div class="bg-slate-850/80 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+                            <div class="bg-slate-800/60 border border-slate-800 rounded-2xl p-3.5 space-y-3">
                                 <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-2">
                                         <input
@@ -1363,13 +1412,13 @@ export function EmsPage() {
                                             id="hasOptionalTier"
                                             checked={editingConsumer.hasOptionalTier ?? true}
                                             onChange={(e: any) => setEditingConsumer({ ...editingConsumer, hasOptionalTier: e.target.checked })}
-                                            class="w-4 h-4 rounded text-cyan-500 focus:ring-0 bg-slate-800 border-slate-700"
+                                            class="w-4 h-4 rounded accent-cyan-500 cursor-pointer"
                                         />
                                         <label for="hasOptionalTier" class="font-bold text-slate-200 cursor-pointer">
                                             {t('ems_optional_tier')}
                                         </label>
                                     </div>
-                                    <span class="text-[0.65rem] text-cyan-400 font-mono">Tier 2 (Modulatable)</span>
+                                    <span class="text-[0.65rem] text-cyan-400 font-mono">{t('ems_tier2_badge')}</span>
                                 </div>
 
                                 {editingConsumer.hasOptionalTier && (
@@ -1384,7 +1433,7 @@ export function EmsPage() {
                                                     onInput={(e: any) => setEditingConsumer({ ...editingConsumer, maxOptionalKw: parseFloat(e.target.value) || 8.0 })}
                                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                                 />
-                                                <span class="text-[0.6rem] text-slate-500 mt-0.5 block">Max optional quota</span>
+                                                <span class="text-[0.6rem] text-slate-500 mt-0.5 block">{t('ems_max_optional_hint')}</span>
                                             </div>
 
                                             <div>
@@ -1396,7 +1445,7 @@ export function EmsPage() {
                                                     onInput={(e: any) => setEditingConsumer({ ...editingConsumer, minOptionalKw: parseFloat(e.target.value) || 0.0 })}
                                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                                 />
-                                                <span class="text-[0.6rem] text-slate-500 mt-0.5 block">Min operating threshold</span>
+                                                <span class="text-[0.6rem] text-slate-500 mt-0.5 block">{t('ems_min_optional_hint')}</span>
                                             </div>
 
                                             <div>
@@ -1408,17 +1457,17 @@ export function EmsPage() {
                                                     onInput={(e: any) => setEditingConsumer({ ...editingConsumer, standbyOptionalKw: parseFloat(e.target.value) || 0.0 })}
                                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-cyan-500 outline-none"
                                                 />
-                                                <span class="text-[0.6rem] text-slate-500 mt-0.5 block">Standby when idle</span>
+                                                <span class="text-[0.6rem] text-slate-500 mt-0.5 block">{t('ems_standby_hint')}</span>
                                             </div>
                                         </div>
 
                                         <div>
-                                            <label class="block text-slate-400 mb-1">Force Power Key (Setpoint write)</label>
+                                            <label class="block text-slate-400 mb-1">{t('ems_force_power_key')}</label>
                                             <input
                                                 type="text"
                                                 value={editingConsumer.forcePowerKey || ''}
                                                 onInput={(e: any) => setEditingConsumer({ ...editingConsumer, forcePowerKey: e.target.value })}
-                                                placeholder="e.g. wallbox-sim-01_force_power"
+                                                placeholder={t('ems_force_key_placeholder')}
                                                 class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
                                             />
                                         </div>
@@ -1427,12 +1476,12 @@ export function EmsPage() {
                             </div>
 
                             <div>
-                                <label class="block text-slate-400 mb-1">Actual Power Key (Telemetry read)</label>
+                                <label class="block text-slate-400 mb-1">{t('ems_actual_power_key')}</label>
                                 <input
                                     type="text"
                                     value={editingConsumer.actualPowerKey || ''}
                                     onInput={(e: any) => setEditingConsumer({ ...editingConsumer, actualPowerKey: e.target.value })}
-                                    placeholder="e.g. wallbox-sim-01_power"
+                                    placeholder={t('ems_actual_key_placeholder')}
                                     class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:border-cyan-500 outline-none"
                                 />
                             </div>
@@ -1462,4 +1511,3 @@ export function EmsPage() {
     );
 }
 
-export const TrajectoryPage = EmsPage;

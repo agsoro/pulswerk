@@ -1,8 +1,24 @@
 {
+  "_modals.chunk.js": {
+    "file": "js/modals.chunk.js",
+    "name": "modals"
+  },
   "src/frontend/app.entry.tsx": {
     "file": "js/app.bundle.js",
     "name": "app",
     "src": "src/frontend/app.entry.tsx",
-    "isEntry": true
+    "isEntry": true,
+    "imports": [
+      "_modals.chunk.js"
+    ]
+  },
+  "src/frontend/layout.entry.ts": {
+    "file": "js/layout.bundle.js",
+    "name": "layout",
+    "src": "src/frontend/layout.entry.ts",
+    "isEntry": true,
+    "imports": [
+      "_modals.chunk.js"
+    ]
   }
 }

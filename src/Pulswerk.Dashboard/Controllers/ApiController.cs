@@ -861,8 +861,8 @@ namespace Pulswerk.Dashboard.Controllers
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 
-            bool success = await _data.WriteValueAsync(request.Key, request.Value);
-            return Ok(new { success });
+            var result = await _data.WriteValueAsync(request.Key, request.Value);
+            return Ok(new { success = result.Success, error = result.Error });
         }
 
         [HttpPost("write-complex")]
@@ -874,8 +874,8 @@ namespace Pulswerk.Dashboard.Controllers
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 
-            bool success = await _data.WriteComplexValueAsync(request.Key, request.Value);
-            return Ok(new { success });
+            var result = await _data.WriteComplexValueAsync(request.Key, request.Value);
+            return Ok(new { success = result.Success, error = result.Error });
         }
 
         [HttpPost("alarm/reset")]
@@ -1607,6 +1607,30 @@ namespace Pulswerk.Dashboard.Controllers
                 totalConsumption24hKwh = snapshot.TotalConsumption24hKwh,
                 autarky24hPct = snapshot.Autarky24hPct,
 
+                // Rolling 30-day calculated energy
+                gridImport30dKwh = snapshot.GridImport30dKwh,
+                gridExport30dKwh = snapshot.GridExport30dKwh,
+                pvGeneration30dKwh = snapshot.PvGeneration30dKwh,
+                batteryCharged30dKwh = snapshot.BatteryCharged30dKwh,
+                batteryDischarged30dKwh = snapshot.BatteryDischarged30dKwh,
+                uncontrollable30dKwh = snapshot.Uncontrollable30dKwh,
+                totalSurplus30dKwh = snapshot.TotalSurplus30dKwh,
+                totalControllable30dKwh = snapshot.TotalControllable30dKwh,
+                totalConsumption30dKwh = snapshot.TotalConsumption30dKwh,
+                autarky30dPct = snapshot.Autarky30dPct,
+
+                // Rolling 1-year calculated energy
+                gridImport1yKwh = snapshot.GridImport1yKwh,
+                gridExport1yKwh = snapshot.GridExport1yKwh,
+                pvGeneration1yKwh = snapshot.PvGeneration1yKwh,
+                batteryCharged1yKwh = snapshot.BatteryCharged1yKwh,
+                batteryDischarged1yKwh = snapshot.BatteryDischarged1yKwh,
+                uncontrollable1yKwh = snapshot.Uncontrollable1yKwh,
+                totalSurplus1yKwh = snapshot.TotalSurplus1yKwh,
+                totalControllable1yKwh = snapshot.TotalControllable1yKwh,
+                totalConsumption1yKwh = snapshot.TotalConsumption1yKwh,
+                autarky1yPct = snapshot.Autarky1yPct,
+
                 consumers = snapshot.Consumers.Select(c => new {
                     id = c.Id,
                     name = c.Name,
@@ -1625,7 +1649,9 @@ namespace Pulswerk.Dashboard.Controllers
                     allocatedPowerKw = c.AllocatedPowerKw,
                     unusedPowerKw = c.UnusedPowerKw,
                     status = c.Status,
-                    energy24hKwh = c.Energy24hKwh
+                    energy24hKwh = c.Energy24hKwh,
+                    energy30dKwh = c.Energy30dKwh,
+                    energy1yKwh = c.Energy1yKwh
                 }).ToList(),
                 sources = svc.SourcesConfig,
 
@@ -1678,6 +1704,15 @@ namespace Pulswerk.Dashboard.Controllers
             if (!string.IsNullOrWhiteSpace(req.BatterySocKey))
                 sources.BatterySocKey = req.BatterySocKey;
 
+            if (req.Consumers != null)
+            {
+                foreach (var consumer in req.Consumers)
+                {
+                    var keyError = ValidateConsumerKeys(consumer);
+                    if (keyError != null) return BadRequest(keyError);
+                }
+            }
+
             svc.SaveConfiguration(req.Enabled, sources, req.Consumers ?? svc.Consumers);
             return Ok(new { success = true });
         }
@@ -1688,10 +1723,15 @@ namespace Pulswerk.Dashboard.Controllers
             var serverCfg = _data.Config.Server;
             if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
 
+            if (consumer == null) return BadRequest("Invalid request");
+
             if (string.IsNullOrWhiteSpace(consumer.Id))
                 consumer.Id = "consumer-" + Guid.NewGuid().ToString("N")[..8];
             if (string.IsNullOrWhiteSpace(consumer.Name))
                 consumer.Name = "Consumer " + consumer.Id;
+
+            var keyError = ValidateConsumerKeys(consumer);
+            if (keyError != null) return BadRequest(keyError);
 
             var svc = EmsService.Instance;
             var list = svc.Consumers.Where(c => !string.IsNullOrWhiteSpace(c.Id) && !string.IsNullOrWhiteSpace(c.Name)).ToList();
@@ -1701,6 +1741,36 @@ namespace Pulswerk.Dashboard.Controllers
 
             svc.SaveConfiguration(svc.Enabled, svc.SourcesConfig, list);
             return Ok(new { success = true, consumer });
+        }
+
+        /// <summary>
+        /// Rejects consumer telemetry keys that do not resolve to a configured device.
+        /// A stale key silently disables control (writes are dropped in WriteValueAsync),
+        /// so it must be caught at configuration time.
+        /// </summary>
+        private string? ValidateConsumerKeys(EnergyConsumer consumer)
+        {
+            var devices = _data.Config.Devices;
+            if (devices == null || devices.Count == 0) return null;
+
+            foreach (var (label, key) in new[]
+                     {
+                         ("forcePowerKey", consumer.ForcePowerKey),
+                         ("actualPowerKey", consumer.ActualPowerKey)
+                     })
+            {
+                if (string.IsNullOrWhiteSpace(key)) continue;
+
+                bool known = devices.Any(d => key.StartsWith(d.Id + "_", StringComparison.Ordinal));
+                if (!known)
+                {
+                    return $"'{label}' = '{key}' does not match any configured device. " +
+                           $"Expected '<deviceId>_<pointKey>' with one of: " +
+                           string.Join(", ", devices.Select(d => d.Id));
+                }
+            }
+
+            return null;
         }
 
         [HttpDelete("ems/consumers/{id}")]

@@ -1,9 +1,20 @@
 // IDeviceDriver.cs – common read/write interfaces for protocol drivers
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Pulswerk.Core
 {
     using TelemetryValues = Dictionary<string, object>;
+
+    /// <summary>
+    /// Outcome of a write-back attempt. Carries the rejection reason so callers can
+    /// surface it instead of silently treating a no-op as success.
+    /// </summary>
+    public readonly record struct WriteResult(bool Success, string? Error)
+    {
+        public static WriteResult Ok() => new(true, null);
+        public static WriteResult Fail(string error) => new(false, error);
+    }
 
     /// <summary>
     /// Implement one class per device type.
@@ -49,6 +60,18 @@ namespace Pulswerk.Core
         /// </summary>
         void Write(ConnectionConfig connection, DeviceConfig device,
                    string key, double value);
+
+        /// <summary>
+        /// Asynchronous write path. Drivers that perform network I/O should override this
+        /// so callers (EMS loop, dashboard) never block on synchronous-over-async waits.
+        /// The default implementation delegates to <see cref="Write"/>.
+        /// </summary>
+        Task WriteAsync(ConnectionConfig connection, DeviceConfig device,
+                        string key, double value)
+        {
+            Write(connection, device, key, value);
+            return Task.CompletedTask;
+        }
 
         /// <summary>
         /// Writes complex/structured data to the field device.

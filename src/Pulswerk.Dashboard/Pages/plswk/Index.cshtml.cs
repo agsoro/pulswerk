@@ -98,8 +98,8 @@ namespace Pulswerk.Dashboard.Pages
             if (request == null || string.IsNullOrEmpty(request.Key))
                 return BadRequest("Invalid request");
 
-            bool success = await _data.WriteValueAsync(request.Key, request.Value);
-            return new JsonResult(new { success });
+            var result = await _data.WriteValueAsync(request.Key, request.Value);
+            return new JsonResult(new { success = result.Success, error = result.Error });
         }
 
         public class WriteRequest

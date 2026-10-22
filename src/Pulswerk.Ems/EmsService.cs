@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -58,12 +59,12 @@ namespace Pulswerk.Ems
 
     public class EnergySourcesConfig
     {
-        public string GridMeterKey { get; set; } = "meter-main-a_power";
+        public string GridMeterKey { get; set; } = "";
         public double GridMaxImportKw { get; set; } = 8.0;
-        public string PvMeterKey { get; set; } = "pv-rooftop_power";
-        public bool HasBattery { get; set; } = true;
-        public string BatteryPowerKey { get; set; } = "solis-battery_power";
-        public string BatterySocKey { get; set; } = "solis-battery_battery_soc";
+        public string PvMeterKey { get; set; } = "";
+        public bool HasBattery { get; set; } = false;
+        public string BatteryPowerKey { get; set; } = "";
+        public string BatterySocKey { get; set; } = "";
 
         // ── Sign Convention Rules ─────────────────────────────────────────────
         // One rule (see PowerSignConvention.Pool): + = into pool, - = out of pool.
@@ -226,6 +227,16 @@ namespace Pulswerk.Ems
         /// Calculated energy consumed over the trailing 24-hour rolling day window in kWh.
         /// </summary>
         public double Energy24hKwh { get; set; }
+
+        /// <summary>
+        /// Calculated energy consumed over the trailing 30-day rolling window in kWh.
+        /// </summary>
+        public double Energy30dKwh { get; set; }
+
+        /// <summary>
+        /// Calculated energy consumed over the trailing 1-year rolling window in kWh.
+        /// </summary>
+        public double Energy1yKwh { get; set; }
     }
 
     public class EnergySystemSnapshot
@@ -278,6 +289,46 @@ namespace Pulswerk.Ems
         /// Autarky / self-sufficiency over the rolling 24-hour window, in percent (0-100).
         /// </summary>
         public double Autarky24hPct { get; set; }
+
+        // ── Rolling 30-Day Calculated Energy (kWh) ────────────────────────────
+        public double GridImport30dKwh { get; set; }
+        public double GridExport30dKwh { get; set; }
+        public double PvGeneration30dKwh { get; set; }
+        public double BatteryCharged30dKwh { get; set; }
+        public double BatteryDischarged30dKwh { get; set; }
+        public double Uncontrollable30dKwh { get; set; }
+        public double TotalSurplus30dKwh { get; set; }
+        public double TotalControllable30dKwh { get; set; }
+
+        /// <summary>
+        /// Total site consumption over the rolling 30-day window in kWh.
+        /// </summary>
+        public double TotalConsumption30dKwh { get; set; }
+
+        /// <summary>
+        /// Autarky / self-sufficiency over the rolling 30-day window, in percent (0-100).
+        /// </summary>
+        public double Autarky30dPct { get; set; }
+
+        // ── Rolling 1-Year Calculated Energy (kWh) ────────────────────────────
+        public double GridImport1yKwh { get; set; }
+        public double GridExport1yKwh { get; set; }
+        public double PvGeneration1yKwh { get; set; }
+        public double BatteryCharged1yKwh { get; set; }
+        public double BatteryDischarged1yKwh { get; set; }
+        public double Uncontrollable1yKwh { get; set; }
+        public double TotalSurplus1yKwh { get; set; }
+        public double TotalControllable1yKwh { get; set; }
+
+        /// <summary>
+        /// Total site consumption over the rolling 1-year window in kWh.
+        /// </summary>
+        public double TotalConsumption1yKwh { get; set; }
+
+        /// <summary>
+        /// Autarky / self-sufficiency over the rolling 1-year window, in percent (0-100).
+        /// </summary>
+        public double Autarky1yPct { get; set; }
 
         public List<EnergyConsumer> Consumers { get; set; } = new();
         public List<EmsLogEntry> Logs { get; set; } = new();
@@ -370,7 +421,7 @@ namespace Pulswerk.Ems
                     consumer.AllocatedPowerKw = Math.Round(consumer.BasePowerKw + guaranteedOpt, 2);
                     consumer.UnusedPowerKw = 0.0;
                     consumer.Status = guaranteedOpt > 0.0
-                        ? $"Grid Import Curtailment (Min {guaranteedOpt:F2} kW)"
+                        ? $"Grid Import Curtailment (Min {guaranteedOpt.ToString("F2", CultureInfo.InvariantCulture)} kW)"
                         : "Grid Import Curtailment";
                 }
                 else
@@ -422,7 +473,7 @@ namespace Pulswerk.Ems
         private TelemetryStore? _telemetryStore;
         private BillingStore? _billingStore;
         private Func<string, double?>? _liveValueReader;
-        private Func<string, double, Task<bool>>? _telemetryWriter;
+        private Func<string, double, Task<WriteResult>>? _telemetryWriter;
         private CancellationTokenSource? _cts;
 
         private readonly ConcurrentQueue<EmsLogEntry> _controlLogs = new();
@@ -489,7 +540,7 @@ namespace Pulswerk.Ems
             TelemetryStore telemetryStore,
             BillingStore billingStore,
             Func<string, double?> liveValueReader,
-            Func<string, double, Task<bool>> telemetryWriter)
+            Func<string, double, Task<WriteResult>> telemetryWriter)
         {
             _telemetryStore = telemetryStore;
             _billingStore = billingStore;
@@ -571,13 +622,13 @@ namespace Pulswerk.Ems
                 SourcesConfig = new EnergySourcesConfig
                 {
                     GridMaxImportKw = _billingStore.GetTariff("energy_control_base_kw", 8.0),
-                    GridMeterKey = _billingStore.GetSetting("energy_control_grid_key", "meter-main-a_power"),
-                    PvMeterKey = _billingStore.GetSetting("energy_control_pv_key", "pv-rooftop_power"),
-                    HasBattery = !string.IsNullOrWhiteSpace(_billingStore.GetSetting("energy_control_battery_power_key", "solis-battery_power")),
+                    GridMeterKey = _billingStore.GetSetting("energy_control_grid_key", ""),
+                    PvMeterKey = _billingStore.GetSetting("energy_control_pv_key", ""),
+                    HasBattery = !string.IsNullOrWhiteSpace(_billingStore.GetSetting("energy_control_battery_power_key", "")),
                     BatteryMinReserveKw = _billingStore.GetTariff("energy_control_reserve_kw", 1.0),
                     BatteryMaxPowerKw = _billingStore.GetTariff("energy_control_battery_max_kw", 5.0),
-                    BatteryPowerKey = _billingStore.GetSetting("energy_control_battery_power_key", "solis-battery_power"),
-                    BatterySocKey = _billingStore.GetSetting("energy_control_battery_soc_key", "solis-battery_battery_soc")
+                    BatteryPowerKey = _billingStore.GetSetting("energy_control_battery_power_key", ""),
+                    BatterySocKey = _billingStore.GetSetting("energy_control_battery_soc_key", "")
                 };
             }
 
@@ -591,8 +642,6 @@ namespace Pulswerk.Ems
                     if (parsed != null)
                     {
                         var valid = parsed.Where(c => !string.IsNullOrWhiteSpace(c.Id) && !string.IsNullOrWhiteSpace(c.Name)).ToList();
-                        // Ignore legacy demo base loads so they do not obstruct calculated base loads
-                        valid = valid.Where(c => c.Id != "base-building-infrastructure" && c.Id != "base-server-room").ToList();
                         if (valid.Count > 0) Consumers = valid;
                     }
                 }
@@ -631,7 +680,6 @@ namespace Pulswerk.Ems
             Enabled = enabled;
             SourcesConfig = sources;
             Consumers = consumers.Where(c => !string.IsNullOrWhiteSpace(c.Id) && !string.IsNullOrWhiteSpace(c.Name)).ToList();
-            if (Consumers.Count == 0) Consumers = consumers;
 
             if (_billingStore != null)
             {
@@ -641,7 +689,7 @@ namespace Pulswerk.Ems
                 _billingStore.SetTariff("energy_control_battery_max_kw", sources.BatteryMaxPowerKw);
 
                 _billingStore.SetSetting("energy_sources_config", JsonSerializer.Serialize(sources));
-                _billingStore.SetSetting("energy_consumers_config", JsonSerializer.Serialize(consumers));
+                _billingStore.SetSetting("energy_consumers_config", JsonSerializer.Serialize(Consumers));
                 _billingStore.SetSetting("ems_energy_24h_state", _energyCalc.Serialize());
 
             }
@@ -692,28 +740,28 @@ namespace Pulswerk.Ems
                 ? Math.Round(Math.Clamp((1.0 - gridImportKw / totalConsumption) * 100.0, 0.0, 100.0), 1)
                 : 100.0;
 
-            // Compute rolling 24-hour energy totals
-            var energyTotals = _energyCalc.Get24hTotals(DateTime.UtcNow);
+            // Compute rolling energy totals for all three windows
+            var now = DateTime.UtcNow;
+            var energyTotals = _energyCalc.Get24hTotals(now);
+            var energy30dTotals = _energyCalc.Get30dTotals(now);
+            var energy1yTotals = _energyCalc.Get1yTotals(now);
+
             foreach (var consumer in Consumers)
             {
-                if (energyTotals.ConsumerKwh.TryGetValue(consumer.Id, out double ckwh))
-                    consumer.Energy24hKwh = ckwh;
-                else
-                    consumer.Energy24hKwh = 0.0;
+                consumer.Energy24hKwh = energyTotals.ConsumerKwh.TryGetValue(consumer.Id, out double ckwh) ? ckwh : 0.0;
+                consumer.Energy30dKwh = energy30dTotals.ConsumerKwh.TryGetValue(consumer.Id, out double ckwh30d) ? ckwh30d : 0.0;
+                consumer.Energy1yKwh = energy1yTotals.ConsumerKwh.TryGetValue(consumer.Id, out double ckwh1y) ? ckwh1y : 0.0;
             }
 
             // Calculate site consumption from the energy balance. Uncontrollable consumers
             // are included in both ConsumerKwh and UncontrollableKwh, so summing load buckets
             // can double-count them.
-            double consumption24h = Math.Max(
-                0.0,
-                energyTotals.GridImportKwh - energyTotals.GridExportKwh
-                    + energyTotals.PvGenerationKwh
-                    + energyTotals.BatteryDischargedKwh
-                    - energyTotals.BatteryChargedKwh);
-            double autarky24hPct = consumption24h > 0.01
-                ? Math.Round(Math.Clamp((1.0 - energyTotals.GridImportKwh / consumption24h) * 100.0, 0.0, 100.0), 1)
-                : 100.0;
+            double consumption24h = ConsumptionFromBalance(energyTotals);
+            double autarky24hPct = AutarkyFromBalance(energyTotals, consumption24h);
+            double consumption30d = ConsumptionFromBalance(energy30dTotals);
+            double autarky30dPct = AutarkyFromBalance(energy30dTotals, consumption30d);
+            double consumption1y = ConsumptionFromBalance(energy1yTotals);
+            double autarky1yPct = AutarkyFromBalance(energy1yTotals, consumption1y);
 
             return new EnergySystemSnapshot
             {
@@ -751,11 +799,53 @@ namespace Pulswerk.Ems
                 TotalConsumption24hKwh = Math.Round(consumption24h, 2),
                 Autarky24hPct = autarky24hPct,
 
+                // 30d Rolling Calculated Energy (in kWh)
+                GridImport30dKwh = energy30dTotals.GridImportKwh,
+                GridExport30dKwh = energy30dTotals.GridExportKwh,
+                PvGeneration30dKwh = energy30dTotals.PvGenerationKwh,
+                BatteryCharged30dKwh = SourcesConfig.HasBattery ? energy30dTotals.BatteryChargedKwh : 0.0,
+                BatteryDischarged30dKwh = SourcesConfig.HasBattery ? energy30dTotals.BatteryDischargedKwh : 0.0,
+                Uncontrollable30dKwh = energy30dTotals.UncontrollableKwh,
+                TotalSurplus30dKwh = energy30dTotals.TotalSurplusKwh,
+                TotalControllable30dKwh = Math.Round(energy30dTotals.ConsumerKwh.Values.Sum(), 2),
+                TotalConsumption30dKwh = Math.Round(consumption30d, 2),
+                Autarky30dPct = autarky30dPct,
+
+                // 1y Rolling Calculated Energy (in kWh)
+                GridImport1yKwh = energy1yTotals.GridImportKwh,
+                GridExport1yKwh = energy1yTotals.GridExportKwh,
+                PvGeneration1yKwh = energy1yTotals.PvGenerationKwh,
+                BatteryCharged1yKwh = SourcesConfig.HasBattery ? energy1yTotals.BatteryChargedKwh : 0.0,
+                BatteryDischarged1yKwh = SourcesConfig.HasBattery ? energy1yTotals.BatteryDischargedKwh : 0.0,
+                Uncontrollable1yKwh = energy1yTotals.UncontrollableKwh,
+                TotalSurplus1yKwh = energy1yTotals.TotalSurplusKwh,
+                TotalControllable1yKwh = Math.Round(energy1yTotals.ConsumerKwh.Values.Sum(), 2),
+                TotalConsumption1yKwh = Math.Round(consumption1y, 2),
+                Autarky1yPct = autarky1yPct,
+
                 Consumers = Consumers.ToList(),
                 Logs = GetLogs(),
                 Sources = SourcesConfig
             };
         }
+
+        /// <summary>
+        /// Site consumption over a rolling window, derived from the energy balance.
+        /// </summary>
+        private static double ConsumptionFromBalance(Rolling24hTotals totals) => Math.Max(
+            0.0,
+            totals.GridImportKwh - totals.GridExportKwh
+                + totals.PvGenerationKwh
+                + totals.BatteryDischargedKwh
+                - totals.BatteryChargedKwh);
+
+        /// <summary>
+        /// Autarky over a rolling window: share of consumption not covered by grid import.
+        /// </summary>
+        private static double AutarkyFromBalance(Rolling24hTotals totals, double consumptionKwh) =>
+            consumptionKwh > 0.01
+                ? Math.Round(Math.Clamp((1.0 - totals.GridImportKwh / consumptionKwh) * 100.0, 0.0, 100.0), 1)
+                : 100.0;
 
         public static readonly string[] StandardTelemetryKeys = new[]
         {
@@ -788,7 +878,29 @@ namespace Pulswerk.Ems
             "controllable_24h",
             "total_surplus_24h",
             "total_consumption_24h",
-            "autarky_24h"
+            "autarky_24h",
+
+            "grid_import_30d",
+            "grid_export_30d",
+            "pv_generation_30d",
+            "battery_charged_30d",
+            "battery_discharged_30d",
+            "uncontrollable_30d",
+            "controllable_30d",
+            "total_surplus_30d",
+            "total_consumption_30d",
+            "autarky_30d",
+
+            "grid_import_1y",
+            "grid_export_1y",
+            "pv_generation_1y",
+            "battery_charged_1y",
+            "battery_discharged_1y",
+            "uncontrollable_1y",
+            "controllable_1y",
+            "total_surplus_1y",
+            "total_consumption_1y",
+            "autarky_1y"
         };
 
         public Dictionary<string, object> GetTelemetryValues()
@@ -824,7 +936,29 @@ namespace Pulswerk.Ems
                 ["controllable_24h"] = snap.TotalControllable24hKwh,
                 ["total_surplus_24h"] = snap.TotalSurplus24hKwh,
                 ["total_consumption_24h"] = snap.TotalConsumption24hKwh,
-                ["autarky_24h"] = snap.Autarky24hPct
+                ["autarky_24h"] = snap.Autarky24hPct,
+
+                ["grid_import_30d"] = snap.GridImport30dKwh,
+                ["grid_export_30d"] = snap.GridExport30dKwh,
+                ["pv_generation_30d"] = snap.PvGeneration30dKwh,
+                ["battery_charged_30d"] = snap.BatteryCharged30dKwh,
+                ["battery_discharged_30d"] = snap.BatteryDischarged30dKwh,
+                ["uncontrollable_30d"] = snap.Uncontrollable30dKwh,
+                ["controllable_30d"] = snap.TotalControllable30dKwh,
+                ["total_surplus_30d"] = snap.TotalSurplus30dKwh,
+                ["total_consumption_30d"] = snap.TotalConsumption30dKwh,
+                ["autarky_30d"] = snap.Autarky30dPct,
+
+                ["grid_import_1y"] = snap.GridImport1yKwh,
+                ["grid_export_1y"] = snap.GridExport1yKwh,
+                ["pv_generation_1y"] = snap.PvGeneration1yKwh,
+                ["battery_charged_1y"] = snap.BatteryCharged1yKwh,
+                ["battery_discharged_1y"] = snap.BatteryDischarged1yKwh,
+                ["uncontrollable_1y"] = snap.Uncontrollable1yKwh,
+                ["controllable_1y"] = snap.TotalControllable1yKwh,
+                ["total_surplus_1y"] = snap.TotalSurplus1yKwh,
+                ["total_consumption_1y"] = snap.TotalConsumption1yKwh,
+                ["autarky_1y"] = snap.Autarky1yPct
             };
 
             foreach (var consumer in snap.Consumers)
@@ -835,6 +969,8 @@ namespace Pulswerk.Ems
                 dict[$"{cleanId}_allocated_power"] = consumer.AllocatedPowerKw;
                 dict[$"{cleanId}_unused_power"] = consumer.UnusedPowerKw;
                 dict[$"{cleanId}_energy_24h"] = consumer.Energy24hKwh;
+                dict[$"{cleanId}_energy_30d"] = consumer.Energy30dKwh;
+                dict[$"{cleanId}_energy_1y"] = consumer.Energy1yKwh;
             }
 
             return dict;
@@ -851,6 +987,8 @@ namespace Pulswerk.Ems
                 list.Add($"{cleanId}_allocated_power");
                 list.Add($"{cleanId}_unused_power");
                 list.Add($"{cleanId}_energy_24h");
+                list.Add($"{cleanId}_energy_30d");
+                list.Add($"{cleanId}_energy_1y");
             }
             return list;
         }
@@ -887,7 +1025,29 @@ namespace Pulswerk.Ems
                 ["controllable_24h"] = Units.KilowattHour,
                 ["total_surplus_24h"] = Units.KilowattHour,
                 ["total_consumption_24h"] = Units.KilowattHour,
-                ["autarky_24h"] = Units.Percent
+                ["autarky_24h"] = Units.Percent,
+
+                ["grid_import_30d"] = Units.KilowattHour,
+                ["grid_export_30d"] = Units.KilowattHour,
+                ["pv_generation_30d"] = Units.KilowattHour,
+                ["battery_charged_30d"] = Units.KilowattHour,
+                ["battery_discharged_30d"] = Units.KilowattHour,
+                ["uncontrollable_30d"] = Units.KilowattHour,
+                ["controllable_30d"] = Units.KilowattHour,
+                ["total_surplus_30d"] = Units.KilowattHour,
+                ["total_consumption_30d"] = Units.KilowattHour,
+                ["autarky_30d"] = Units.Percent,
+
+                ["grid_import_1y"] = Units.KilowattHour,
+                ["grid_export_1y"] = Units.KilowattHour,
+                ["pv_generation_1y"] = Units.KilowattHour,
+                ["battery_charged_1y"] = Units.KilowattHour,
+                ["battery_discharged_1y"] = Units.KilowattHour,
+                ["uncontrollable_1y"] = Units.KilowattHour,
+                ["controllable_1y"] = Units.KilowattHour,
+                ["total_surplus_1y"] = Units.KilowattHour,
+                ["total_consumption_1y"] = Units.KilowattHour,
+                ["autarky_1y"] = Units.Percent
             };
 
             foreach (var c in Consumers)
@@ -898,6 +1058,8 @@ namespace Pulswerk.Ems
                 map[$"{cleanId}_allocated_power"] = Units.Kilowatt;
                 map[$"{cleanId}_unused_power"] = Units.Kilowatt;
                 map[$"{cleanId}_energy_24h"] = Units.KilowattHour;
+                map[$"{cleanId}_energy_30d"] = Units.KilowattHour;
+                map[$"{cleanId}_energy_1y"] = Units.KilowattHour;
             }
 
             return map;
@@ -936,6 +1098,28 @@ namespace Pulswerk.Ems
                 "total_surplus_24h" => "Rolling 24h Solar Surplus Energy",
                 "total_consumption_24h" => "Rolling 24h Total Consumption",
                 "autarky_24h" => "Rolling 24h Autarky (Self-Sufficiency)",
+
+                "grid_import_30d" => "Rolling 30d Grid Import",
+                "grid_export_30d" => "Rolling 30d Grid Export",
+                "pv_generation_30d" => "Rolling 30d PV Generation",
+                "battery_charged_30d" => "Rolling 30d Battery Charged",
+                "battery_discharged_30d" => "Rolling 30d Battery Discharged",
+                "uncontrollable_30d" => "Rolling 30d Uncontrollable Base Energy",
+                "controllable_30d" => "Rolling 30d Controllable Load Energy",
+                "total_surplus_30d" => "Rolling 30d Solar Surplus Energy",
+                "total_consumption_30d" => "Rolling 30d Total Consumption",
+                "autarky_30d" => "Rolling 30d Autarky (Self-Sufficiency)",
+
+                "grid_import_1y" => "Rolling 1y Grid Import",
+                "grid_export_1y" => "Rolling 1y Grid Export",
+                "pv_generation_1y" => "Rolling 1y PV Generation",
+                "battery_charged_1y" => "Rolling 1y Battery Charged",
+                "battery_discharged_1y" => "Rolling 1y Battery Discharged",
+                "uncontrollable_1y" => "Rolling 1y Uncontrollable Base Energy",
+                "controllable_1y" => "Rolling 1y Controllable Load Energy",
+                "total_surplus_1y" => "Rolling 1y Solar Surplus Energy",
+                "total_consumption_1y" => "Rolling 1y Total Consumption",
+                "autarky_1y" => "Rolling 1y Autarky (Self-Sufficiency)",
                 _ => FormatConsumerKeyName(key)
             };
         }
@@ -955,6 +1139,8 @@ namespace Pulswerk.Ems
                         "allocated_power" => "Allocated Setpoint",
                         "unused_power" => "Unused / Shared Power",
                         "energy_24h" => "Rolling 24h Consumed Energy",
+                        "energy_30d" => "Rolling 30d Consumed Energy",
+                        "energy_1y" => "Rolling 1y Consumed Energy",
                         _ => suffix.Replace('_', ' ')
                     };
                     return $"{c.Name} {suffixName}";
@@ -990,12 +1176,7 @@ namespace Pulswerk.Ems
                     }
                     else
                     {
-                        foreach (var c in Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0))
-                        {
-                            c.AllocatedOptionalKw = 0.0;
-                            c.AllocatedPowerKw = 0.0; // 0 = Unrestricted in OCPP master
-                            c.Status = "Disabled";
-                        }
+                        await ReleaseControlAsync();
                     }
                 }
                 catch (Exception ex)
@@ -1007,25 +1188,53 @@ namespace Pulswerk.Ems
             }
         }
 
+        /// <summary>
+        /// Writes an explicit unrestricted setpoint to every controllable consumer so a
+        /// wallbox does not keep the last EMS limit after the EMS is switched off.
+        /// </summary>
+        private async Task ReleaseControlAsync()
+        {
+            var now = DateTime.UtcNow;
+            foreach (var c in Consumers.Where(c => c.HasOptionalTier && c.MaxOptionalKw > 0.0))
+            {
+                c.AllocatedOptionalKw = 0.0;
+                c.AllocatedPowerKw = 0.0;
+                c.Status = "Disabled";
+
+                if (_telemetryWriter == null || string.IsNullOrWhiteSpace(c.ForcePowerKey)) continue;
+
+                // Negative = unrestricted (no charging profile limit).
+                if (c.LastWrittenSetpointKw < 0.0 && (now - c.LastWrittenUtc).TotalSeconds < 60) continue;
+
+                c.LastWrittenSetpointKw = -1.0;
+                c.LastWrittenUtc = now;
+
+                try
+                {
+                    var result = await _telemetryWriter(c.ForcePowerKey, -1.0);
+                    if (result.Success)
+                    {
+                        AddLog($"[{c.Name}] EMS disabled: released charge limit.", "Disabled");
+                    }
+                    else
+                    {
+                        AddLog($"[{c.Name}] Failed releasing '{c.ForcePowerKey}': {result.Error}", "Write Error");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[EnergyControl] Release write failed for {c.ForcePowerKey}: {ex.Message}");
+                }
+            }
+        }
+
         private async Task EvaluateDispatchAsync()
         {
             if (_liveValueReader == null || _telemetryWriter == null) return;
 
             // 1. Read live sources
-            double? gridValNullable = _liveValueReader(SourcesConfig.GridMeterKey);
-            if (!gridValNullable.HasValue)
-            {
-                gridValNullable = _liveValueReader("meter-main-a_power") ?? _liveValueReader("meter-main_power");
-            }
-            // Normalize raw values into the pool rule.
-            double gridVal = SourcesConfig.NormalizeGridPower(gridValNullable ?? 0.0);
-
-            double? pvValNullable = _liveValueReader(SourcesConfig.PvMeterKey);
-            if (!pvValNullable.HasValue)
-            {
-                pvValNullable = _liveValueReader("pv-rooftop_power") ?? _liveValueReader("glueck-pv_power") ?? _liveValueReader("solis-pv_power");
-            }
-            double pvVal = SourcesConfig.NormalizePvPower(pvValNullable ?? 0.0);
+            double gridVal = SourcesConfig.NormalizeGridPower(_liveValueReader(SourcesConfig.GridMeterKey) ?? 0.0);
+            double pvVal = SourcesConfig.NormalizePvPower(_liveValueReader(SourcesConfig.PvMeterKey) ?? 0.0);
 
             double battPowerVal = 0.0;
             double battSocVal = 0.0;
@@ -1080,15 +1289,16 @@ namespace Pulswerk.Ems
 
                     try
                     {
-                        bool ok = await _telemetryWriter(consumer.ForcePowerKey, writeValue);
-                        if (ok)
+                        var result = await _telemetryWriter(consumer.ForcePowerKey, writeValue);
+                        if (result.Success)
                         {
                             AddLog($"[{consumer.Name}] Set force_power = {writeValue:F2} kW.", consumer.Status);
                             Log.Info($"[EnergyControl] [{consumer.Name}] Set {consumer.ForcePowerKey} = {writeValue} kW ({consumer.Status})");
                         }
                         else
                         {
-                            AddLog($"[{consumer.Name}] Failed writing {writeValue} kW to '{consumer.ForcePowerKey}'.", "Write Error");
+                            AddLog($"[{consumer.Name}] Failed writing {writeValue} kW to '{consumer.ForcePowerKey}': {result.Error}", "Write Error");
+                            Log.Warning($"[EnergyControl] [{consumer.Name}] Write to '{consumer.ForcePowerKey}' rejected: {result.Error}");
                         }
                     }
                     catch (Exception ex)
@@ -1142,8 +1352,6 @@ namespace Pulswerk.Ems
             try
             {
                 var now = DateTimeOffset.UtcNow;
-                long startTs = now.AddHours(-24).ToUnixTimeMilliseconds();
-                long endTs = now.ToUnixTimeMilliseconds();
 
                 var keys = new List<string>();
                 if (!string.IsNullOrWhiteSpace(SourcesConfig.GridMeterKey)) keys.Add(SourcesConfig.GridMeterKey);
@@ -1157,62 +1365,90 @@ namespace Pulswerk.Ems
 
                 if (keys.Count == 0) return;
 
-                var pointsMap = await _telemetryStore.QueryMultipleAsync(keys, startTs, endTs, maxPointsPerKey: 3000);
-                if (pointsMap != null && pointsMap.Count > 0)
-                {
-                    foreach (var (key, pts) in pointsMap)
-                    {
-                        if (pts == null || pts.Count < 2) continue;
-                        var sorted = pts.Where(p => p.Value.HasValue).OrderBy(p => p.Ts).ToList();
-                        for (int i = 1; i < sorted.Count; i++)
-                        {
-                            long dtMs = sorted[i].Ts - sorted[i - 1].Ts;
-                            if (dtMs <= 0 || dtMs > 300_000) continue;
-                            double dtHours = dtMs / 3600000.0;
-                            double vPrev = sorted[i - 1].Value!.Value;
-                            double vCurr = sorted[i].Value!.Value;
-                            long minKey = sorted[i].Ts / 60000;
+                // Minute-resolution pass for the rolling 24h window.
+                await BootstrapWindowAsync(keys, now.AddHours(-24), now, granularity: null,
+                    maxPointsPerKey: 3000, maxDeltaMs: 300_000, tiers: EnergyTiers.Minute);
 
-                            if (key == SourcesConfig.GridMeterKey)
-                            {
-                                double vPrevN = SourcesConfig.NormalizeGridPower(vPrev);
-                                double vCurrN = SourcesConfig.NormalizeGridPower(vCurr);
-                                double imp = Math.Max(0.0, (Math.Max(0.0, vPrevN) + Math.Max(0.0, vCurrN)) * 0.5 * dtHours);
-                                double exp = Math.Max(0.0, (Math.Max(0.0, -vPrevN) + Math.Max(0.0, -vCurrN)) * 0.5 * dtHours);
-                                _energyCalc.AddEnergy(minKey, gridImportKwh: imp, gridExportKwh: exp);
-                            }
-                            else if (key == SourcesConfig.PvMeterKey)
-                            {
-                                double vPrevN = SourcesConfig.NormalizePvPower(vPrev);
-                                double vCurrN = SourcesConfig.NormalizePvPower(vCurr);
-                                double pv = Math.Max(0.0, (vPrevN + vCurrN) * 0.5 * dtHours);
-                                _energyCalc.AddEnergy(minKey, pvGenKwh: pv);
-                            }
-                            else if (key == SourcesConfig.BatteryPowerKey)
-                            {
-                                double vPrevN = SourcesConfig.NormalizeBatteryPower(vPrev);
-                                double vCurrN = SourcesConfig.NormalizeBatteryPower(vCurr);
-                                double chg = Math.Max(0.0, (Math.Max(0.0, -vPrevN) + Math.Max(0.0, -vCurrN)) * 0.5 * dtHours);
-                                double dch = Math.Max(0.0, (Math.Max(0.0, vPrevN) + Math.Max(0.0, vCurrN)) * 0.5 * dtHours);
-                                _energyCalc.AddEnergy(minKey, battChargeKwh: chg, battDischargeKwh: dch);
-                            }
-                            else
-                            {
-                                var consumer = Consumers.FirstOrDefault(c => c.ActualPowerKey == key);
-                                if (consumer != null)
-                                {
-                                    double cons = Math.Max(0.0, (Math.Max(0.0, vPrev) + Math.Max(0.0, vCurr)) * 0.5 * dtHours);
-                                    _energyCalc.AddEnergy(minKey, consumerKwh: new Dictionary<string, double> { [consumer.Id] = cons });
-                                }
-                            }
-                        }
-                    }
-                    Log.Info("[EnergyControl] Bootstrapped rolling 24h energy from historical telemetry store.");
-                }
+                // Hourly pass for the rolling 30d window.
+                await BootstrapWindowAsync(keys, now.AddDays(-30), now, granularity: "hour",
+                    maxPointsPerKey: 800, maxDeltaMs: 2 * 3_600_000, tiers: EnergyTiers.Hour);
+
+                // Daily pass for the rolling 1y window.
+                await BootstrapWindowAsync(keys, now.AddDays(-365), now, granularity: "day",
+                    maxPointsPerKey: 400, maxDeltaMs: 2 * 86_400_000, tiers: EnergyTiers.Day);
+
+                Log.Info("[EnergyControl] Bootstrapped rolling 24h/30d/1y energy from historical telemetry store.");
             }
             catch (Exception ex)
             {
                 Log.Debug($"[EnergyControl] Historical energy bootstrap skipped: {ex.Message}");
+            }
+        }
+
+        private async Task BootstrapWindowAsync(
+            List<string> keys,
+            DateTimeOffset from,
+            DateTimeOffset to,
+            string? granularity,
+            int maxPointsPerKey,
+            long maxDeltaMs,
+            EnergyTiers tiers)
+        {
+            long startTs = from.ToUnixTimeMilliseconds();
+            long endTs = to.ToUnixTimeMilliseconds();
+
+            var pointsMap = await _telemetryStore!.QueryMultipleAsync(
+                keys, startTs, endTs, granularity, maxPointsPerKey: maxPointsPerKey);
+            if (pointsMap == null || pointsMap.Count == 0) return;
+
+            foreach (var (key, pts) in pointsMap)
+            {
+                if (pts == null || pts.Count < 2) continue;
+                var sorted = pts.Where(p => p.Value.HasValue).OrderBy(p => p.Ts).ToList();
+                for (int i = 1; i < sorted.Count; i++)
+                {
+                    long dtMs = sorted[i].Ts - sorted[i - 1].Ts;
+                    if (dtMs <= 0 || dtMs > maxDeltaMs) continue;
+                    double dtHours = dtMs / 3600000.0;
+                    double vPrev = sorted[i - 1].Value!.Value;
+                    double vCurr = sorted[i].Value!.Value;
+                    long minKey = sorted[i].Ts / 60000;
+
+                    if (key == SourcesConfig.GridMeterKey)
+                    {
+                        double vPrevN = SourcesConfig.NormalizeGridPower(vPrev);
+                        double vCurrN = SourcesConfig.NormalizeGridPower(vCurr);
+                        double imp = Math.Max(0.0, (Math.Max(0.0, vPrevN) + Math.Max(0.0, vCurrN)) * 0.5 * dtHours);
+                        double exp = Math.Max(0.0, (Math.Max(0.0, -vPrevN) + Math.Max(0.0, -vCurrN)) * 0.5 * dtHours);
+                        _energyCalc.AddEnergy(minKey, gridImportKwh: imp, gridExportKwh: exp, tiers: tiers);
+                    }
+                    else if (key == SourcesConfig.PvMeterKey)
+                    {
+                        double vPrevN = SourcesConfig.NormalizePvPower(vPrev);
+                        double vCurrN = SourcesConfig.NormalizePvPower(vCurr);
+                        double pv = Math.Max(0.0, (vPrevN + vCurrN) * 0.5 * dtHours);
+                        _energyCalc.AddEnergy(minKey, pvGenKwh: pv, tiers: tiers);
+                    }
+                    else if (key == SourcesConfig.BatteryPowerKey)
+                    {
+                        double vPrevN = SourcesConfig.NormalizeBatteryPower(vPrev);
+                        double vCurrN = SourcesConfig.NormalizeBatteryPower(vCurr);
+                        double chg = Math.Max(0.0, (Math.Max(0.0, -vPrevN) + Math.Max(0.0, -vCurrN)) * 0.5 * dtHours);
+                        double dch = Math.Max(0.0, (Math.Max(0.0, vPrevN) + Math.Max(0.0, vCurrN)) * 0.5 * dtHours);
+                        _energyCalc.AddEnergy(minKey, battChargeKwh: chg, battDischargeKwh: dch, tiers: tiers);
+                    }
+                    else
+                    {
+                        var consumer = Consumers.FirstOrDefault(c => c.ActualPowerKey == key);
+                        if (consumer != null)
+                        {
+                            double cons = Math.Max(0.0, (Math.Max(0.0, vPrev) + Math.Max(0.0, vCurr)) * 0.5 * dtHours);
+                            _energyCalc.AddEnergy(minKey,
+                                consumerKwh: new Dictionary<string, double> { [consumer.Id] = cons },
+                                tiers: tiers);
+                        }
+                    }
+                }
             }
         }
     }

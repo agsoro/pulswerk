@@ -11,6 +11,7 @@ namespace Pulswerk.Core.Tests
             new EnergySourcesConfig
             {
                 GridMaxImportKw = gridLimit,
+                HasBattery = true,
                 BatteryMinReserveKw = reserve,
                 BatteryMinSocPct = 15.0,
                 BatteryFullSocPct = 98.0
@@ -543,6 +544,144 @@ namespace Pulswerk.Core.Tests
             // Old energy (26h ago) should be pruned from the rolling 24h window
             Assert.Equal(12.5, totals.GridImportKwh);
             Assert.Equal(25.0, totals.PvGenerationKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_Rolling30dWindow_ExpiresOlderBuckets()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+
+            // 40 days ago: outside the 30d window
+            long oldMinute = new DateTimeOffset(now.AddDays(-40)).ToUnixTimeSeconds() / 60;
+            calc.AddEnergy(oldMinute, gridImportKwh: 500.0, pvGenKwh: 900.0);
+
+            // 10 days ago: inside the 30d window
+            long recentMinute = new DateTimeOffset(now.AddDays(-10)).ToUnixTimeSeconds() / 60;
+            calc.AddEnergy(recentMinute, gridImportKwh: 42.0, pvGenKwh: 77.0);
+
+            var totals = calc.Get30dTotals(now);
+
+            Assert.Equal(42.0, totals.GridImportKwh);
+            Assert.Equal(77.0, totals.PvGenerationKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_Rolling1yWindow_ExpiresOlderBuckets()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+
+            // 400 days ago: outside the 1y window
+            long oldMinute = new DateTimeOffset(now.AddDays(-400)).ToUnixTimeSeconds() / 60;
+            calc.AddEnergy(oldMinute, gridImportKwh: 5000.0, pvGenKwh: 9000.0);
+
+            // 200 days ago: inside the 1y window
+            long recentMinute = new DateTimeOffset(now.AddDays(-200)).ToUnixTimeSeconds() / 60;
+            calc.AddEnergy(recentMinute, gridImportKwh: 321.0, pvGenKwh: 654.0);
+
+            var totals = calc.Get1yTotals(now);
+
+            Assert.Equal(321.0, totals.GridImportKwh);
+            Assert.Equal(654.0, totals.PvGenerationKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_TiersAgree_WhenAllTiersAreWritten()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+            long minuteKey = new DateTimeOffset(now.AddHours(-2)).ToUnixTimeSeconds() / 60;
+
+            calc.AddEnergy(
+                minuteKey,
+                gridImportKwh: 3.0,
+                gridExportKwh: 1.0,
+                pvGenKwh: 9.0,
+                battChargeKwh: 2.0,
+                battDischargeKwh: 1.5,
+                uncontrollableKwh: 4.0,
+                surplusKwh: 2.5,
+                consumerKwh: new Dictionary<string, double> { ["wb1"] = 1.25 });
+
+            var h24 = calc.Get24hTotals(now);
+            var d30 = calc.Get30dTotals(now);
+            var y1 = calc.Get1yTotals(now);
+
+            // A single sample inside every window must produce identical totals per tier.
+            Assert.Equal(h24.GridImportKwh, d30.GridImportKwh);
+            Assert.Equal(h24.GridImportKwh, y1.GridImportKwh);
+            Assert.Equal(h24.PvGenerationKwh, y1.PvGenerationKwh);
+            Assert.Equal(h24.BatteryChargedKwh, d30.BatteryChargedKwh);
+            Assert.Equal(h24.BatteryDischargedKwh, y1.BatteryDischargedKwh);
+            Assert.Equal(h24.UncontrollableKwh, d30.UncontrollableKwh);
+            Assert.Equal(h24.TotalSurplusKwh, y1.TotalSurplusKwh);
+            Assert.Equal(1.25, y1.ConsumerKwh["wb1"]);
+        }
+
+        [Fact]
+        public void EnergyCalculator_TierMask_WritesOnlyRequestedTier()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+            long minuteKey = new DateTimeOffset(now.AddHours(-1)).ToUnixTimeSeconds() / 60;
+
+            calc.AddEnergy(minuteKey, gridImportKwh: 7.0, tiers: EnergyTiers.Hour);
+
+            Assert.Equal(0.0, calc.Get24hTotals(now).GridImportKwh);
+            Assert.Equal(7.0, calc.Get30dTotals(now).GridImportKwh);
+            Assert.Equal(0.0, calc.Get1yTotals(now).GridImportKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_Serialization_PreservesAllTiers()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+
+            calc.AddEnergy(
+                new DateTimeOffset(now.AddHours(-3)).ToUnixTimeSeconds() / 60,
+                gridImportKwh: 2.0);
+            calc.AddEnergy(
+                new DateTimeOffset(now.AddDays(-20)).ToUnixTimeSeconds() / 60,
+                gridImportKwh: 40.0);
+            calc.AddEnergy(
+                new DateTimeOffset(now.AddDays(-300)).ToUnixTimeSeconds() / 60,
+                gridImportKwh: 400.0);
+
+            var restored = new EmsRollingEnergyCalculator();
+            restored.Deserialize(calc.Serialize());
+
+            Assert.Equal(2.0, restored.Get24hTotals(now).GridImportKwh);
+            Assert.Equal(42.0, restored.Get30dTotals(now).GridImportKwh);
+            Assert.Equal(442.0, restored.Get1yTotals(now).GridImportKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_Deserialize_LegacyMinuteArray_RebuildsCoarseTiers()
+        {
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+            long minuteKey = new DateTimeOffset(now.AddHours(-6)).ToUnixTimeSeconds() / 60;
+
+            // Legacy payload: a bare JSON array of minute buckets (pre-v2 format).
+            string legacyJson = System.Text.Json.JsonSerializer.Serialize(new[]
+            {
+                new EnergyMinuteBucket
+                {
+                    MinuteKey = minuteKey,
+                    GridImportKwh = 5.0,
+                    PvGenKwh = 8.0,
+                    ConsumerKwh = new Dictionary<string, double> { ["wb1"] = 2.0 },
+                },
+            });
+
+            var calc = new EmsRollingEnergyCalculator();
+            calc.Deserialize(legacyJson);
+
+            Assert.Equal(5.0, calc.Get24hTotals(now).GridImportKwh);
+            Assert.Equal(5.0, calc.Get30dTotals(now).GridImportKwh);
+            Assert.Equal(5.0, calc.Get1yTotals(now).GridImportKwh);
+            Assert.Equal(2.0, calc.Get1yTotals(now).ConsumerKwh["wb1"]);
         }
 
         [Fact]

@@ -115,22 +115,28 @@ namespace Pulswerk.Drivers.Ocpp
 
         // IDeviceWriter methods
         public void Write(ConnectionConfig connection, DeviceConfig device, string key, double value)
+            => WriteAsync(connection, device, key, value).GetAwaiter().GetResult();
+
+        public async Task WriteAsync(ConnectionConfig connection, DeviceConfig device, string key, double value)
         {
             var manager = OcppManagerService.Instance;
             if (key == "force_power" || key == TelemetryKeys.ForcePowerKw)
             {
                 int connectorId = 1;
+                bool applied;
                 if (value < 0.0)
                 {
                     // Negative: Unrestricted mode (16A, 3 phases = 11.04 kW) & clear profiles
-                    _ = manager.ClearChargingProfileAsync(device.Id, 0);
-                    manager.SetChargingLimitAsync(device.Id, connectorId, OcppManagerService.DefaultMaxCurrentAmps, OcppManagerService.MaxPhases, 11.04).GetAwaiter().GetResult();
+                    await manager.ClearChargingProfileAsync(device.Id, 0);
+                    applied = await manager.SetChargingLimitAsync(device.Id, connectorId, OcppManagerService.DefaultMaxCurrentAmps, OcppManagerService.MaxPhases, 11.04);
                 }
                 else
                 {
                     var (amps, phases) = OcppManagerService.ResolveForcePower(value);
-                    manager.SetChargingLimitAsync(device.Id, connectorId, amps, phases, value).GetAwaiter().GetResult();
+                    applied = await manager.SetChargingLimitAsync(device.Id, connectorId, amps, phases, value);
                 }
+
+                ThrowIfRejected(manager, device.Id, key, applied);
             }
             else if (key == "charging_phases")
             {
@@ -143,12 +149,24 @@ namespace Pulswerk.Drivers.Ocpp
                     currentPowerKw = fp;
                 }
                 var (amps, phases) = OcppManagerService.ResolveForcePower(currentPowerKw, newPhases);
-                manager.SetChargingLimitAsync(device.Id, connectorId, amps, phases, currentPowerKw).GetAwaiter().GetResult();
+                bool applied = await manager.SetChargingLimitAsync(device.Id, connectorId, amps, phases, currentPowerKw);
+                ThrowIfRejected(manager, device.Id, key, applied);
             }
             else
             {
                 throw new NotSupportedException($"Writing to key '{key}' is not supported.");
             }
+        }
+
+        /// <summary>
+        /// A charge point that is offline keeps the setpoint in telemetry and applies it once
+        /// a transaction starts, so only a connected charger that actively rejected the
+        /// profile is reported as a failed write.
+        /// </summary>
+        private static void ThrowIfRejected(OcppManagerService manager, string chargePointId, string key, bool applied)
+        {
+            if (!applied && manager.IsConnected(chargePointId))
+                throw new InvalidOperationException($"Charge point '{chargePointId}' rejected the charging profile for '{key}'.");
         }
 
         public void WriteComplex(ConnectionConfig connection, DeviceConfig device, string key, object value)

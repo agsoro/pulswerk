@@ -20,6 +20,7 @@ import { HeartbeatPage } from './pages/heartbeat';
 import { WallboxesPage } from './pages/wallboxes';
 import { BillingPage } from './pages/billing';
 import { EmsPage } from './pages/ems';
+import { useMobileHeaderAction } from './mobileHeaderAction';
 import { TelemetryCrudPage } from './pages/telemetryCrud';
 
 // Imports of i18n
@@ -73,6 +74,7 @@ export function App() {
     const [popoverOpen, setPopoverOpen] = useState(false);
     const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
+    const mobileHeaderAction = useMobileHeaderAction();
 
     // Client-side navigation helper
     const navigate = (url: string) => {
@@ -412,40 +414,50 @@ export function App() {
             {/* Main content viewport */}
             <main class="flex-1 w-full ml-0 px-3 py-3 pb-24 md:ml-[72px] md:w-[calc(100%-72px)] md:px-6 md:py-4 md:pb-6 transition-[margin-left] duration-300">
                 {/* Mobile Top Header */}
-                <header class="md:hidden flex items-center justify-between px-3 py-2.5 bg-slate-800/80 backdrop-blur-md border border-white/5 rounded-xl mb-4 sticky top-1 z-30" data-testid="mobile-header">
-                    <a href="/plswk/" class="flex items-center no-underline">
-                        <img src="/plswk/img/pulswerk_logo_sm.png" alt="Pulswerk" class="h-6 brightness-0 invert" />
+                <header class="md:hidden flex items-center justify-between gap-2 px-2 py-1 bg-slate-800/80 backdrop-blur-md border border-white/5 rounded-lg mb-2 sticky top-1 z-30" data-testid="mobile-header">
+                    <a href="/plswk/" class="flex items-center no-underline shrink-0">
+                        <img src="/plswk/img/pulswerk_logo_sm.png" alt="Pulswerk" class="h-4 brightness-0 invert" />
                     </a>
-                    <div class="flex items-center gap-2">
-                        <span class="text-xs font-bold text-slate-200 truncate max-w-[130px]" data-testid="mobile-page-title">
-                            {pageTitle === 'Home' ? t('nav_home') : 
-                             pageTitle === 'Dashboards' ? t('nav_dashboards') :
-                             pageTitle === 'Assets' ? t('nav_assets') :
-                             pageTitle === 'Data Points' ? t('nav_telemetries') :
-                             pageTitle === 'Connections' ? t('nav_connections') :
-                             pageTitle === 'Active Alarms' ? t('nav_alarms') :
-                             pageTitle === 'System Logs' ? t('nav_logs') :
-                             pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
-                             pageTitle === 'Billing' ? t('nav_billing') :
-                             pageTitle === 'Energy Management' ? t('nav_ems') :
-                             pageTitle === 'Historical Data' ? t('nav_historical_data') :
-                             pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle}
-                        </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <div class="flex items-center gap-1 text-[0.65rem] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full px-2 py-0.5">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span class="text-[0.65rem] font-bold text-slate-300 truncate min-w-0" data-testid="mobile-page-title">
+                        {pageTitle === 'Home' ? t('nav_home') : 
+                         pageTitle === 'Dashboards' ? t('nav_dashboards') :
+                         pageTitle === 'Assets' ? t('nav_assets') :
+                         pageTitle === 'Data Points' ? t('nav_telemetries') :
+                         pageTitle === 'Connections' ? t('nav_connections') :
+                         pageTitle === 'Active Alarms' ? t('nav_alarms') :
+                         pageTitle === 'System Logs' ? t('nav_logs') :
+                         pageTitle === 'Wallboxes' ? t('nav_wallboxes') :
+                         pageTitle === 'Billing' ? t('nav_billing') :
+                         pageTitle === 'Energy Management' ? t('nav_ems') :
+                         pageTitle === 'Historical Data' ? t('nav_historical_data') :
+                         pageTitle === 'System Heartbeat' ? t('nav_heartbeat') : pageTitle}
+                    </span>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <div class="flex items-center gap-1 text-[0.55rem] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full px-1.5 py-px">
+                            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>
                             <span class="font-mono">Live</span>
                         </div>
+                        {mobileHeaderAction && (
+                            <button
+                                type="button"
+                                onClick={() => mobileHeaderAction.onClick()}
+                                class="w-6 h-6 rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-cyan-300 hover:border-cyan-500/50 flex items-center justify-center text-[0.6rem] cursor-pointer"
+                                title={mobileHeaderAction.title}
+                                aria-label={mobileHeaderAction.title}
+                                data-testid="mobile-header-action"
+                            >
+                                <i class={`fas ${mobileHeaderAction.icon}`}></i>
+                            </button>
+                        )}
                         <button 
                             type="button"
                             onClick={() => setMobileDrawerOpen(true)}
-                            class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer"
+                            class="w-6 h-6 rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-[0.6rem] cursor-pointer"
                             title="Menu & Profile"
                             data-testid="mobile-menu-btn"
                         >
                             {isUserAuth ? (
-                                <span class="font-bold text-[0.65rem] text-sky-400">{userInitials}</span>
+                                <span class="font-bold text-[0.55rem] text-sky-400">{userInitials}</span>
                             ) : (
                                 <i class="fas fa-bars"></i>
                             )}

@@ -382,8 +382,12 @@ namespace Pulswerk.Billing
         {
             if (_disposed) return;
             _disposed = true;
-            _db?.Close();
-            _db?.Dispose();
+            _db.Close();
+            // Microsoft.Data.Sqlite pools connections by default, so Close() returns the
+            // handle to the pool instead of releasing the file. Without clearing the pool
+            // the database file (and its -wal/-shm siblings) stays locked on Windows.
+            SqliteConnection.ClearPool(_db);
+            _db.Dispose();
         }
     }
 

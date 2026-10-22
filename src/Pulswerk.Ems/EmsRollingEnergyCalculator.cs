@@ -47,13 +47,30 @@ namespace Pulswerk.Ems
         Dictionary<string, double> ConsumerKwh);
 
     /// <summary>
-    /// Computes rolling 24-hour energy (in/out) in kWh for all EMS channels
-    /// by numerical trapezoidal integration of power telemetry into 1-minute buckets.
+    /// Retention tiers of the rolling energy calculator.
+    /// </summary>
+    [Flags]
+    public enum EnergyTiers
+    {
+        None = 0,
+        Minute = 1,
+        Hour = 2,
+        Day = 4,
+        All = Minute | Hour | Day
+    }
+
+    /// <summary>
+    /// Computes rolling energy (in/out) in kWh for all EMS channels by numerical
+    /// trapezoidal integration of power telemetry. Three retention tiers are kept:
+    /// 1-minute buckets for the rolling 24h window, 1-hour buckets for the rolling
+    /// 30-day window and 1-day buckets for the rolling 1-year window.
     /// </summary>
     public class EmsRollingEnergyCalculator
     {
         private readonly object _lock = new();
         private readonly Dictionary<long, EnergyMinuteBucket> _buckets = new();
+        private readonly Dictionary<long, EnergyMinuteBucket> _hourBuckets = new();
+        private readonly Dictionary<long, EnergyMinuteBucket> _dayBuckets = new();
 
         private DateTime? _lastTimestamp;
         private double _lastGridKw;
@@ -65,6 +82,13 @@ namespace Pulswerk.Ems
 
         private const int RollingHours = 24;
         private const int PruneHours = 25; // Retain 25h to ensure rolling 24h is always complete
+        private const int RollingDays = 30;
+        private const int PruneDays = 31; // Retain 31d to ensure rolling 30d is always complete
+        private const int RollingYearDays = 365;
+        private const int PruneYearDays = 366; // Retain 366d to ensure rolling 1y is always complete
+
+        private const long MinutesPerHour = 60;
+        private const long MinutesPerDay = 1440;
 
         /// <summary>
         /// Ingests a live power telemetry sample and integrates energy into the current minute bucket.
@@ -91,49 +115,43 @@ namespace Pulswerk.Ems
                     {
                         double deltaHours = deltaSec / 3600.0;
 
-                        if (!_buckets.TryGetValue(currentMinute, out var bucket))
-                        {
-                            bucket = new EnergyMinuteBucket { MinuteKey = currentMinute };
-                            _buckets[currentMinute] = bucket;
-                        }
-
                         // 1. Grid (In = Import, Out = Export)
                         double avgGridImport = (Math.Max(0.0, _lastGridKw) + Math.Max(0.0, gridKw)) * 0.5;
                         double avgGridExport = (Math.Max(0.0, -_lastGridKw) + Math.Max(0.0, -gridKw)) * 0.5;
-                        bucket.GridImportKwh += avgGridImport * deltaHours;
-                        bucket.GridExportKwh += avgGridExport * deltaHours;
 
                         // 2. Solar PV (Out = Generation; values are pre-normalized to the canonical
                         //    sign rule where positive = generation, so only positive power counts).
                         double avgPv = (Math.Max(0.0, _lastPvKw) + Math.Max(0.0, pvKw)) * 0.5;
-                        bucket.PvGenKwh += avgPv * deltaHours;
 
                         // 3. Battery (In = Charge when P < 0, Out = Discharge when P > 0)
                         double avgBattCharge = (Math.Max(0.0, -_lastBattKw) + Math.Max(0.0, -battKw)) * 0.5;
                         double avgBattDischarge = (Math.Max(0.0, _lastBattKw) + Math.Max(0.0, battKw)) * 0.5;
-                        bucket.BatteryChargeKwh += avgBattCharge * deltaHours;
-                        bucket.BatteryDischargeKwh += avgBattDischarge * deltaHours;
 
                         // 4. Uncontrollable loads (In = Consumed)
                         double avgUnc = (Math.Max(0.0, _lastUncontrollableKw) + Math.Max(0.0, uncontrollableKw)) * 0.5;
-                        bucket.UncontrollableKwh += avgUnc * deltaHours;
 
                         // 5. Surplus pool
                         double avgSurplus = (Math.Max(0.0, _lastSurplusKw) + Math.Max(0.0, surplusKw)) * 0.5;
-                        bucket.SurplusKwh += avgSurplus * deltaHours;
 
                         // 6. Consumers (In = Consumed)
+                        var consumerDeltas = new Dictionary<string, double>();
                         foreach (var (id, power) in consumers)
                         {
                             _lastConsumerKw.TryGetValue(id, out double prevKw);
                             double avgCons = (Math.Max(0.0, prevKw) + Math.Max(0.0, power)) * 0.5;
-                            double kwh = avgCons * deltaHours;
-
-                            if (!bucket.ConsumerKwh.TryGetValue(id, out double curKwh))
-                                bucket.ConsumerKwh[id] = kwh;
-                            else
-                                bucket.ConsumerKwh[id] = curKwh + kwh;
+                            consumerDeltas[id] = avgCons * deltaHours;
                         }
+
+                        AddDelta(
+                            currentMinute,
+                            avgGridImport * deltaHours,
+                            avgGridExport * deltaHours,
+                            avgPv * deltaHours,
+                            avgBattCharge * deltaHours,
+                            avgBattDischarge * deltaHours,
+                            avgUnc * deltaHours,
+                            avgSurplus * deltaHours,
+                            consumerDeltas);
                     }
                 }
 
@@ -151,12 +169,90 @@ namespace Pulswerk.Ems
                     _lastConsumerKw[id] = power;
                 }
 
-                // Prune buckets older than PruneHours
+                // Prune buckets older than the retention windows
                 long pruneCutoff = currentMinute - (PruneHours * 60);
                 var staleKeys = _buckets.Keys.Where(k => k < pruneCutoff).ToList();
                 foreach (var key in staleKeys)
                 {
                     _buckets.Remove(key);
+                }
+
+                long hourPruneCutoff = currentMinute / MinutesPerHour - (PruneDays * 24);
+                var staleHourKeys = _hourBuckets.Keys.Where(k => k < hourPruneCutoff).ToList();
+                foreach (var key in staleHourKeys)
+                {
+                    _hourBuckets.Remove(key);
+                }
+
+                long dayPruneCutoff = currentMinute / MinutesPerDay - PruneYearDays;
+                var staleDayKeys = _dayBuckets.Keys.Where(k => k < dayPruneCutoff).ToList();
+                foreach (var key in staleDayKeys)
+                {
+                    _dayBuckets.Remove(key);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Adds an energy delta to the minute, hour and day bucket that contain <paramref name="minuteKey"/>.
+        /// </summary>
+        private void AddDelta(
+            long minuteKey,
+            double gridImportKwh,
+            double gridExportKwh,
+            double pvGenKwh,
+            double battChargeKwh,
+            double battDischargeKwh,
+            double uncontrollableKwh,
+            double surplusKwh,
+            Dictionary<string, double>? consumerKwh,
+            EnergyTiers tiers = EnergyTiers.All)
+        {
+            if (tiers.HasFlag(EnergyTiers.Minute))
+                Accumulate(_buckets, minuteKey, gridImportKwh, gridExportKwh, pvGenKwh, battChargeKwh,
+                    battDischargeKwh, uncontrollableKwh, surplusKwh, consumerKwh);
+            if (tiers.HasFlag(EnergyTiers.Hour))
+                Accumulate(_hourBuckets, minuteKey / MinutesPerHour, gridImportKwh, gridExportKwh, pvGenKwh,
+                    battChargeKwh, battDischargeKwh, uncontrollableKwh, surplusKwh, consumerKwh);
+            if (tiers.HasFlag(EnergyTiers.Day))
+                Accumulate(_dayBuckets, minuteKey / MinutesPerDay, gridImportKwh, gridExportKwh, pvGenKwh,
+                    battChargeKwh, battDischargeKwh, uncontrollableKwh, surplusKwh, consumerKwh);
+        }
+
+        private static void Accumulate(
+            Dictionary<long, EnergyMinuteBucket> target,
+            long key,
+            double gridImportKwh,
+            double gridExportKwh,
+            double pvGenKwh,
+            double battChargeKwh,
+            double battDischargeKwh,
+            double uncontrollableKwh,
+            double surplusKwh,
+            Dictionary<string, double>? consumerKwh)
+        {
+            if (!target.TryGetValue(key, out var bucket))
+            {
+                bucket = new EnergyMinuteBucket { MinuteKey = key };
+                target[key] = bucket;
+            }
+
+            bucket.GridImportKwh += gridImportKwh;
+            bucket.GridExportKwh += gridExportKwh;
+            bucket.PvGenKwh += pvGenKwh;
+            bucket.BatteryChargeKwh += battChargeKwh;
+            bucket.BatteryDischargeKwh += battDischargeKwh;
+            bucket.UncontrollableKwh += uncontrollableKwh;
+            bucket.SurplusKwh += surplusKwh;
+
+            if (consumerKwh != null)
+            {
+                foreach (var (cid, kwh) in consumerKwh)
+                {
+                    if (!bucket.ConsumerKwh.TryGetValue(cid, out double existing))
+                        bucket.ConsumerKwh[cid] = kwh;
+                    else
+                        bucket.ConsumerKwh[cid] = existing + kwh;
                 }
             }
         }
@@ -169,55 +265,89 @@ namespace Pulswerk.Ems
             lock (_lock)
             {
                 long currentMinute = new DateTimeOffset(asOf).ToUnixTimeSeconds() / 60;
-                long windowStartMinute = currentMinute - (RollingHours * 60);
+                return SumWindow(_buckets, currentMinute - (RollingHours * 60), currentMinute);
+            }
+        }
 
-                double sumGridImport = 0.0;
-                double sumGridExport = 0.0;
-                double sumPv = 0.0;
-                double sumBattCharge = 0.0;
-                double sumBattDischarge = 0.0;
-                double sumUnc = 0.0;
-                double sumSurplus = 0.0;
-                var consumerTotals = new Dictionary<string, double>();
+        /// <summary>
+        /// Calculates the total energy for the trailing 30-day rolling window.
+        /// </summary>
+        public Rolling24hTotals Get30dTotals(DateTime asOf)
+        {
+            lock (_lock)
+            {
+                long currentHour = new DateTimeOffset(asOf).ToUnixTimeSeconds() / 60 / MinutesPerHour;
+                return SumWindow(_hourBuckets, currentHour - (RollingDays * 24), currentHour);
+            }
+        }
 
-                foreach (var (minuteKey, bucket) in _buckets)
+        /// <summary>
+        /// Calculates the total energy for the trailing 1-year rolling window.
+        /// </summary>
+        public Rolling24hTotals Get1yTotals(DateTime asOf)
+        {
+            lock (_lock)
+            {
+                long currentDay = new DateTimeOffset(asOf).ToUnixTimeSeconds() / 60 / MinutesPerDay;
+                return SumWindow(_dayBuckets, currentDay - RollingYearDays, currentDay);
+            }
+        }
+
+        private static Rolling24hTotals SumWindow(
+            Dictionary<long, EnergyMinuteBucket> source,
+            long windowStartKey,
+            long windowEndKey)
+        {
+            double sumGridImport = 0.0;
+            double sumGridExport = 0.0;
+            double sumPv = 0.0;
+            double sumBattCharge = 0.0;
+            double sumBattDischarge = 0.0;
+            double sumUnc = 0.0;
+            double sumSurplus = 0.0;
+            var consumerTotals = new Dictionary<string, double>();
+
+            foreach (var (key, bucket) in source)
+            {
+                if (key >= windowStartKey && key <= windowEndKey)
                 {
-                    if (minuteKey >= windowStartMinute && minuteKey <= currentMinute)
-                    {
-                        sumGridImport += bucket.GridImportKwh;
-                        sumGridExport += bucket.GridExportKwh;
-                        sumPv += bucket.PvGenKwh;
-                        sumBattCharge += bucket.BatteryChargeKwh;
-                        sumBattDischarge += bucket.BatteryDischargeKwh;
-                        sumUnc += bucket.UncontrollableKwh;
-                        sumSurplus += bucket.SurplusKwh;
+                    sumGridImport += bucket.GridImportKwh;
+                    sumGridExport += bucket.GridExportKwh;
+                    sumPv += bucket.PvGenKwh;
+                    sumBattCharge += bucket.BatteryChargeKwh;
+                    sumBattDischarge += bucket.BatteryDischargeKwh;
+                    sumUnc += bucket.UncontrollableKwh;
+                    sumSurplus += bucket.SurplusKwh;
 
-                        foreach (var (cid, ckwh) in bucket.ConsumerKwh)
-                        {
-                            if (!consumerTotals.TryGetValue(cid, out double csum))
-                                consumerTotals[cid] = ckwh;
-                            else
-                                consumerTotals[cid] = csum + ckwh;
-                        }
+                    foreach (var (cid, ckwh) in bucket.ConsumerKwh)
+                    {
+                        if (!consumerTotals.TryGetValue(cid, out double csum))
+                            consumerTotals[cid] = ckwh;
+                        else
+                            consumerTotals[cid] = csum + ckwh;
                     }
                 }
-
-                return new Rolling24hTotals(
-                    Math.Round(sumGridImport, 2),
-                    Math.Round(sumGridExport, 2),
-                    Math.Round(sumPv, 2),
-                    Math.Round(sumBattCharge, 2),
-                    Math.Round(sumBattDischarge, 2),
-                    Math.Round(sumUnc, 2),
-                    Math.Round(sumSurplus, 2),
-                    consumerTotals.ToDictionary(k => k.Key, v => Math.Round(v.Value, 2)));
             }
+
+            return new Rolling24hTotals(
+                Math.Round(sumGridImport, 2),
+                Math.Round(sumGridExport, 2),
+                Math.Round(sumPv, 2),
+                Math.Round(sumBattCharge, 2),
+                Math.Round(sumBattDischarge, 2),
+                Math.Round(sumUnc, 2),
+                Math.Round(sumSurplus, 2),
+                consumerTotals.ToDictionary(k => k.Key, v => Math.Round(v.Value, 2)));
         }
 
         /// <summary>
         /// Manually integrates a discrete block of energy into a specific minute bucket.
         /// Useful for historical bootstrapping from InfluxDB or test fixtures.
         /// </summary>
+        /// <param name="tiers">
+        /// Retention tiers to write. Backfill passes use a single tier so that coarse
+        /// aggregates are not double-counted by overlapping passes.
+        /// </param>
         public void AddEnergy(
             long minuteKey,
             double gridImportKwh = 0.0,
@@ -227,34 +357,22 @@ namespace Pulswerk.Ems
             double battDischargeKwh = 0.0,
             double uncontrollableKwh = 0.0,
             double surplusKwh = 0.0,
-            Dictionary<string, double>? consumerKwh = null)
+            Dictionary<string, double>? consumerKwh = null,
+            EnergyTiers tiers = EnergyTiers.All)
         {
             lock (_lock)
             {
-                if (!_buckets.TryGetValue(minuteKey, out var bucket))
-                {
-                    bucket = new EnergyMinuteBucket { MinuteKey = minuteKey };
-                    _buckets[minuteKey] = bucket;
-                }
-
-                bucket.GridImportKwh += gridImportKwh;
-                bucket.GridExportKwh += gridExportKwh;
-                bucket.PvGenKwh += pvGenKwh;
-                bucket.BatteryChargeKwh += battChargeKwh;
-                bucket.BatteryDischargeKwh += battDischargeKwh;
-                bucket.UncontrollableKwh += uncontrollableKwh;
-                bucket.SurplusKwh += surplusKwh;
-
-                if (consumerKwh != null)
-                {
-                    foreach (var (cid, kwh) in consumerKwh)
-                    {
-                        if (!bucket.ConsumerKwh.TryGetValue(cid, out double existing))
-                            bucket.ConsumerKwh[cid] = kwh;
-                        else
-                            bucket.ConsumerKwh[cid] = existing + kwh;
-                    }
-                }
+                AddDelta(
+                    minuteKey,
+                    gridImportKwh,
+                    gridExportKwh,
+                    pvGenKwh,
+                    battChargeKwh,
+                    battDischargeKwh,
+                    uncontrollableKwh,
+                    surplusKwh,
+                    consumerKwh,
+                    tiers);
             }
         }
 
@@ -265,13 +383,20 @@ namespace Pulswerk.Ems
         {
             lock (_lock)
             {
-                var bucketList = _buckets.Values.OrderBy(b => b.MinuteKey).ToList();
-                return JsonSerializer.Serialize(bucketList);
+                var state = new EnergyStateEnvelope
+                {
+                    Version = 2,
+                    MinuteBuckets = _buckets.Values.OrderBy(b => b.MinuteKey).ToList(),
+                    HourBuckets = _hourBuckets.Values.OrderBy(b => b.MinuteKey).ToList(),
+                    DayBuckets = _dayBuckets.Values.OrderBy(b => b.MinuteKey).ToList()
+                };
+                return JsonSerializer.Serialize(state);
             }
         }
 
         /// <summary>
-        /// Restores buckets from serialized JSON state.
+        /// Restores buckets from serialized JSON state. Legacy payloads (a bare array of
+        /// minute buckets) are still accepted; the coarser tiers are then rebuilt from them.
         /// </summary>
         public void Deserialize(string json)
         {
@@ -279,16 +404,47 @@ namespace Pulswerk.Ems
 
             try
             {
-                var list = JsonSerializer.Deserialize<List<EnergyMinuteBucket>>(json);
-                if (list == null) return;
+                if (json.TrimStart().StartsWith("[", StringComparison.Ordinal))
+                {
+                    var legacyList = JsonSerializer.Deserialize<List<EnergyMinuteBucket>>(json);
+                    if (legacyList == null) return;
+
+                    lock (_lock)
+                    {
+                        _buckets.Clear();
+                        _hourBuckets.Clear();
+                        _dayBuckets.Clear();
+                        foreach (var bucket in legacyList)
+                        {
+                            _buckets[bucket.MinuteKey] = bucket;
+                            Accumulate(_hourBuckets, bucket.MinuteKey / MinutesPerHour, bucket.GridImportKwh,
+                                bucket.GridExportKwh, bucket.PvGenKwh, bucket.BatteryChargeKwh,
+                                bucket.BatteryDischargeKwh, bucket.UncontrollableKwh, bucket.SurplusKwh,
+                                bucket.ConsumerKwh);
+                            Accumulate(_dayBuckets, bucket.MinuteKey / MinutesPerDay, bucket.GridImportKwh,
+                                bucket.GridExportKwh, bucket.PvGenKwh, bucket.BatteryChargeKwh,
+                                bucket.BatteryDischargeKwh, bucket.UncontrollableKwh, bucket.SurplusKwh,
+                                bucket.ConsumerKwh);
+                        }
+                    }
+                    return;
+                }
+
+                var state = JsonSerializer.Deserialize<EnergyStateEnvelope>(json);
+                if (state == null) return;
 
                 lock (_lock)
                 {
                     _buckets.Clear();
-                    foreach (var bucket in list)
-                    {
+                    _hourBuckets.Clear();
+                    _dayBuckets.Clear();
+
+                    foreach (var bucket in state.MinuteBuckets ?? new List<EnergyMinuteBucket>())
                         _buckets[bucket.MinuteKey] = bucket;
-                    }
+                    foreach (var bucket in state.HourBuckets ?? new List<EnergyMinuteBucket>())
+                        _hourBuckets[bucket.MinuteKey] = bucket;
+                    foreach (var bucket in state.DayBuckets ?? new List<EnergyMinuteBucket>())
+                        _dayBuckets[bucket.MinuteKey] = bucket;
                 }
             }
             catch
@@ -305,9 +461,26 @@ namespace Pulswerk.Ems
             lock (_lock)
             {
                 _buckets.Clear();
+                _hourBuckets.Clear();
+                _dayBuckets.Clear();
                 _lastTimestamp = null;
                 _lastConsumerKw.Clear();
             }
+        }
+
+        private sealed class EnergyStateEnvelope
+        {
+            [JsonPropertyName("v")]
+            public int Version { get; set; }
+
+            [JsonPropertyName("min")]
+            public List<EnergyMinuteBucket>? MinuteBuckets { get; set; }
+
+            [JsonPropertyName("hour")]
+            public List<EnergyMinuteBucket>? HourBuckets { get; set; }
+
+            [JsonPropertyName("day")]
+            public List<EnergyMinuteBucket>? DayBuckets { get; set; }
         }
     }
 }

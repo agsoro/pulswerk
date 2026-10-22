@@ -789,7 +789,7 @@ namespace Pulswerk.Host
             {
                 while (!ct.IsCancellationRequested)
                 {
-                    try { _controlEngine.EvaluateDue(); }
+                    try { await _controlEngine.EvaluateDueAsync(); }
                     catch (Exception ex) { Log.Error($"[Control] Evaluation error: {ex.Message}"); }
 
                     try { await Task.Delay(1_000, ct); }

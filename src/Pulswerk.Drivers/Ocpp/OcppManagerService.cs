@@ -30,6 +30,15 @@ namespace Pulswerk.Drivers.Ocpp
         private readonly ConcurrentDictionary<string, int> _chargePointConnectorIds = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingCallResults = new();
 
+        // Serializes outbound frames per charge point: WebSocket.SendAsync must not be
+        // called concurrently, and sends now originate from both the receive loop and
+        // background CALL handlers.
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _sendLocks = new(StringComparer.OrdinalIgnoreCase);
+
+        // Chains CALL handlers per charge point so they still run in arrival order even
+        // though the receive loop no longer awaits them.
+        private readonly ConcurrentDictionary<string, Task> _callChains = new(StringComparer.OrdinalIgnoreCase);
+
         private int _transactionIdCounter = 1000;
         private BillingStore? _billingStore;
 
@@ -41,6 +50,9 @@ namespace Pulswerk.Drivers.Ocpp
         // below this, so when power drops below 4.14 kW we switch to 1 phase (@ 6A = 1.38 kW)
         // instead of reducing below 6A. Below 1.38 kW charging is paused (0A).
         public const double MinCurrentAmps = 6.0;
+
+        /// <summary>How long to wait for a charge point CallResult before treating the call as failed.</summary>
+        private static readonly TimeSpan CallResultTimeout = TimeSpan.FromSeconds(10);
 
         public event Action<string, string, object>? OnTelemetryUpdated;
         public event Action<string, object>? OnServerTelemetryUpdated;
@@ -139,7 +151,7 @@ namespace Pulswerk.Drivers.Ocpp
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         string message = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
-                        await ProcessOcppMessageAsync(chargePointId, message, socket);
+                        ProcessOcppMessage(chargePointId, message);
                     }
                 }
             }
@@ -163,6 +175,8 @@ namespace Pulswerk.Drivers.Ocpp
                 }
                 _chargePointTransactionIds.TryRemove(chargePointId, out _);
                 _chargePointConnectorIds.TryRemove(chargePointId, out _);
+                _sendLocks.TryRemove(chargePointId, out _);
+                _callChains.TryRemove(chargePointId, out _);
 
                 PublishServerTelemetry();
 
@@ -182,7 +196,7 @@ namespace Pulswerk.Drivers.Ocpp
         }
 
         // Processes OCPP 1.6-J messages
-        private async Task ProcessOcppMessageAsync(string chargePointId, string rawMessage, WebSocket socket)
+        private void ProcessOcppMessage(string chargePointId, string rawMessage)
         {
             try
             {
@@ -201,8 +215,22 @@ namespace Pulswerk.Drivers.Ocpp
                 if (messageType == 2)
                 {
                     string action = root[2].GetString() ?? "";
-                    var payload = root[3];
-                    await HandleOcppCallAsync(chargePointId, messageId, action, payload);
+                    // Clone: the JsonDocument is disposed when this method returns, but the
+                    // handler runs on a background task.
+                    var payload = root[3].Clone();
+
+                    // Handlers must not run inline: some of them (MeterValues, StopTransaction)
+                    // send Smart Charging calls and wait for the CALLRESULT, which can only be
+                    // read by this receive loop. Awaiting here would deadlock until the
+                    // CallResultTimeout expires. Chaining keeps per-charger ordering.
+                    _callChains.AddOrUpdate(
+                        chargePointId,
+                        _ => RunCallHandlerAsync(chargePointId, messageId, action, payload),
+                        (_, previous) => previous.ContinueWith(
+                            _ => RunCallHandlerAsync(chargePointId, messageId, action, payload),
+                            CancellationToken.None,
+                            TaskContinuationOptions.None,
+                            TaskScheduler.Default).Unwrap());
                 }
                 // MessageType 3 = CALLRESULT
                 else if (messageType == 3)
@@ -211,7 +239,7 @@ namespace Pulswerk.Drivers.Ocpp
                     Log.Info($"[OCPP] [{chargePointId}] Received CallResult for message {messageId}: {payloadStr}");
                     if (_pendingCallResults.TryRemove(messageId, out var pendingResult))
                     {
-                        pendingResult.TrySetResult(true);
+                        pendingResult.TrySetResult(IsCallResultAccepted(root));
                     }
                 }
                 // MessageType 4 = CALLERROR
@@ -230,6 +258,43 @@ namespace Pulswerk.Drivers.Ocpp
             {
                 Log.Error($"[OCPP] [{chargePointId}] Error parsing message: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Runs a CALL handler off the receive loop and swallows handler faults so one bad
+        /// message cannot break the per-charge-point chain.
+        /// </summary>
+        private async Task RunCallHandlerAsync(string chargePointId, string messageId, string action, JsonElement payload)
+        {
+            try
+            {
+                await HandleOcppCallAsync(chargePointId, messageId, action, payload);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[OCPP] [{chargePointId}] Failed to handle '{action}': {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Interprets a CALLRESULT payload. Smart Charging calls answer with a
+        /// <c>status</c> field that may be <c>Rejected</c> even though the CALL itself
+        /// succeeded, so a bare "response received" is not enough.
+        /// </summary>
+        public static bool IsCallResultAccepted(JsonElement root)
+        {
+            if (root.GetArrayLength() < 3 || root[2].ValueKind != JsonValueKind.Object)
+                return true;
+
+            if (!root[2].TryGetProperty("status", out var statusProp) &&
+                !root[2].TryGetProperty("Status", out statusProp))
+                return true;
+
+            string? status = statusProp.ValueKind == JsonValueKind.String ? statusProp.GetString() : null;
+            if (string.IsNullOrEmpty(status))
+                return true;
+
+            return status.Equals("Accepted", StringComparison.OrdinalIgnoreCase);
         }
 
         public async Task HandleOcppCallAsync(string chargePointId, string messageId, string action, JsonElement payload)
@@ -367,7 +432,14 @@ namespace Pulswerk.Drivers.Ocpp
 
                     if (payload.TryGetProperty("transactionData", out var txData) || payload.TryGetProperty("TransactionData", out txData))
                     {
-                        ProcessMeterValues(chargePointId, txData);
+                        // Respond first, then process: the transaction data path may send
+                        // Smart Charging calls and wait for their CALLRESULT.
+                        var txDataCopy = txData.Clone();
+                        _ = Task.Run(async () =>
+                        {
+                            try { await ProcessMeterValuesAsync(chargePointId, txDataCopy); }
+                            catch (Exception ex) { Log.Error($"[OCPP] [{chargePointId}] Failed to process StopTransaction data: {ex.Message}"); }
+                        });
                     }
 
                     string stopIdTag = "Guest";
@@ -407,7 +479,7 @@ namespace Pulswerk.Drivers.Ocpp
                     break;
 
                 case "MeterValues":
-                    ProcessMeterValues(chargePointId, payload);
+                    await ProcessMeterValuesAsync(chargePointId, payload);
                     responsePayload = new { };
                     break;
 
@@ -426,6 +498,9 @@ namespace Pulswerk.Drivers.Ocpp
         }
 
         public void ProcessMeterValues(string chargePointId, JsonElement payload)
+            => ProcessMeterValuesAsync(chargePointId, payload).GetAwaiter().GetResult();
+
+        public async Task ProcessMeterValuesAsync(string chargePointId, JsonElement payload)
         {
             try
             {
@@ -469,8 +544,8 @@ namespace Pulswerk.Drivers.Ocpp
                         int preferredPhases = telemetry.TryGetValue("charging_phases", out var phaseObj) &&
                             phaseObj is double phaseValue ? (int)phaseValue : MaxPhases;
                         var (amps, phases) = ResolveForcePower(forcePowerKw, preferredPhases);
-                        _ = Task.Run(() => SetChargingLimitAsync(
-                            chargePointId, meterConnectorId, amps, phases, forcePowerKw));
+                        await SetChargingLimitAsync(
+                            chargePointId, meterConnectorId, amps, phases, forcePowerKw);
                     }
                 }
 
@@ -719,13 +794,31 @@ namespace Pulswerk.Drivers.Ocpp
 
         public async Task<bool> SendMessageAsync(string chargePointId, string message)
         {
-            if (_activeSockets.TryGetValue(chargePointId, out var socket) && socket.State == WebSocketState.Open)
+            if (!_activeSockets.TryGetValue(chargePointId, out var socket) || socket.State != WebSocketState.Open)
+                return false;
+
+            // Sends now come from the receive loop (CALL responses) and from background
+            // CALL handlers (Smart Charging), so they must be serialized per socket.
+            var sendLock = _sendLocks.GetOrAdd(chargePointId, _ => new SemaphoreSlim(1, 1));
+            await sendLock.WaitAsync();
+            try
             {
+                if (socket.State != WebSocketState.Open)
+                    return false;
+
                 var bytes = Encoding.UTF8.GetBytes(message);
                 await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
                 return true;
             }
-            return false;
+            catch (Exception ex)
+            {
+                Log.Warning($"[OCPP] [{chargePointId}] Failed to send message: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                sendLock.Release();
+            }
         }
 
         /// <summary>
@@ -835,7 +928,9 @@ namespace Pulswerk.Drivers.Ocpp
 
             if (maxCurrentAmps < DefaultMaxCurrentAmps)
             {
-                await ClearChargingProfileAsync(chargePointId, 0);
+                // Drop a lingering TxProfile (stackLevel 10) from a previous transaction so the
+                // new, lower limit is not overridden by a stale profile.
+                await ClearChargingProfileAsync(chargePointId, 0, "TxProfile", 10);
             }
 
             int? activeTxId = null;
@@ -848,10 +943,12 @@ namespace Pulswerk.Drivers.Ocpp
                 }
             }
 
-            // If unrestricted (16A), also clear existing profiles.
+            // If unrestricted (16A), remove every profile this service owns.
             if (maxCurrentAmps >= DefaultMaxCurrentAmps)
             {
-                _ = ClearChargingProfileAsync(chargePointId, 0);
+                await ClearChargingProfileAsync(chargePointId, 0, "ChargePointMaxProfile", 1);
+                await ClearChargingProfileAsync(chargePointId, 0, "TxDefaultProfile", 1);
+                await ClearChargingProfileAsync(chargePointId, 0, "TxProfile", 10);
             }
 
             int targetConnector = connectorId > 0 ? connectorId : 1;
@@ -894,15 +991,27 @@ namespace Pulswerk.Drivers.Ocpp
                     transactionId: activeTxId.Value);
             }
 
-            return okMax || okDefault || okTx;
+            return okMax && okDefault && okTx;
         }
 
-        public async Task<bool> ClearChargingProfileAsync(string chargePointId, int connectorId = 0)
+        /// <summary>
+        /// Sends ClearChargingProfile. When <paramref name="purpose"/> is given the request is
+        /// scoped to that profile purpose and stack level, so chargers do not clear unrelated
+        /// profiles (or reject the request as too broad).
+        /// </summary>
+        public async Task<bool> ClearChargingProfileAsync(
+            string chargePointId,
+            int connectorId = 0,
+            string? purpose = null,
+            int? stackLevel = null)
         {
             string messageId = Guid.NewGuid().ToString("N")[..8];
-            var payload = new { connectorId = connectorId };
+            var payload = new Dictionary<string, object> { ["connectorId"] = connectorId };
+            if (purpose != null) payload["chargingProfilePurpose"] = purpose;
+            if (stackLevel.HasValue) payload["stackLevel"] = stackLevel.Value;
             string ocppMsg = $"[2,\"{messageId}\",\"ClearChargingProfile\",{JsonSerializer.Serialize(payload)}]";
-            Log.Debug($"[OCPP] [{chargePointId}] Sending ClearChargingProfile on connector {connectorId}");
+            Log.Debug($"[OCPP] [{chargePointId}] Sending ClearChargingProfile on connector {connectorId}" +
+                      (purpose != null ? $" (purpose={purpose}, stackLevel={stackLevel})" : ""));
             var pendingResult = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingCallResults[messageId] = pendingResult;
 
@@ -914,7 +1023,7 @@ namespace Pulswerk.Drivers.Ocpp
 
             try
             {
-                return await pendingResult.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                return await pendingResult.Task.WaitAsync(CallResultTimeout);
             }
             catch (TimeoutException)
             {
@@ -985,7 +1094,32 @@ namespace Pulswerk.Drivers.Ocpp
 
             string ocppMsg = $"[2,\"{messageId}\",\"SetChargingProfile\",{JsonSerializer.Serialize(profile)}]";
             Log.Debug($"[OCPP] [{chargePointId}] Sending SetChargingProfile ({purpose}): {limitAmps}A, {phases}ph on connector {connectorId}" + (transactionId.HasValue ? $", txId={transactionId.Value}" : ""));
-            return await SendMessageAsync(chargePointId, ocppMsg);
+
+            var pendingResult = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingCallResults[messageId] = pendingResult;
+
+            if (!await SendMessageAsync(chargePointId, ocppMsg))
+            {
+                _pendingCallResults.TryRemove(messageId, out _);
+                Log.Warning($"[OCPP] [{chargePointId}] SetChargingProfile ({purpose}) not sent: charge point is not connected.");
+                return false;
+            }
+
+            try
+            {
+                bool accepted = await pendingResult.Task.WaitAsync(CallResultTimeout);
+                if (!accepted)
+                {
+                    Log.Warning($"[OCPP] [{chargePointId}] SetChargingProfile ({purpose}) was rejected by the charge point.");
+                }
+                return accepted;
+            }
+            catch (TimeoutException)
+            {
+                _pendingCallResults.TryRemove(messageId, out _);
+                Log.Warning($"[OCPP] [{chargePointId}] Timed out waiting for SetChargingProfile ({purpose}) response.");
+                return false;
+            }
         }
 
         public async Task<bool> RemoteStartTransactionAsync(string chargePointId, int connectorId, string idTag)

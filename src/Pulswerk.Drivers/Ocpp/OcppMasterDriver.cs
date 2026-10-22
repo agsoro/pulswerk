@@ -13,7 +13,7 @@ namespace Pulswerk.Drivers.Ocpp
     /// Exposes aggregate telemetry across all connected wallboxes (total power,
     /// total energy import, and number of active sessions.
     /// </summary>
-    public class OcppMasterDriver : IDeviceDriver, IDeviceWriter
+    public class OcppMasterDriver : IDeviceDriver
     {
         public string DriverName => "ocpp-master";
         public bool IsBusy => false;
@@ -98,16 +98,6 @@ namespace Pulswerk.Drivers.Ocpp
         public Task<List<PropertyDto>> GetExtendedPropertiesAsync(ConnectionConfig connection, DeviceConfig device, string key)
         {
             return Task.FromResult(new List<PropertyDto>());
-        }
-
-        public void Write(ConnectionConfig connection, DeviceConfig device, string key, double value)
-        {
-            throw new NotSupportedException($"Writing to key '{key}' is not supported on OCPP master.");
-        }
-
-        public void WriteComplex(ConnectionConfig connection, DeviceConfig device, string key, object value)
-        {
-            throw new NotSupportedException("Complex writes are not supported by the OCPP master driver.");
         }
 
         public bool IsWritable(string key)

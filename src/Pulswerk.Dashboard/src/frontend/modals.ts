@@ -865,7 +865,8 @@ async function submitEdit(e?: Event): Promise<void> {
                     cancelTelemetryEdit();
                 }, 1500);
             } else {
-                status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
+                status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' +
+                    (result.error ? `Write rejected: ${escapeHtml(result.error)}` : 'Write failed on device');
                 status.className = 'status-msg error';
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-save"></i> <span data-i18n="btn_save_changes">Save Changes</span>';
@@ -1127,7 +1128,8 @@ async function saveSchedule(): Promise<void> {
                     status.className = 'status-msg';
                 }, 1200);
             } else {
-                status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Write failed on device';
+                status.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' +
+                    (result.error ? `Write rejected: ${escapeHtml(result.error)}` : 'Write failed on device');
                 status.className = 'status-msg error';
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-save mr-1"></i> <span>Save</span>';

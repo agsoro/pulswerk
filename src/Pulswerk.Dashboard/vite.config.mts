@@ -49,6 +49,9 @@ export default defineConfig({
     manifest: true,
     rollupOptions: {
         input: {
+        // _Layout.cshtml loads layout.bundle.js for non-Development environments,
+        // so it must stay a build entry.
+        layout: './src/frontend/layout.entry.ts',
         app: './src/frontend/app.entry.tsx'
       },
       output: {
