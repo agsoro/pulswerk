@@ -91,6 +91,13 @@ namespace Pulswerk.Ems
         private const long MinutesPerDay = 1440;
 
         /// <summary>
+        /// Version of the persisted state envelope. Version 3 introduced gap-only backfill;
+        /// older payloads may contain energy that was integrated twice (restored state plus a
+        /// full historical backfill), so they are discarded and rebuilt from the telemetry store.
+        /// </summary>
+        private const int CurrentStateVersion = 3;
+
+        /// <summary>
         /// Ingests a live power telemetry sample and integrates energy into the current minute bucket.
         /// </summary>
         public void RecordSample(
@@ -377,6 +384,45 @@ namespace Pulswerk.Ems
         }
 
         /// <summary>
+        /// Returns the point in time where a historical backfill pass for <paramref name="tier"/>
+        /// should start: the end of the newest bucket that already holds integrated energy,
+        /// clamped to <paramref name="windowStart"/>. Backfill must resume here instead of
+        /// re-integrating the whole window, otherwise restored state is counted twice.
+        /// </summary>
+        public DateTimeOffset GetBackfillStart(DateTimeOffset windowStart, EnergyTiers tier)
+        {
+            long? newestKey;
+            TimeSpan bucketSize;
+
+            lock (_lock)
+            {
+                switch (tier)
+                {
+                    case EnergyTiers.Minute:
+                        newestKey = _buckets.Count == 0 ? null : _buckets.Keys.Max();
+                        bucketSize = TimeSpan.FromMinutes(1);
+                        break;
+                    case EnergyTiers.Hour:
+                        newestKey = _hourBuckets.Count == 0 ? null : _hourBuckets.Keys.Max();
+                        bucketSize = TimeSpan.FromHours(1);
+                        break;
+                    case EnergyTiers.Day:
+                        newestKey = _dayBuckets.Count == 0 ? null : _dayBuckets.Keys.Max();
+                        bucketSize = TimeSpan.FromDays(1);
+                        break;
+                    default:
+                        return windowStart;
+                }
+            }
+
+            if (newestKey == null) return windowStart;
+
+            var bucketEnd = DateTimeOffset.FromUnixTimeMilliseconds(
+                (newestKey.Value + 1) * (long)bucketSize.TotalMilliseconds);
+            return bucketEnd > windowStart ? bucketEnd : windowStart;
+        }
+
+        /// <summary>
         /// Serializes the in-memory buckets for persistence in SQLite.
         /// </summary>
         public string Serialize()
@@ -385,7 +431,7 @@ namespace Pulswerk.Ems
             {
                 var state = new EnergyStateEnvelope
                 {
-                    Version = 2,
+                    Version = CurrentStateVersion,
                     MinuteBuckets = _buckets.Values.OrderBy(b => b.MinuteKey).ToList(),
                     HourBuckets = _hourBuckets.Values.OrderBy(b => b.MinuteKey).ToList(),
                     DayBuckets = _dayBuckets.Values.OrderBy(b => b.MinuteKey).ToList()
@@ -395,8 +441,10 @@ namespace Pulswerk.Ems
         }
 
         /// <summary>
-        /// Restores buckets from serialized JSON state. Legacy payloads (a bare array of
-        /// minute buckets) are still accepted; the coarser tiers are then rebuilt from them.
+        /// Restores buckets from serialized JSON state. Payloads written before version 3 are
+        /// ignored, because they may contain energy that was integrated twice (restored state
+        /// plus a full historical backfill). The backfill then rebuilds the buckets from the
+        /// telemetry store.
         /// </summary>
         public void Deserialize(string json)
         {
@@ -404,34 +452,14 @@ namespace Pulswerk.Ems
 
             try
             {
-                if (json.TrimStart().StartsWith("[", StringComparison.Ordinal))
-                {
-                    var legacyList = JsonSerializer.Deserialize<List<EnergyMinuteBucket>>(json);
-                    if (legacyList == null) return;
-
-                    lock (_lock)
-                    {
-                        _buckets.Clear();
-                        _hourBuckets.Clear();
-                        _dayBuckets.Clear();
-                        foreach (var bucket in legacyList)
-                        {
-                            _buckets[bucket.MinuteKey] = bucket;
-                            Accumulate(_hourBuckets, bucket.MinuteKey / MinutesPerHour, bucket.GridImportKwh,
-                                bucket.GridExportKwh, bucket.PvGenKwh, bucket.BatteryChargeKwh,
-                                bucket.BatteryDischargeKwh, bucket.UncontrollableKwh, bucket.SurplusKwh,
-                                bucket.ConsumerKwh);
-                            Accumulate(_dayBuckets, bucket.MinuteKey / MinutesPerDay, bucket.GridImportKwh,
-                                bucket.GridExportKwh, bucket.PvGenKwh, bucket.BatteryChargeKwh,
-                                bucket.BatteryDischargeKwh, bucket.UncontrollableKwh, bucket.SurplusKwh,
-                                bucket.ConsumerKwh);
-                        }
-                    }
-                    return;
-                }
+                // Legacy payloads (a bare array of minute buckets) predate the versioned
+                // envelope and were written by builds that double-counted energy.
+                if (json.TrimStart().StartsWith("[", StringComparison.Ordinal)) return;
 
                 var state = JsonSerializer.Deserialize<EnergyStateEnvelope>(json);
                 if (state == null) return;
+
+                if (state.Version < CurrentStateVersion) return;
 
                 lock (_lock)
                 {

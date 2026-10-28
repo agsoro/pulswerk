@@ -482,6 +482,7 @@ namespace Pulswerk.Ems
         private readonly EmsRollingEnergyCalculator _energyCalc = new();
         public EmsRollingEnergyCalculator EnergyCalculator => _energyCalc;
         private int _cyclesSinceEnergySave = 0;
+        private int _bootstrapStarted = 0;
 
         public bool Enabled { get; private set; } = true;
         public EnergySourcesConfig SourcesConfig { get; private set; } = new();
@@ -547,6 +548,10 @@ namespace Pulswerk.Ems
             _liveValueReader = liveValueReader;
             _telemetryWriter = telemetryWriter;
 
+            // A fresh initialization restores state from storage, so the historical
+            // backfill may run again to fill the gap up to now.
+            Interlocked.Exchange(ref _bootstrapStarted, 0);
+
             LoadConfiguration();
             Log.Info("[EnergyControl] Two-Sided Energy & Smart Charging Service initialized.");
         }
@@ -562,7 +567,10 @@ namespace Pulswerk.Ems
 
             _cts = new CancellationTokenSource();
             Task.Run(() => LoopAsync(_cts.Token));
-            _ = Task.Run(BootstrapHistoricalEnergyAsync);
+            if (Interlocked.Exchange(ref _bootstrapStarted, 1) == 0)
+            {
+                _ = Task.Run(BootstrapHistoricalEnergyAsync);
+            }
             PublishTelemetries();
             Log.Info("[EnergyControl] Energy dispatch loop started.");
         }
@@ -1365,17 +1373,26 @@ namespace Pulswerk.Ems
 
                 if (keys.Count == 0) return;
 
+                // Restored state already covers everything up to the newest bucket of each
+                // tier, so each pass only fills the gap between that bucket and now.
+                // Without this the restored energy would be integrated a second time.
+                // Each pass also stops at the start of the current bucket, because the live
+                // dispatch loop keeps writing into that bucket.
+
                 // Minute-resolution pass for the rolling 24h window.
-                await BootstrapWindowAsync(keys, now.AddHours(-24), now, granularity: null,
-                    maxPointsPerKey: 3000, maxDeltaMs: 300_000, tiers: EnergyTiers.Minute);
+                await BootstrapWindowAsync(keys, _energyCalc.GetBackfillStart(now.AddHours(-24), EnergyTiers.Minute),
+                    TruncateTo(now, TimeSpan.FromMinutes(1)),
+                    granularity: null, maxPointsPerKey: 3000, maxDeltaMs: 300_000, tiers: EnergyTiers.Minute);
 
                 // Hourly pass for the rolling 30d window.
-                await BootstrapWindowAsync(keys, now.AddDays(-30), now, granularity: "hour",
-                    maxPointsPerKey: 800, maxDeltaMs: 2 * 3_600_000, tiers: EnergyTiers.Hour);
+                await BootstrapWindowAsync(keys, _energyCalc.GetBackfillStart(now.AddDays(-30), EnergyTiers.Hour),
+                    TruncateTo(now, TimeSpan.FromHours(1)),
+                    granularity: "hour", maxPointsPerKey: 800, maxDeltaMs: 2 * 3_600_000, tiers: EnergyTiers.Hour);
 
                 // Daily pass for the rolling 1y window.
-                await BootstrapWindowAsync(keys, now.AddDays(-365), now, granularity: "day",
-                    maxPointsPerKey: 400, maxDeltaMs: 2 * 86_400_000, tiers: EnergyTiers.Day);
+                await BootstrapWindowAsync(keys, _energyCalc.GetBackfillStart(now.AddDays(-365), EnergyTiers.Day),
+                    TruncateTo(now, TimeSpan.FromDays(1)),
+                    granularity: "day", maxPointsPerKey: 400, maxDeltaMs: 2 * 86_400_000, tiers: EnergyTiers.Day);
 
                 Log.Info("[EnergyControl] Bootstrapped rolling 24h/30d/1y energy from historical telemetry store.");
             }
@@ -1383,6 +1400,17 @@ namespace Pulswerk.Ems
             {
                 Log.Debug($"[EnergyControl] Historical energy bootstrap skipped: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Truncates <paramref name="value"/> down to the start of the bucket of size
+        /// <paramref name="bucketSize"/>, so a backfill pass never writes into the bucket
+        /// the live dispatch loop is currently filling.
+        /// </summary>
+        private static DateTimeOffset TruncateTo(DateTimeOffset value, TimeSpan bucketSize)
+        {
+            long sizeMs = (long)bucketSize.TotalMilliseconds;
+            return DateTimeOffset.FromUnixTimeMilliseconds(value.ToUnixTimeMilliseconds() / sizeMs * sizeMs);
         }
 
         private async Task BootstrapWindowAsync(
@@ -1396,6 +1424,7 @@ namespace Pulswerk.Ems
         {
             long startTs = from.ToUnixTimeMilliseconds();
             long endTs = to.ToUnixTimeMilliseconds();
+            if (startTs >= endTs) return;
 
             var pointsMap = await _telemetryStore!.QueryMultipleAsync(
                 keys, startTs, endTs, granularity, maxPointsPerKey: maxPointsPerKey);

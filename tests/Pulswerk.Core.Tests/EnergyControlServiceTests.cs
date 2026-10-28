@@ -658,12 +658,13 @@ namespace Pulswerk.Core.Tests
         }
 
         [Fact]
-        public void EnergyCalculator_Deserialize_LegacyMinuteArray_RebuildsCoarseTiers()
+        public void EnergyCalculator_Deserialize_LegacyMinuteArray_IsIgnored()
         {
             var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
             long minuteKey = new DateTimeOffset(now.AddHours(-6)).ToUnixTimeSeconds() / 60;
 
-            // Legacy payload: a bare JSON array of minute buckets (pre-v2 format).
+            // Legacy payload: a bare JSON array of minute buckets (pre-v2 format). Those builds
+            // double-counted energy, so the payload is discarded and rebuilt by the backfill.
             string legacyJson = System.Text.Json.JsonSerializer.Serialize(new[]
             {
                 new EnergyMinuteBucket
@@ -678,10 +679,41 @@ namespace Pulswerk.Core.Tests
             var calc = new EmsRollingEnergyCalculator();
             calc.Deserialize(legacyJson);
 
-            Assert.Equal(5.0, calc.Get24hTotals(now).GridImportKwh);
-            Assert.Equal(5.0, calc.Get30dTotals(now).GridImportKwh);
-            Assert.Equal(5.0, calc.Get1yTotals(now).GridImportKwh);
-            Assert.Equal(2.0, calc.Get1yTotals(now).ConsumerKwh["wb1"]);
+            Assert.Equal(0.0, calc.Get24hTotals(now).GridImportKwh);
+            Assert.Equal(0.0, calc.Get30dTotals(now).GridImportKwh);
+            Assert.Equal(0.0, calc.Get1yTotals(now).GridImportKwh);
+        }
+
+        [Fact]
+        public void EnergyCalculator_Deserialize_OutdatedEnvelope_IsIgnored()
+        {
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+            long minuteKey = new DateTimeOffset(now.AddHours(-6)).ToUnixTimeSeconds() / 60;
+
+            // Version 2 envelopes were written by builds that re-integrated restored energy.
+            string outdatedJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                v = 2,
+                min = new[]
+                {
+                    new EnergyMinuteBucket { MinuteKey = minuteKey, GridImportKwh = 5.0 },
+                },
+                hour = new[]
+                {
+                    new EnergyMinuteBucket { MinuteKey = minuteKey / 60, GridImportKwh = 5.0 },
+                },
+                day = new[]
+                {
+                    new EnergyMinuteBucket { MinuteKey = minuteKey / 1440, GridImportKwh = 5.0 },
+                },
+            });
+
+            var calc = new EmsRollingEnergyCalculator();
+            calc.Deserialize(outdatedJson);
+
+            Assert.Equal(0.0, calc.Get24hTotals(now).GridImportKwh);
+            Assert.Equal(0.0, calc.Get30dTotals(now).GridImportKwh);
+            Assert.Equal(0.0, calc.Get1yTotals(now).GridImportKwh);
         }
 
         [Fact]
@@ -717,6 +749,68 @@ namespace Pulswerk.Core.Tests
             Assert.Equal(11.0, totals.UncontrollableKwh);
             Assert.Equal(5.0, totals.TotalSurplusKwh);
             Assert.Equal(12.0, totals.ConsumerKwh["wb1"]);
+        }
+
+        [Fact]
+        public void EnergyCalculator_GetBackfillStart_ResumesAfterNewestBucket()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+
+            // Empty calculator: backfill must cover the whole window.
+            Assert.Equal(now.AddHours(-24), calc.GetBackfillStart(now.AddHours(-24), EnergyTiers.Minute));
+            Assert.Equal(now.AddDays(-30), calc.GetBackfillStart(now.AddDays(-30), EnergyTiers.Hour));
+            Assert.Equal(now.AddDays(-365), calc.GetBackfillStart(now.AddDays(-365), EnergyTiers.Day));
+
+            long minuteKey = new DateTimeOffset(now.AddHours(-2)).ToUnixTimeSeconds() / 60;
+            calc.AddEnergy(minuteKey, gridImportKwh: 1.0);
+
+            // Minute tier resumes at the end of the newest minute bucket.
+            var minuteStart = calc.GetBackfillStart(now.AddHours(-24), EnergyTiers.Minute);
+            Assert.Equal(DateTimeOffset.FromUnixTimeSeconds((minuteKey + 1) * 60), minuteStart);
+
+            // Coarse tiers resume at the end of their own newest bucket.
+            var hourStart = calc.GetBackfillStart(now.AddDays(-30), EnergyTiers.Hour);
+            Assert.Equal(DateTimeOffset.FromUnixTimeSeconds((minuteKey / 60 + 1) * 3600), hourStart);
+
+            var dayStart = calc.GetBackfillStart(now.AddDays(-365), EnergyTiers.Day);
+            Assert.Equal(DateTimeOffset.FromUnixTimeSeconds((minuteKey / 1440 + 1) * 86400), dayStart);
+
+            // A stale bucket older than the window must not shrink the window.
+            var stale = new EmsRollingEnergyCalculator();
+            stale.AddEnergy(new DateTimeOffset(now.AddDays(-400)).ToUnixTimeSeconds() / 60, gridImportKwh: 1.0);
+            Assert.Equal(now.AddHours(-24), stale.GetBackfillStart(now.AddHours(-24), EnergyTiers.Minute));
+        }
+
+        [Fact]
+        public void EnergyCalculator_BackfillAfterRestore_DoesNotDoubleCount()
+        {
+            var calc = new EmsRollingEnergyCalculator();
+            var now = new DateTime(2026, 9, 13, 14, 0, 0, DateTimeKind.Utc);
+            long minuteKey = new DateTimeOffset(now.AddHours(-3)).ToUnixTimeSeconds() / 60;
+
+            calc.AddEnergy(minuteKey, gridImportKwh: 12.0, pvGenKwh: 20.0);
+
+            var restored = new EmsRollingEnergyCalculator();
+            restored.Deserialize(calc.Serialize());
+
+            // Simulate a backfill pass that honours the resume point: only samples at or
+            // after the resume timestamp are integrated, so restored energy is not re-added.
+            var resume = restored.GetBackfillStart(now.AddHours(-24), EnergyTiers.Minute);
+            long windowStartKey = new DateTimeOffset(now.AddHours(-24)).ToUnixTimeSeconds() / 60;
+            long nowKey = new DateTimeOffset(now).ToUnixTimeSeconds() / 60;
+            int added = 0;
+            for (long key = windowStartKey; key <= nowKey; key++)
+            {
+                if (DateTimeOffset.FromUnixTimeSeconds(key * 60) < resume) continue;
+                restored.AddEnergy(key, gridImportKwh: 1.0, tiers: EnergyTiers.Minute);
+                added++;
+            }
+
+            // The restored bucket is untouched and only the gap after it was integrated.
+            Assert.True(added > 0);
+            Assert.Equal(12.0 + added, restored.Get24hTotals(now).GridImportKwh);
+            Assert.Equal(20.0, restored.Get24hTotals(now).PvGenerationKwh);
         }
 
         [Fact]
