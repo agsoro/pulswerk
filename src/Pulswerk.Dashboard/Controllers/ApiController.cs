@@ -1307,8 +1307,13 @@ namespace Pulswerk.Dashboard.Controllers
         [HttpGet("billing/rfid")]
         public IActionResult GetRfidMappings()
         {
-            var map = _billing.GetRfidMap();
-            var list = map.Select(kv => new { idTag = kv.Key, userName = kv.Value }).ToList();
+            var customers = _billing.GetCustomers().ToDictionary(c => c.Id, c => c.Name);
+            var list = _billing.GetRfidMappings().Select(r => new {
+                idTag = r.IdTag,
+                userName = r.UserName,
+                customerId = r.CustomerId,
+                customerName = r.CustomerId != null && customers.TryGetValue(r.CustomerId, out var cn) ? cn : null
+            }).ToList();
             return Ok(list);
         }
 
@@ -1316,6 +1321,7 @@ namespace Pulswerk.Dashboard.Controllers
         {
             public string IdTag { get; set; } = "";
             public string UserName { get; set; } = "";
+            public string? CustomerId { get; set; }
         }
 
         [HttpPost("billing/rfid")]
@@ -1327,7 +1333,7 @@ namespace Pulswerk.Dashboard.Controllers
             if (string.IsNullOrEmpty(req.IdTag) || string.IsNullOrEmpty(req.UserName))
                 return BadRequest("idTag and userName are required");
 
-            _billing.AddRfidMapping(req.IdTag, req.UserName);
+            _billing.AddRfidMapping(req.IdTag, req.UserName, string.IsNullOrWhiteSpace(req.CustomerId) ? null : req.CustomerId);
             return Ok(new { success = true });
         }
 
@@ -1345,67 +1351,106 @@ namespace Pulswerk.Dashboard.Controllers
         public IActionResult GetBillingTransactions()
         {
             var list = _billing.GetTransactions();
-            var rfidMap = _billing.GetRfidMap();
+            var rfidMap = _billing.GetRfidMappings().ToDictionary(r => r.IdTag);
+            var customers = _billing.GetCustomers().ToDictionary(c => c.Id, c => c.Name);
 
-            var result = list.Select(t => new {
-                id = t.Id,
-                chargepointId = t.ChargepointId,
-                connectorId = t.ConnectorId,
-                idTag = t.IdTag,
-                userName = rfidMap.TryGetValue(t.IdTag, out var u) ? u : "Guest",
-                kwh = t.Kwh,
-                timestamp = DateTimeOffset.FromUnixTimeMilliseconds(t.Timestamp).ToString("yyyy-MM-dd HH:mm:ss")
+            var result = list.Select(t => {
+                rfidMap.TryGetValue(t.IdTag, out var mapping);
+                string? customerId = mapping?.CustomerId;
+                return new {
+                    id = t.Id,
+                    chargepointId = t.ChargepointId,
+                    connectorId = t.ConnectorId,
+                    idTag = t.IdTag,
+                    userName = mapping?.UserName ?? "Guest",
+                    customerId,
+                    customerName = customerId != null && customers.TryGetValue(customerId, out var cn) ? cn : null,
+                    kwh = t.Kwh,
+                    timestamp = DateTimeOffset.FromUnixTimeMilliseconds(t.Timestamp).ToString("yyyy-MM-dd HH:mm:ss")
+                };
             }).ToList();
 
             return Ok(result);
         }
 
+        /// <summary>
+        /// Builds one invoice document per customer and per billing source (EV charging vs. metered tenant).
+        /// Each invoice carries its individual line items so the UI can show single transactions.
+        /// </summary>
         [HttpGet("billing/invoice")]
         public async Task<IActionResult> GenerateMonthlyInvoice([FromQuery] int year, [FromQuery] int month)
         {
             var transactions = _billing.GetTransactions();
-            var rfidMap = _billing.GetRfidMap();
+            var rfidMap = _billing.GetRfidMappings().ToDictionary(r => r.IdTag);
             var tenants = _billing.GetTenants();
+            var customers = _billing.GetCustomers().ToDictionary(c => c.Id);
             double ratePerKwh = _billing.GetTariff("rate_per_kwh", 0.30);
             double baseMonthlyFee = _billing.GetTariff("base_monthly_fee", 10.00);
+            string period = $"{year:D4}-{month:D2}";
 
             var invoices = new List<object>();
 
-            // 1. Process EV charging sessions
+            CustomerRecord? ResolveCustomer(string? customerId) =>
+                customerId != null && customers.TryGetValue(customerId, out var c) ? c : null;
+
+            // 1. EV charging sessions — grouped per customer
             var filtered = transactions.Where(t => {
                 var dt = DateTimeOffset.FromUnixTimeMilliseconds(t.Timestamp);
                 return dt.Year == year && dt.Month == month;
             }).ToList();
 
-            var grouped = filtered.GroupBy(t => t.IdTag);
-            foreach (var g in grouped)
+            var evGroups = filtered
+                .GroupBy(t => rfidMap.TryGetValue(t.IdTag, out var m) ? m.CustomerId : null)
+                .OrderBy(g => g.Key == null ? 1 : 0)
+                .ThenBy(g => g.Key);
+
+            foreach (var g in evGroups)
             {
-                string idTag = g.Key;
-                string userName = rfidMap.TryGetValue(idTag, out var u) ? u : "Guest";
+                var customer = ResolveCustomer(g.Key);
+                var lineItems = g
+                    .OrderBy(t => t.Timestamp)
+                    .Select(t => new {
+                        date = DateTimeOffset.FromUnixTimeMilliseconds(t.Timestamp).ToString("yyyy-MM-dd HH:mm"),
+                        description = $"{(rfidMap.TryGetValue(t.IdTag, out var m) ? m.UserName : "Guest")} · {t.ChargepointId} / #{t.ConnectorId}",
+                        idTag = t.IdTag,
+                        quantity = Math.Round(t.Kwh, 3),
+                        unit = "kWh",
+                        unitPrice = ratePerKwh,
+                        amount = Math.Round(t.Kwh * ratePerKwh, 2)
+                    }).ToList();
+
                 double totalKwh = g.Sum(t => t.Kwh);
                 double energyCost = Math.Round(totalKwh * ratePerKwh, 2);
                 double totalCost = Math.Round(energyCost + baseMonthlyFee, 2);
 
                 invoices.Add(new {
+                    invoiceId = $"EV-{period}-{g.Key ?? "unassigned"}",
+                    source = "ev",
                     type = "EV Charging",
-                    idTag = idTag,
-                    userName = userName,
-                    details = $"RFID: {idTag}",
+                    customerId = g.Key,
+                    customerName = customer?.Name ?? "Unassigned",
+                    customerAddress = customer?.Address,
+                    customerEmail = customer?.Email,
+                    details = customer != null ? $"Customer: {customer.Name}" : "No customer assigned",
                     transactionCount = g.Count(),
                     totalKwh = Math.Round(totalKwh, 3),
-                    ratePerKwh = ratePerKwh,
+                    ratePerKwh,
                     baseFee = baseMonthlyFee,
-                    energyCost = energyCost,
-                    totalCost = totalCost,
-                    billingPeriod = $"{year:D4}-{month:D2}"
+                    energyCost,
+                    totalCost,
+                    replacementCount = 0,
+                    billingPeriod = period,
+                    lineItems
                 });
             }
 
-            // 2. Process Metered Tenants
+            // 2. Metered tenants — grouped per customer
             var startOfMonth = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
             var endOfMonth = startOfMonth.AddMonths(1);
             long startTs = new DateTimeOffset(startOfMonth).ToUnixTimeMilliseconds();
             long endTs   = new DateTimeOffset(endOfMonth).ToUnixTimeMilliseconds();
+
+            var tenantResults = new List<(TenantRecord Tenant, double Kwh, int Replacements)>();
 
             foreach (var tenant in tenants)
             {
@@ -1452,35 +1497,120 @@ namespace Pulswerk.Dashboard.Controllers
                     Log.Error($"[Billing] Failed to query consumption for tenant '{tenant.Name}' ({tenant.MeterKey}): {ex.Message}");
                 }
 
+                tenantResults.Add((tenant, totalKwh, replacementCount));
+            }
+
+            var tenantGroups = tenantResults
+                .GroupBy(r => r.Tenant.CustomerId)
+                .OrderBy(g => g.Key == null ? 1 : 0)
+                .ThenBy(g => g.Key);
+
+            foreach (var g in tenantGroups)
+            {
+                var customer = ResolveCustomer(g.Key);
+                var lineItems = new List<object>();
+                double totalKwh = 0.0;
+                int replacementCount = 0;
+
+                foreach (var (tenant, kwh, replacements) in g)
+                {
+                    totalKwh += kwh;
+                    replacementCount += replacements;
+                    lineItems.Add(new {
+                        date = period,
+                        description = $"{tenant.Name} · {tenant.MeterKey}",
+                        idTag = tenant.Id,
+                        quantity = Math.Round(kwh, 3),
+                        unit = "kWh",
+                        unitPrice = ratePerKwh,
+                        amount = Math.Round(kwh * ratePerKwh, 2)
+                    });
+                }
+
                 double energyCost = Math.Round(totalKwh * ratePerKwh, 2);
                 double totalCost  = Math.Round(energyCost + baseMonthlyFee, 2);
 
                 invoices.Add(new {
+                    invoiceId = $"METER-{period}-{g.Key ?? "unassigned"}",
+                    source = "meter",
                     type = "Tenant Meter",
-                    idTag = tenant.Id,
-                    userName = tenant.Name,
-                    details = $"Meter Point: {tenant.MeterKey}",
-                    transactionCount = 1,
+                    customerId = g.Key,
+                    customerName = customer?.Name ?? "Unassigned",
+                    customerAddress = customer?.Address,
+                    customerEmail = customer?.Email,
+                    details = string.Join(", ", g.Select(r => r.Tenant.MeterKey)),
+                    transactionCount = g.Count(),
                     totalKwh = Math.Round(totalKwh, 3),
-                    ratePerKwh = ratePerKwh,
+                    ratePerKwh,
                     baseFee = baseMonthlyFee,
-                    energyCost = energyCost,
-                    totalCost = totalCost,
-                    replacementCount = replacementCount,
-                    billingPeriod = $"{year:D4}-{month:D2}"
+                    energyCost,
+                    totalCost,
+                    replacementCount,
+                    billingPeriod = period,
+                    lineItems
                 });
             }
 
             return Ok(new { invoices, ratePerKwh, baseMonthlyFee });
         }
 
+        // ── Customers ───────────────────────────────────────────────────────
+
+        [HttpGet("billing/customers")]
+        public IActionResult GetCustomers()
+        {
+            var list = _billing.GetCustomers().Select(c => new {
+                id = c.Id,
+                name = c.Name,
+                address = c.Address,
+                email = c.Email,
+                note = c.Note
+            }).ToList();
+            return Ok(list);
+        }
+
+        public class CustomerDto
+        {
+            public string Id { get; set; } = "";
+            public string Name { get; set; } = "";
+            public string? Address { get; set; }
+            public string? Email { get; set; }
+            public string? Note { get; set; }
+        }
+
+        [HttpPost("billing/customers")]
+        public IActionResult AddOrUpdateCustomer([FromBody] CustomerDto req)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            if (string.IsNullOrEmpty(req.Id) || string.IsNullOrEmpty(req.Name))
+                return BadRequest("id and name are required");
+
+            _billing.AddCustomer(req.Id, req.Name, req.Address, req.Email, req.Note);
+            return Ok(new { success = true });
+        }
+
+        [HttpDelete("billing/customers/{id}")]
+        public IActionResult DeleteCustomer(string id)
+        {
+            var serverCfg = _data.Config.Server;
+            if (!DashboardAuth.CanEditConfig(HttpContext, serverCfg)) return StatusCode(403);
+
+            _billing.DeleteCustomer(id);
+            return Ok(new { success = true });
+        }
+
         [HttpGet("billing/tenants")]
         public IActionResult GetTenants()
         {
+            var customers = _billing.GetCustomers().ToDictionary(c => c.Id, c => c.Name);
             var list = _billing.GetTenants().Select(t => new {
                 id = t.Id,
                 name = t.Name,
-                meterKey = t.MeterKey
+                meterKey = t.MeterKey,
+                customerId = t.CustomerId,
+                customerName = t.CustomerId != null && customers.TryGetValue(t.CustomerId, out var cn) ? cn : null
             }).ToList();
             return Ok(list);
         }
@@ -1490,6 +1620,7 @@ namespace Pulswerk.Dashboard.Controllers
             public string Id { get; set; } = "";
             public string Name { get; set; } = "";
             public string MeterKey { get; set; } = "";
+            public string? CustomerId { get; set; }
         }
 
         [HttpPost("billing/tenants")]
@@ -1501,7 +1632,7 @@ namespace Pulswerk.Dashboard.Controllers
             if (string.IsNullOrEmpty(req.Id) || string.IsNullOrEmpty(req.Name) || string.IsNullOrEmpty(req.MeterKey))
                 return BadRequest("id, name, and meterKey are required");
 
-            _billing.AddTenant(req.Id, req.Name, req.MeterKey);
+            _billing.AddTenant(req.Id, req.Name, req.MeterKey, string.IsNullOrWhiteSpace(req.CustomerId) ? null : req.CustomerId);
             return Ok(new { success = true });
         }
 

@@ -37,8 +37,8 @@ const MOCK_WALLBOXES = [
 
 // Mock RFID cards
 const MOCK_RFIDS = [
-  { idTag: "04A1B2C3", userName: "Alice Miller" },
-  { idTag: "08D4E5F6", userName: "Bob Fischer" }
+  { idTag: "04A1B2C3", userName: "Alice Miller", customerId: "cust_mueller", customerName: "Müller GmbH" },
+  { idTag: "08D4E5F6", userName: "Bob Fischer", customerId: null, customerName: null }
 ];
 
 // Mock Alarms

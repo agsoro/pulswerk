@@ -495,5 +495,333 @@ namespace Pulswerk.Billing.Tests
         public void Dispose() => _fx.Dispose();
     }
 
+    // ── Customer Tests ────────────────────────────────────────────────────────
+
+    public class CustomerTests : IDisposable
+    {
+        private readonly BillingStoreFixture _fx = new();
+
+        [Fact]
+        public void GetCustomers_ReturnsEmpty_Initially()
+        {
+            Assert.Empty(_fx.Store.GetCustomers());
+        }
+
+        [Fact]
+        public void AddAndGetCustomer_RoundTrips()
+        {
+            _fx.Store.AddCustomer("cust_a", "Müller GmbH", "Hauptstr. 1", "billing@mueller.example", "VIP");
+
+            var list = _fx.Store.GetCustomers();
+            Assert.Single(list);
+            Assert.Equal("cust_a", list[0].Id);
+            Assert.Equal("Müller GmbH", list[0].Name);
+            Assert.Equal("Hauptstr. 1", list[0].Address);
+            Assert.Equal("billing@mueller.example", list[0].Email);
+            Assert.Equal("VIP", list[0].Note);
+        }
+
+        [Fact]
+        public void AddCustomer_AllowsNullOptionalFields()
+        {
+            _fx.Store.AddCustomer("cust_b", "Fischer AG", null, null, null);
+
+            var c = Assert.Single(_fx.Store.GetCustomers());
+            Assert.Null(c.Address);
+            Assert.Null(c.Email);
+            Assert.Null(c.Note);
+        }
+
+        [Fact]
+        public void AddCustomer_Upserts_ExistingId()
+        {
+            _fx.Store.AddCustomer("cust_a", "Old Name", null, null, null);
+            _fx.Store.AddCustomer("cust_a", "New Name", "New Address", "new@example.com", null);
+
+            var c = Assert.Single(_fx.Store.GetCustomers());
+            Assert.Equal("New Name", c.Name);
+            Assert.Equal("New Address", c.Address);
+            Assert.Equal("new@example.com", c.Email);
+        }
+
+        [Fact]
+        public void GetCustomers_OrderedByName()
+        {
+            _fx.Store.AddCustomer("c2", "Zebra AG", null, null, null);
+            _fx.Store.AddCustomer("c1", "Alpha GmbH", null, null, null);
+
+            var list = _fx.Store.GetCustomers();
+            Assert.Equal(new[] { "Alpha GmbH", "Zebra AG" }, list.Select(c => c.Name).ToArray());
+        }
+
+        [Fact]
+        public void DeleteCustomer_RemovesEntry()
+        {
+            _fx.Store.AddCustomer("cust_a", "To Delete", null, null, null);
+            _fx.Store.DeleteCustomer("cust_a");
+            Assert.Empty(_fx.Store.GetCustomers());
+        }
+
+        [Fact]
+        public void DeleteCustomer_DetachesRfidCardsAndTenants()
+        {
+            _fx.Store.AddCustomer("cust_a", "Müller GmbH", null, null, null);
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice", "cust_a");
+            _fx.Store.AddTenant("t1", "Apartment 1", "meter-1_kwh", "cust_a");
+
+            _fx.Store.DeleteCustomer("cust_a");
+
+            Assert.Null(Assert.Single(_fx.Store.GetRfidMappings()).CustomerId);
+            Assert.Null(Assert.Single(_fx.Store.GetTenants()).CustomerId);
+            // The card and tenant themselves must survive
+            Assert.Equal("Alice", Assert.Single(_fx.Store.GetRfidMappings()).UserName);
+            Assert.Equal("Apartment 1", Assert.Single(_fx.Store.GetTenants()).Name);
+        }
+
+        [Fact]
+        public void DeleteCustomer_Noop_ForMissingId()
+        {
+            _fx.Store.DeleteCustomer("NO_SUCH_CUSTOMER"); // must not throw
+        }
+
+        public void Dispose() => _fx.Dispose();
+    }
+
+    // ── RFID ↔ Customer Tests ─────────────────────────────────────────────────
+
+    public class RfidCustomerAssignmentTests : IDisposable
+    {
+        private readonly BillingStoreFixture _fx = new();
+
+        [Fact]
+        public void AddRfidMapping_WithoutCustomer_LeavesCustomerNull()
+        {
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice");
+
+            var m = Assert.Single(_fx.Store.GetRfidMappings());
+            Assert.Null(m.CustomerId);
+        }
+
+        [Fact]
+        public void AddRfidMapping_StoresCustomerId()
+        {
+            _fx.Store.AddCustomer("cust_a", "Müller GmbH", null, null, null);
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice", "cust_a");
+
+            var m = Assert.Single(_fx.Store.GetRfidMappings());
+            Assert.Equal("cust_a", m.CustomerId);
+        }
+
+        [Fact]
+        public void AddRfidMapping_CanAssignCustomerToExistingCard()
+        {
+            _fx.Store.AddCustomer("cust_a", "Müller GmbH", null, null, null);
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice");
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice", "cust_a");
+
+            var m = Assert.Single(_fx.Store.GetRfidMappings());
+            Assert.Equal("cust_a", m.CustomerId);
+            Assert.Equal("Alice", m.UserName);
+        }
+
+        [Fact]
+        public void AddRfidMapping_CanClearCustomerAssignment()
+        {
+            _fx.Store.AddCustomer("cust_a", "Müller GmbH", null, null, null);
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice", "cust_a");
+            _fx.Store.AddRfidMapping("04A1B2C3", "Alice", null);
+
+            Assert.Null(Assert.Single(_fx.Store.GetRfidMappings()).CustomerId);
+        }
+
+        [Fact]
+        public void GetRfidMappings_OrderedByUserName()
+        {
+            _fx.Store.AddRfidMapping("TAG2", "Zoe");
+            _fx.Store.AddRfidMapping("TAG1", "Adam");
+
+            var list = _fx.Store.GetRfidMappings();
+            Assert.Equal(new[] { "Adam", "Zoe" }, list.Select(m => m.UserName).ToArray());
+        }
+
+        public void Dispose() => _fx.Dispose();
+    }
+
+    // ── Tenant ↔ Customer Tests ───────────────────────────────────────────────
+
+    public class TenantCustomerAssignmentTests : IDisposable
+    {
+        private readonly BillingStoreFixture _fx = new();
+
+        [Fact]
+        public void AddTenant_WithoutCustomer_LeavesCustomerNull()
+        {
+            _fx.Store.AddTenant("t1", "Apartment 1", "meter-1_kwh");
+            Assert.Null(Assert.Single(_fx.Store.GetTenants()).CustomerId);
+        }
+
+        [Fact]
+        public void AddTenant_StoresCustomerId()
+        {
+            _fx.Store.AddCustomer("cust_a", "Müller GmbH", null, null, null);
+            _fx.Store.AddTenant("t1", "Apartment 1", "meter-1_kwh", "cust_a");
+
+            Assert.Equal("cust_a", Assert.Single(_fx.Store.GetTenants()).CustomerId);
+        }
+
+        [Fact]
+        public void AddTenant_CanReassignCustomer()
+        {
+            _fx.Store.AddCustomer("cust_a", "A", null, null, null);
+            _fx.Store.AddCustomer("cust_b", "B", null, null, null);
+            _fx.Store.AddTenant("t1", "Apartment 1", "meter-1_kwh", "cust_a");
+            _fx.Store.AddTenant("t1", "Apartment 1", "meter-1_kwh", "cust_b");
+
+            Assert.Equal("cust_b", Assert.Single(_fx.Store.GetTenants()).CustomerId);
+        }
+
+        public void Dispose() => _fx.Dispose();
+    }
+
+    // ── Settings / Legacy Migration Tests ─────────────────────────────────────
+
+    public class SettingsTests : IDisposable
+    {
+        private readonly BillingStoreFixture _fx = new();
+
+        [Fact]
+        public void GetSetting_ReturnsDefault_WhenMissing()
+        {
+            Assert.Equal("fallback", _fx.Store.GetSetting("no_such_key", "fallback"));
+        }
+
+        [Fact]
+        public void SetAndGetSetting_RoundTrips()
+        {
+            _fx.Store.SetSetting("energy_sources_config", "{\"v\":2}");
+            Assert.Equal("{\"v\":2}", _fx.Store.GetSetting("energy_sources_config", ""));
+        }
+
+        [Fact]
+        public void SetSetting_Updates_ExistingValue()
+        {
+            _fx.Store.SetSetting("k", "one");
+            _fx.Store.SetSetting("k", "two");
+            Assert.Equal("two", _fx.Store.GetSetting("k", ""));
+        }
+
+        [Fact]
+        public void SetSetting_DoesNotCreateRfidCard()
+        {
+            _fx.Store.SetSetting("energy_consumers_config", "[]");
+            Assert.Empty(_fx.Store.GetRfidMappings());
+        }
+
+        public void Dispose() => _fx.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that databases created by older versions — which stored EMS settings as
+    /// pseudo RFID cards — are cleaned up on startup.
+    /// </summary>
+    public class LegacySettingsMigrationTests : IDisposable
+    {
+        private readonly string _dbPath = Path.GetTempFileName();
+
+        public void Dispose()
+        {
+            foreach (var path in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        private void SeedLegacyDatabase()
+        {
+            using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE rfid_user_map (
+                    id_tag    TEXT PRIMARY KEY,
+                    user_name TEXT NOT NULL
+                );
+                INSERT INTO rfid_user_map (id_tag, user_name) VALUES
+                    ('04A1B2C3', 'Alice'),
+                    ('energy_sources_config', '{"v":2}'),
+                    ('energy_consumers_config', '[]'),
+                    ('ems_energy_24h_state', '{"min":[1,2]}'),
+                    ('energy_control_grid_key', 'grid'),
+                    ('energy_control_pv_key', 'pv'),
+                    ('energy_control_battery_power_key', 'bp'),
+                    ('energy_control_battery_soc_key', 'bs'),
+                    ('energy_control_wb_key', 'wb'),
+                    ('energy_control_wb_actual_key', 'wba'),
+                    ('trajectory_main_meter_key', 'main');
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        [Fact]
+        public void LegacySettingRows_AreMovedOutOfRfidTable()
+        {
+            SeedLegacyDatabase();
+
+            using var store = new BillingStore(_dbPath);
+
+            var cards = store.GetRfidMappings();
+            Assert.Single(cards);
+            Assert.Equal("04A1B2C3", cards[0].IdTag);
+            Assert.Equal("Alice", cards[0].UserName);
+        }
+
+        [Fact]
+        public void LegacySettingValues_RemainReadableViaGetSetting()
+        {
+            SeedLegacyDatabase();
+
+            using var store = new BillingStore(_dbPath);
+
+            Assert.Equal("{\"v\":2}", store.GetSetting("energy_sources_config", ""));
+            Assert.Equal("[]", store.GetSetting("energy_consumers_config", ""));
+            Assert.Equal("{\"min\":[1,2]}", store.GetSetting("ems_energy_24h_state", ""));
+            Assert.Equal("grid", store.GetSetting("energy_control_grid_key", ""));
+            Assert.Equal("pv", store.GetSetting("energy_control_pv_key", ""));
+            Assert.Equal("bp", store.GetSetting("energy_control_battery_power_key", ""));
+            Assert.Equal("bs", store.GetSetting("energy_control_battery_soc_key", ""));
+            Assert.Equal("wb", store.GetSetting("energy_control_wb_key", ""));
+            Assert.Equal("wba", store.GetSetting("energy_control_wb_actual_key", ""));
+            Assert.Equal("main", store.GetSetting("trajectory_main_meter_key", ""));
+        }
+
+        [Fact]
+        public void Migration_IsIdempotent()
+        {
+            SeedLegacyDatabase();
+
+            using (var first = new BillingStore(_dbPath)) { }
+            using var second = new BillingStore(_dbPath);
+
+            Assert.Single(second.GetRfidMappings());
+            Assert.Equal("grid", second.GetSetting("energy_control_grid_key", ""));
+        }
+
+        [Fact]
+        public void Migration_AddsCustomerColumnsToLegacyTables()
+        {
+            SeedLegacyDatabase();
+
+            using var store = new BillingStore(_dbPath);
+
+            // Both tables must accept customer assignments after the upgrade.
+            store.AddCustomer("cust_a", "Müller GmbH", null, null, null);
+            store.AddRfidMapping("04A1B2C3", "Alice", "cust_a");
+            store.AddTenant("t1", "Apartment 1", "meter-1_kwh", "cust_a");
+
+            Assert.Equal("cust_a", Assert.Single(store.GetRfidMappings()).CustomerId);
+            Assert.Equal("cust_a", Assert.Single(store.GetTenants()).CustomerId);
+        }
+    }
+
     // ── Curtailment Target Tests ──────────────────────────────────────────────
 }

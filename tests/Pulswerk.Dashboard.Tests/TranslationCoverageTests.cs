@@ -42,7 +42,7 @@ namespace Pulswerk.Dashboard.Tests
             var usedKeys = new HashSet<string>();
             var filesToScan = Directory.GetFiles(PagesRoot, "*.cshtml", SearchOption.AllDirectories)
                 .Concat(Directory.GetFiles(WwwRoot, "*.js", SearchOption.AllDirectories))
-                .Where(f => !f.EndsWith("i18n.js") && !f.Contains("lib"));
+                .Where(f => !f.EndsWith("i18n.js") && !f.Contains("lib") && !f.Contains("dist"));
 
             foreach (var file in filesToScan)
             {

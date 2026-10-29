@@ -64,14 +64,26 @@ test.describe('UI Quality and Layout Audits', () => {
       });
     });
 
+    // Mock /api/billing/customers
+    await page.route('**/api/billing/customers**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: "cust_mueller", name: "Müller GmbH", address: "Hauptstr. 1, 12345 Stadt", email: "billing@mueller.example", note: null },
+          { id: "cust_fischer", name: "Fischer AG", address: "Nebenweg 9, 54321 Dorf", email: "invoice@fischer.example", note: null }
+        ])
+      });
+    });
+
     // Mock /api/billing/rfid
     await page.route('**/api/billing/rfid', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify([
-          { idTag: "04A1B2C3", userName: "Alice Miller" },
-          { idTag: "08D4E5F6", userName: "Bob Fischer" }
+          { idTag: "04A1B2C3", userName: "Alice Miller", customerId: "cust_mueller", customerName: "Müller GmbH" },
+          { idTag: "08D4E5F6", userName: "Bob Fischer", customerId: null, customerName: null }
         ])
       });
     });
@@ -82,8 +94,8 @@ test.describe('UI Quality and Layout Audits', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify([
-          { id: "tenant-101", name: "Apartment 101", meterKey: "meter-101_active-energy" },
-          { id: "tenant-202", name: "Office 202", meterKey: "meter-202_active-energy" }
+          { id: "tenant-101", name: "Apartment 101", meterKey: "meter-101_active-energy", customerId: "cust_mueller", customerName: "Müller GmbH" },
+          { id: "tenant-202", name: "Office 202", meterKey: "meter-202_active-energy", customerId: null, customerName: null }
         ])
       });
     });
@@ -105,30 +117,47 @@ test.describe('UI Quality and Layout Audits', () => {
         body: JSON.stringify({
           invoices: [
             {
+              invoiceId: "EV-2026-05-cust_mueller",
+              source: "ev",
               type: "EV Charging",
-              idTag: "04A1B2C3",
-              userName: "Alice Miller",
-              details: "RFID: 04A1B2C3",
-              transactionCount: 4,
+              customerId: "cust_mueller",
+              customerName: "Müller GmbH",
+              customerAddress: "Hauptstr. 1, 12345 Stadt",
+              customerEmail: "billing@mueller.example",
+              details: "Customer: Müller GmbH",
+              transactionCount: 2,
               totalKwh: 80.5,
               ratePerKwh: 0.35,
               baseFee: 12.50,
               energyCost: 28.18,
               totalCost: 40.68,
-              billingPeriod: "2026-05"
+              replacementCount: 0,
+              billingPeriod: "2026-05",
+              lineItems: [
+                { date: "2026-05-03 09:15", description: "Alice Miller · CP-1 / #1", idTag: "04A1B2C3", quantity: 40.5, unit: "kWh", unitPrice: 0.35, amount: 14.18 },
+                { date: "2026-05-17 18:42", description: "Alice Miller · CP-1 / #2", idTag: "04A1B2C3", quantity: 40.0, unit: "kWh", unitPrice: 0.35, amount: 14.00 }
+              ]
             },
             {
+              invoiceId: "METER-2026-05-cust_mueller",
+              source: "meter",
               type: "Tenant Meter",
-              idTag: "",
-              userName: "Apartment 101",
+              customerId: "cust_mueller",
+              customerName: "Müller GmbH",
+              customerAddress: "Hauptstr. 1, 12345 Stadt",
+              customerEmail: "billing@mueller.example",
               details: "meter-101_active-energy",
-              transactionCount: 0,
+              transactionCount: 1,
               totalKwh: 320.0,
               ratePerKwh: 0.35,
               baseFee: 12.50,
               energyCost: 112.00,
               totalCost: 124.50,
-              billingPeriod: "2026-05"
+              replacementCount: 1,
+              billingPeriod: "2026-05",
+              lineItems: [
+                { date: "2026-05", description: "Apartment 101 · meter-101_active-energy", idTag: "tenant-101", quantity: 320.0, unit: "kWh", unitPrice: 0.35, amount: 112.00 }
+              ]
             }
           ],
           ratePerKwh: 0.35,
