@@ -39,6 +39,15 @@ namespace Pulswerk.Drivers.Ocpp
         // though the receive loop no longer awaits them.
         private readonly ConcurrentDictionary<string, Task> _callChains = new(StringComparer.OrdinalIgnoreCase);
 
+        // Incremented on every accepted WebSocket connection. Telemetry configuration is
+        // applied once per generation, so the connect hook and the BootNotification handler
+        // do not send the same ChangeConfiguration batch twice on every reconnect.
+        private readonly ConcurrentDictionary<string, int> _connectionGenerations = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, int> _configuredGenerations = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _configLocks = new(StringComparer.OrdinalIgnoreCase);
+
+        private Timer? _watchdogTimer;
+
         private int _transactionIdCounter = 1000;
         private BillingStore? _billingStore;
 
@@ -62,6 +71,7 @@ namespace Pulswerk.Drivers.Ocpp
         public void Initialize(BillingStore billingStore)
         {
             _billingStore = billingStore;
+            _watchdogTimer ??= new Timer(CheckWatchdog, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
             Log.Info("[OCPP] OcppManagerService initialized.");
         }
 
@@ -107,6 +117,7 @@ namespace Pulswerk.Drivers.Ocpp
             }
 
             _activeSockets[chargePointId] = socket;
+            int generation = _connectionGenerations.AddOrUpdate(chargePointId, 1, (_, previous) => previous + 1);
             
             // Set initial telemetry as connected
             UpdateTelemetryValue(chargePointId, "status", "Connected");
@@ -161,26 +172,41 @@ namespace Pulswerk.Drivers.Ocpp
             }
             finally
             {
-                _activeSockets.TryRemove(chargePointId, out _);
-                UpdateTelemetryValue(chargePointId, "status", "Offline");
-
-                // Purge any transactions still open for this charge point. A charger that
-                // disconnects mid-charge (crash, network loss) may never send StopTransaction,
-                // and transaction ids are monotonically increasing, so without this the
-                // _activeTransactions dictionary would accumulate orphaned entries forever.
-                foreach (var kvp in _activeTransactions)
+                // A charger that reconnects within the same second (common after an aborted
+                // TCP connection) already registered its new socket. Only clean up when this
+                // handler still owns the active socket, otherwise the new connection would be
+                // torn down by the previous one's cleanup.
+                bool stillOwner = _activeSockets.TryGetValue(chargePointId, out var currentSocket) &&
+                                  ReferenceEquals(currentSocket, socket);
+                if (stillOwner)
                 {
-                    if (string.Equals(kvp.Value.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase))
-                        _activeTransactions.TryRemove(kvp.Key, out _);
+                    _activeSockets.TryRemove(chargePointId, out _);
+                    UpdateTelemetryValue(chargePointId, "status", "Offline");
+
+                    // Purge any transactions still open for this charge point. A charger that
+                    // disconnects mid-charge (crash, network loss) may never send StopTransaction,
+                    // and transaction ids are monotonically increasing, so without this the
+                    // _activeTransactions dictionary would accumulate orphaned entries forever.
+                    foreach (var kvp in _activeTransactions)
+                    {
+                        if (string.Equals(kvp.Value.ChargePointId, chargePointId, StringComparison.OrdinalIgnoreCase))
+                            _activeTransactions.TryRemove(kvp.Key, out _);
+                    }
+                    _chargePointTransactionIds.TryRemove(chargePointId, out _);
+                    _chargePointConnectorIds.TryRemove(chargePointId, out _);
+                    _sendLocks.TryRemove(chargePointId, out _);
+                    _callChains.TryRemove(chargePointId, out _);
+                    _configuredGenerations.TryRemove(chargePointId, out _);
+                    _configLocks.TryRemove(chargePointId, out _);
+
+                    PublishServerTelemetry();
+
+                    Log.Info($"[OCPP] Charger '{chargePointId}' disconnected.");
                 }
-                _chargePointTransactionIds.TryRemove(chargePointId, out _);
-                _chargePointConnectorIds.TryRemove(chargePointId, out _);
-                _sendLocks.TryRemove(chargePointId, out _);
-                _callChains.TryRemove(chargePointId, out _);
-
-                PublishServerTelemetry();
-
-                Log.Info($"[OCPP] Charger '{chargePointId}' disconnected.");
+                else
+                {
+                    Log.Info($"[OCPP] Charger '{chargePointId}' connection closed, but a newer connection is active. Skipping cleanup.");
+                }
             }
         }
 
@@ -481,6 +507,25 @@ namespace Pulswerk.Drivers.Ocpp
                 case "MeterValues":
                     await ProcessMeterValuesAsync(chargePointId, payload);
                     responsePayload = new { };
+                    break;
+
+                case "SecurityEventNotification":
+                    // OCPP 1.6 security extension: informational only, no data to act on.
+                    string securityType = payload.TryGetProperty("type", out var secType) ? secType.GetString() ?? "" : "";
+                    string securityTech = payload.TryGetProperty("techInfo", out var secTech) ? secTech.GetString() ?? "" : "";
+                    Log.Info($"[OCPP] [{chargePointId}] SecurityEventNotification: type='{securityType}'" +
+                             (string.IsNullOrEmpty(securityTech) ? "" : $", techInfo='{securityTech}'"));
+                    responsePayload = new { };
+                    break;
+
+                case "DataTransfer":
+                    // Vendor-specific payloads are not interpreted, but the charge point
+                    // expects a DataTransfer.conf with a status.
+                    string dataVendorId = payload.TryGetProperty("vendorId", out var vendorProp) ? vendorProp.GetString() ?? "" : "";
+                    string dataMessageId = payload.TryGetProperty("messageId", out var msgIdProp) ? msgIdProp.GetString() ?? "" : "";
+                    Log.Info($"[OCPP] [{chargePointId}] DataTransfer from vendor '{dataVendorId}'" +
+                             (string.IsNullOrEmpty(dataMessageId) ? "" : $" (messageId='{dataMessageId}')") + " acknowledged.");
+                    responsePayload = new { status = "Accepted" };
                     break;
 
                 default:
@@ -1165,8 +1210,20 @@ namespace Pulswerk.Drivers.Ocpp
 
         public async Task ConfigureChargerTelemetryAsync(string chargePointId)
         {
+            // Both the connect hook and the BootNotification handler request configuration.
+            // Apply it once per connection generation so a reconnect does not send the whole
+            // ChangeConfiguration batch twice.
+            var configLock = _configLocks.GetOrAdd(chargePointId, _ => new SemaphoreSlim(1, 1));
+            await configLock.WaitAsync();
             try
             {
+                int generation = _connectionGenerations.GetOrAdd(chargePointId, 1);
+                if (_configuredGenerations.TryGetValue(chargePointId, out int configured) && configured == generation)
+                {
+                    Log.Debug($"[OCPP] [{chargePointId}] Telemetry already configured for this connection.");
+                    return;
+                }
+
                 Log.Info($"[OCPP] [{chargePointId}] Configuring meter value sample interval and sampled measurands...");
                 // 1. Set sample interval to 10s (standard for responsive monitoring)
                 await ChangeConfigurationAsync(chargePointId, "MeterValueSampleInterval", "10");
@@ -1176,10 +1233,16 @@ namespace Pulswerk.Drivers.Ocpp
                 await ChangeConfigurationAsync(chargePointId, "StopTxnSampledData", "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage");
                 // 4. Clock-aligned measurands
                 await ChangeConfigurationAsync(chargePointId, "MeterValuesAlignedData", "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage");
+
+                _configuredGenerations[chargePointId] = generation;
             }
             catch (Exception ex)
             {
                 Log.Warning($"[OCPP] [{chargePointId}] Error configuring telemetry: {ex.Message}");
+            }
+            finally
+            {
+                configLock.Release();
             }
         }
 
@@ -1220,16 +1283,24 @@ namespace Pulswerk.Drivers.Ocpp
 
         private void CheckWatchdog(object? state)
         {
-            // Periodic trigger for active charging sessions: request live MeterValues
-            foreach (var cpId in _activeSockets.Keys)
+            try
             {
-                var telem = GetTelemetry(cpId);
-                string currentStatus = telem.GetValueOrDefault("status", "")?.ToString() ?? "";
-                bool hasActiveSession = _activeTransactions.Values.Any(t => string.Equals(t.ChargePointId, cpId, StringComparison.OrdinalIgnoreCase));
-                if (hasActiveSession || currentStatus.Equals("Charging", StringComparison.OrdinalIgnoreCase))
+                // Periodic trigger for active charging sessions: request live MeterValues
+                foreach (var cpId in _activeSockets.Keys)
                 {
-                    _ = TriggerMessageAsync(cpId, "MeterValues");
+                    var telem = GetTelemetry(cpId);
+                    string currentStatus = telem.GetValueOrDefault("status", "")?.ToString() ?? "";
+                    bool hasActiveSession = _activeTransactions.Values.Any(t => string.Equals(t.ChargePointId, cpId, StringComparison.OrdinalIgnoreCase));
+                    if (hasActiveSession || currentStatus.Equals("Charging", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _ = TriggerMessageAsync(cpId, "MeterValues");
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                // An exception escaping a Timer callback would terminate the process.
+                Log.Warning($"[OCPP] Watchdog iteration failed: {ex.Message}");
             }
         }
 
