@@ -104,6 +104,17 @@ namespace Pulswerk.Host
             InitializeConnectionLocks();
             _controlEngine = new ControlEngine(
                 _cfg.Controls, _cfg.Devices, _drivers, _connections, _connLocks, _alarmStore);
+            if (_cfg.Modules?.Ems ?? true)
+            {
+                var emsValues = Pulswerk.Ems.EmsService.Instance.GetTelemetryValues()
+                    .ToDictionary(
+                        pair => pair.Key.StartsWith("ems_", StringComparison.OrdinalIgnoreCase)
+                            ? pair.Key
+                            : $"ems_{pair.Key}",
+                        pair => pair.Value);
+                _controlEngine.Update(emsValues);
+            }
+
             _poller = new DevicePoller(
                 _drivers, _dataService, _offlineDevices, _lastPolledAt,
                 values => _controlEngine.Update(values),
@@ -431,6 +442,8 @@ namespace Pulswerk.Host
                         string fullKey = kvp.Key.StartsWith("ems_") ? kvp.Key : $"ems_{kvp.Key}";
                         update[fullKey] = kvp.Value;
                     }
+
+                    _controlEngine?.Update(update);
 
                     var persisted = dataService.UpdateTelemetries(update, isPush: true);
                     if (persisted != null)
